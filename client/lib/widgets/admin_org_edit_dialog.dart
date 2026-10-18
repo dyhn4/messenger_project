@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart' show PositionOption;
+import '../l10n/tr.dart';
 
 /// 관리자 콘솔 "회원" 탭의 "직책 수정" 다이얼로그. 팀·직책 관리 범위에 따라 다르다 — 계정
 /// 단위면 서버 운영자가 관리하는 "직책 목록" 중에서 칩으로 고르고(가로로 늘어놔서 한눈에
@@ -76,7 +77,9 @@ class _AdminOrgEditDialogState extends State<_AdminOrgEditDialog> {
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
     return AlertDialog(
-      title: Text('${widget.userName} 님의 직책'),
+      title: Text(
+        tr('{widget.userName} 님의 직책', {'widget.userName': widget.userName}),
+      ),
       content: SizedBox(
         width: 340,
         child: Column(
@@ -86,7 +89,7 @@ class _AdminOrgEditDialogState extends State<_AdminOrgEditDialog> {
             if (_isAccountScope)
               if (widget.options.isEmpty && !_hasLegacyValue)
                 Text(
-                  '등록된 직책이 없습니다. "운영 현황"에서 먼저 추가하세요.',
+                  tr('등록된 직책이 없습니다. "운영 현황"에서 먼저 추가하세요.'),
                   style: TextStyle(color: hint),
                 )
               else
@@ -95,13 +98,17 @@ class _AdminOrgEditDialogState extends State<_AdminOrgEditDialog> {
                   runSpacing: 8,
                   children: [
                     ChoiceChip(
-                      label: const Text('(없음)'),
+                      label: Text(tr('(없음)')),
                       selected: _selected == null,
                       onSelected: (_) => setState(() => _selected = null),
                     ),
                     if (_hasLegacyValue)
                       ChoiceChip(
-                        label: Text('${widget.position}(목록에 없는 기존 값)'),
+                        label: Text(
+                          tr('{widget.position}(목록에 없는 기존 값)', {
+                            'widget.position': widget.position,
+                          }),
+                        ),
                         selected: _selected == widget.position,
                         onSelected: (_) =>
                             setState(() => _selected = widget.position),
@@ -123,9 +130,9 @@ class _AdminOrgEditDialogState extends State<_AdminOrgEditDialog> {
                 controller: _positionText,
                 maxLength: 30,
                 autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: '직책',
-                  hintText: '예: 팀장',
+                decoration: InputDecoration(
+                  labelText: tr('직책'),
+                  hintText: tr('예: 팀장'),
                   border: OutlineInputBorder(),
                 ),
                 onSubmitted: (_) => _submit(),
@@ -136,9 +143,9 @@ class _AdminOrgEditDialogState extends State<_AdminOrgEditDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
-        FilledButton(onPressed: _submit, child: const Text('저장')),
+        FilledButton(onPressed: _submit, child: Text(tr('저장'))),
       ],
     );
   }

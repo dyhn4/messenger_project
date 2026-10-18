@@ -7,6 +7,7 @@ import '../../widgets/app_toast.dart';
 import 'approval_forms.dart' show isHmText;
 import 'groupware_screen.dart' show GroupwareChanges, GroupwareSectionHeader;
 import 'leave_tab.dart' show showLeaveDatesDialog;
+import '../../l10n/tr.dart';
 
 /// 관리 탭의 근태·휴가 관리 — 휴가 종류·지출 분류·출근 알림(범위 설정), 유연근무, 주 52시간, 연차 사용 촉진(서버 groupwareWork.js).
 
@@ -43,7 +44,7 @@ class _GroupwareOptionsSectionState extends State<GroupwareOptionsSection> {
       final o = await widget.api.options();
       if (mounted) setState(() => _options = o);
     } catch (e) {
-      if (mounted) showAppToast(context, '설정을 불러오지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('설정을 불러오지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -59,7 +60,7 @@ class _GroupwareOptionsSectionState extends State<GroupwareOptionsSection> {
       showAppToast(context, done);
       widget.onChanged?.call();
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -73,7 +74,7 @@ class _GroupwareOptionsSectionState extends State<GroupwareOptionsSection> {
     if (result == null) return;
     await _save(
       () => widget.api.updateOptions(leaveTypes: result),
-      '휴가 종류를 저장했습니다.',
+      tr('휴가 종류를 저장했습니다.'),
     );
   }
 
@@ -86,7 +87,7 @@ class _GroupwareOptionsSectionState extends State<GroupwareOptionsSection> {
     if (result == null) return;
     await _save(
       () => widget.api.updateOptions(expenseCategories: result),
-      '지출 분류를 저장했습니다.',
+      tr('지출 분류를 저장했습니다.'),
     );
   }
 
@@ -98,11 +99,11 @@ class _GroupwareOptionsSectionState extends State<GroupwareOptionsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const GroupwareSectionHeader('휴가 종류·지출 분류'),
+        GroupwareSectionHeader(tr('휴가 종류·지출 분류')),
         ListTile(
           key: const ValueKey('gw-leave-types'),
           dense: true,
-          title: const Text('휴가 종류'),
+          title: Text(tr('휴가 종류')),
           subtitle: Text(
             o.leaveTypes
                 .where((t) => t.enabled)
@@ -112,29 +113,32 @@ class _GroupwareOptionsSectionState extends State<GroupwareOptionsSection> {
           ),
           trailing: TextButton(
             onPressed: _busy ? null : _editLeaveTypes,
-            child: const Text('바꾸기'),
+            child: Text(tr('바꾸기')),
           ),
         ),
         ListTile(
           key: const ValueKey('gw-expense-categories'),
           dense: true,
-          title: const Text('지출 분류'),
+          title: Text(tr('지출 분류')),
           subtitle: Text(
             o.expenseCategories.join(' · '),
             style: TextStyle(color: hint),
           ),
           trailing: TextButton(
             onPressed: _busy ? null : _editCategories,
-            child: const Text('바꾸기'),
+            child: Text(tr('바꾸기')),
           ),
         ),
-        const GroupwareSectionHeader('출근·퇴근 알림'),
+        GroupwareSectionHeader(tr('출근·퇴근 알림')),
         SwitchListTile(
           key: const ValueKey('gw-clock-in-reminder'),
           dense: true,
-          title: const Text('출근을 안 누르면 알림'),
+          title: Text(tr('출근을 안 누르면 알림')),
           subtitle: Text(
-            '근무 시작 ${o.reminderDelayMinutes}분 뒤 — 최근 30일 안에 출퇴근을 쓴 사람에게, 쉬는 날·휴가·출장 빼고',
+            tr(
+              '근무 시작 {o.reminderDelayMinutes}분 뒤 — 최근 30일 안에 출퇴근을 쓴 사람에게, 쉬는 날·휴가·출장 빼고',
+              {'o.reminderDelayMinutes': o.reminderDelayMinutes},
+            ),
             style: TextStyle(color: hint),
           ),
           value: o.clockInReminder,
@@ -142,27 +146,27 @@ class _GroupwareOptionsSectionState extends State<GroupwareOptionsSection> {
               ? null
               : (v) => _save(
                   () => widget.api.updateOptions(clockInReminder: v),
-                  v ? '출근 알림을 켰습니다.' : '출근 알림을 껐습니다.',
+                  v ? tr('출근 알림을 켰습니다.') : tr('출근 알림을 껐습니다.'),
                 ),
         ),
         SwitchListTile(
           key: const ValueKey('gw-clock-out-reminder'),
           dense: true,
-          title: const Text('퇴근을 안 누르면 알림'),
-          subtitle: Text('근무 끝 1시간 뒤', style: TextStyle(color: hint)),
+          title: Text(tr('퇴근을 안 누르면 알림')),
+          subtitle: Text(tr('근무 끝 1시간 뒤'), style: TextStyle(color: hint)),
           value: o.clockOutReminder,
           onChanged: _busy
               ? null
               : (v) => _save(
                   () => widget.api.updateOptions(clockOutReminder: v),
-                  v ? '퇴근 알림을 켰습니다.' : '퇴근 알림을 껐습니다.',
+                  v ? tr('퇴근 알림을 켰습니다.') : tr('퇴근 알림을 껐습니다.'),
                 ),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              const Text('출근 알림 시각'),
+              Text(tr('출근 알림 시각')),
               const SizedBox(width: 12),
               DropdownButton<int>(
                 key: const ValueKey('gw-reminder-delay'),
@@ -181,14 +185,16 @@ class _GroupwareOptionsSectionState extends State<GroupwareOptionsSection> {
                   for (final m in const [0, 5, 10, 15, 30, 60])
                     DropdownMenuItem(
                       value: m,
-                      child: Text(m == 0 ? '근무 시작' : '근무 시작 $m분 뒤'),
+                      child: Text(
+                        m == 0 ? tr('근무 시작') : tr('근무 시작 {m}분 뒤', {'m': m}),
+                      ),
                     ),
                 ],
                 onChanged: _busy
                     ? null
                     : (v) => _save(
                         () => widget.api.updateOptions(reminderDelayMinutes: v),
-                        '출근 알림 시각을 바꿨습니다.',
+                        tr('출근 알림 시각을 바꿨습니다.'),
                       ),
               ),
             ],
@@ -251,7 +257,7 @@ class _LeaveTypesDialogState extends State<_LeaveTypesDialog> {
     for (final d in _drafts) {
       final label = d.label.text.trim();
       if (label.isEmpty) {
-        setState(() => _error = '휴가 종류 이름을 넣으세요.');
+        setState(() => _error = tr('휴가 종류 이름을 넣으세요.'));
         return;
       }
       out.add(
@@ -272,7 +278,7 @@ class _LeaveTypesDialogState extends State<_LeaveTypesDialog> {
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
     return AlertDialog(
-      title: const Text('휴가 종류'),
+      title: Text(tr('휴가 종류')),
       content: SizedBox(
         width: 480,
         child: SingleChildScrollView(
@@ -281,7 +287,9 @@ class _LeaveTypesDialogState extends State<_LeaveTypesDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                '끈 종류는 새로 신청할 수 없고(연차는 끌 수 없음), 이미 올린 신청은 그때 이름 그대로 남습니다. 더한 종류는 하루 단위이고 연차에서 뺄지 고릅니다.',
+                tr(
+                  '끈 종류는 새로 신청할 수 없고(연차는 끌 수 없음), 이미 올린 신청은 그때 이름 그대로 남습니다. 더한 종류는 하루 단위이고 연차에서 뺄지 고릅니다.',
+                ),
                 style: TextStyle(fontSize: 12, color: hint),
               ),
               const SizedBox(height: 8),
@@ -297,14 +305,14 @@ class _LeaveTypesDialogState extends State<_LeaveTypesDialog> {
                         decoration: InputDecoration(
                           isDense: true,
                           counterText: '',
-                          helperText: d.builtin ? null : '더한 종류',
+                          helperText: d.builtin ? null : tr('더한 종류'),
                         ),
                       ),
                     ),
                     if (!d.builtin)
                       Column(
                         children: [
-                          const Text('연차 차감', style: TextStyle(fontSize: 11)),
+                          Text(tr('연차 차감'), style: TextStyle(fontSize: 11)),
                           Checkbox(
                             key: ValueKey('gw-leave-type-$i-deducts'),
                             value: d.deducts,
@@ -339,7 +347,7 @@ class _LeaveTypesDialogState extends State<_LeaveTypesDialog> {
                     ),
                   ),
                   icon: const Icon(Icons.add, size: 18),
-                  label: const Text('종류 더하기'),
+                  label: Text(tr('종류 더하기')),
                 ),
               ),
               if (_error != null)
@@ -354,12 +362,12 @@ class _LeaveTypesDialogState extends State<_LeaveTypesDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('gw-leave-types-save'),
           onPressed: _save,
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ],
     );
@@ -396,7 +404,7 @@ class _CategoriesDialogState extends State<_CategoriesDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('지출 분류'),
+      title: Text(tr('지출 분류')),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -424,8 +432,8 @@ class _CategoriesDialogState extends State<_CategoriesDialog> {
                     key: const ValueKey('gw-category-input'),
                     controller: _input,
                     maxLength: 20,
-                    decoration: const InputDecoration(
-                      labelText: '분류 더하기',
+                    decoration: InputDecoration(
+                      labelText: tr('분류 더하기'),
                       counterText: '',
                     ),
                     onSubmitted: (_) => _add(),
@@ -433,7 +441,7 @@ class _CategoriesDialogState extends State<_CategoriesDialog> {
                 ),
                 IconButton(
                   key: const ValueKey('gw-category-add'),
-                  tooltip: '더하기',
+                  tooltip: tr('더하기'),
                   icon: const Icon(Icons.add),
                   onPressed: _add,
                 ),
@@ -445,12 +453,12 @@ class _CategoriesDialogState extends State<_CategoriesDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('gw-categories-save'),
           onPressed: () => Navigator.of(context).pop(_list),
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ],
     );
@@ -514,7 +522,7 @@ class _WorkSchedulesSectionState extends State<WorkSchedulesSection> {
       }
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -526,12 +534,13 @@ class _WorkSchedulesSectionState extends State<WorkSchedulesSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const GroupwareSectionHeader('유연근무'),
+        GroupwareSectionHeader(tr('유연근무')),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
-            '사람마다 근무 형태를 정합니다 — 시차출퇴근(자기 출근·퇴근 시각), 선택근무(핵심 시간대만 지각·조퇴), 자율 출퇴근(지각·조퇴를 세지 않음). '
-            '정하지 않으면 위 근무 시간입니다.',
+            tr(
+              '사람마다 근무 형태를 정합니다 — 시차출퇴근(자기 출근·퇴근 시각), 선택근무(핵심 시간대만 지각·조퇴), 자율 출퇴근(지각·조퇴를 세지 않음). 정하지 않으면 위 근무 시간입니다.',
+            ),
             style: TextStyle(fontSize: 12, color: hint),
           ),
         ),
@@ -542,7 +551,10 @@ class _WorkSchedulesSectionState extends State<WorkSchedulesSection> {
             title: Text(m.name),
             subtitle: Text(
               m.schedule?.description ??
-                  '기본 ${minutesText(widget.ctx.workStart)}~${minutesText(widget.ctx.workEnd)}',
+                  tr('기본 {p0}~{p1}', {
+                    'p0': minutesText(widget.ctx.workStart),
+                    'p1': minutesText(widget.ctx.workEnd),
+                  }),
               style: TextStyle(color: hint),
             ),
             trailing: const Icon(Icons.edit_outlined, size: 18),
@@ -589,12 +601,12 @@ class _ScheduleDialogState extends State<_ScheduleDialog> {
   void _save() {
     if (_mode == 'staggered' &&
         (!isHmText(_start.text) || !isHmText(_end.text))) {
-      setState(() => _error = '출근·퇴근 시각을 HH:MM으로 넣으세요.');
+      setState(() => _error = tr('출근·퇴근 시각을 HH:MM으로 넣으세요.'));
       return;
     }
     if (_mode == 'core' &&
         (!isHmText(_coreStart.text) || !isHmText(_coreEnd.text))) {
-      setState(() => _error = '핵심 시간대를 HH:MM으로 넣으세요.');
+      setState(() => _error = tr('핵심 시간대를 HH:MM으로 넣으세요.'));
       return;
     }
     Navigator.of(context).pop((
@@ -637,7 +649,11 @@ class _ScheduleDialogState extends State<_ScheduleDialog> {
       ],
     );
     return AlertDialog(
-      title: Text('${widget.member.name} 근무 형태'),
+      title: Text(
+        tr('{widget.member.name} 근무 형태', {
+          'widget.member.name': widget.member.name,
+        }),
+      ),
       content: SizedBox(
         width: 380,
         child: Column(
@@ -646,10 +662,10 @@ class _ScheduleDialogState extends State<_ScheduleDialog> {
           children: [
             SegmentedButton<String>(
               key: const ValueKey('gw-schedule-mode'),
-              segments: const [
-                ButtonSegment(value: 'staggered', label: Text('시차출퇴근')),
-                ButtonSegment(value: 'core', label: Text('선택근무')),
-                ButtonSegment(value: 'free', label: Text('자율')),
+              segments: [
+                ButtonSegment(value: 'staggered', label: Text(tr('시차출퇴근'))),
+                ButtonSegment(value: 'core', label: Text(tr('선택근무'))),
+                ButtonSegment(value: 'free', label: Text(tr('자율'))),
               ],
               selected: {_mode},
               onSelectionChanged: (s) => setState(() => _mode = s.first),
@@ -659,14 +675,20 @@ class _ScheduleDialogState extends State<_ScheduleDialog> {
               times(
                 _start,
                 _end,
-                '출근 (HH:MM)',
-                '퇴근 (HH:MM)',
+                tr('출근 (HH:MM)'),
+                tr('퇴근 (HH:MM)'),
                 'gw-schedule-hours',
               ),
             if (_mode == 'core')
-              times(_coreStart, _coreEnd, '핵심 시작', '핵심 끝', 'gw-schedule-core'),
+              times(
+                _coreStart,
+                _coreEnd,
+                tr('핵심 시작'),
+                tr('핵심 끝'),
+                'gw-schedule-core',
+              ),
             if (_mode == 'free')
-              const Text('지각·조퇴를 세지 않습니다. 근로시간(주 52시간)은 그대로 셉니다.'),
+              Text(tr('지각·조퇴를 세지 않습니다. 근로시간(주 52시간)은 그대로 셉니다.')),
             if (_error != null)
               Text(
                 _error!,
@@ -680,16 +702,16 @@ class _ScheduleDialogState extends State<_ScheduleDialog> {
           TextButton(
             key: const ValueKey('gw-schedule-default'),
             onPressed: () => Navigator.of(context).pop('default'),
-            child: const Text('기본으로'),
+            child: Text(tr('기본으로')),
           ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('gw-schedule-save'),
           onPressed: _save,
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ],
     );
@@ -740,12 +762,12 @@ class _WeeklyHoursSectionState extends State<WeeklyHoursSection> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         GroupwareSectionHeader(
-          '주 52시간',
+          tr('주 52시간'),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                tooltip: '지난주',
+                tooltip: tr('지난주'),
                 icon: const Icon(Icons.chevron_left),
                 onPressed: () => _shift(-1),
               ),
@@ -756,7 +778,7 @@ class _WeeklyHoursSectionState extends State<WeeklyHoursSection> {
                 key: const ValueKey('gw-weekly-range'),
               ),
               IconButton(
-                tooltip: '다음 주',
+                tooltip: tr('다음 주'),
                 icon: const Icon(Icons.chevron_right),
                 onPressed: () => _shift(1),
               ),
@@ -771,19 +793,21 @@ class _WeeklyHoursSectionState extends State<WeeklyHoursSection> {
               title: Text(m.name),
               subtitle: Text(
                 [
-                  '실근로 ${durationText(m.hours.netMinutes)}',
+                  tr('실근로 {p0}', {'p0': durationText(m.hours.netMinutes)}),
                   if (m.hours.overtimeMinutes > 0)
-                    '연장 ${durationText(m.hours.overtimeMinutes)}',
+                    tr('연장 {p0}', {
+                      'p0': durationText(m.hours.overtimeMinutes),
+                    }),
                   if (m.hours.holidayMinutes > 0)
-                    '휴일 ${durationText(m.hours.holidayMinutes)}',
+                    tr('휴일 {p0}', {'p0': durationText(m.hours.holidayMinutes)}),
                   if (m.hours.nightMinutes > 0)
-                    '야간 ${durationText(m.hours.nightMinutes)}',
+                    tr('야간 {p0}', {'p0': durationText(m.hours.nightMinutes)}),
                 ].join(' · '),
               ),
               trailing: m.hours.status == 'ok'
                   ? null
                   : Text(
-                      m.hours.status == 'over' ? '52시간 넘음' : '48시간 넘음',
+                      m.hours.status == 'over' ? tr('52시간 넘음') : tr('48시간 넘음'),
                       style: TextStyle(
                         color: m.hours.status == 'over'
                             ? theme.colorScheme.error
@@ -852,19 +876,22 @@ class _LeavePromotionSectionState extends State<LeavePromotionSection> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('1차 촉진 보내기'),
+        title: Text(tr('1차 촉진 보내기')),
         content: Text(
-          '${_selected.length}명에게 남은 연차를 알리고 10일 안에 쓸 날을 내라고 요구합니다. 보낸 기록은 지워지지 않습니다.',
+          tr(
+            '{_selected.length}명에게 남은 연차를 알리고 10일 안에 쓸 날을 내라고 요구합니다. 보낸 기록은 지워지지 않습니다.',
+            {'_selected.length': _selected.length},
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('gw-promotion-confirm'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('보내기'),
+            child: Text(tr('보내기')),
           ),
         ],
       ),
@@ -876,12 +903,20 @@ class _LeavePromotionSectionState extends State<LeavePromotionSection> {
       if (!mounted) return;
       showAppToast(
         context,
-        '${r.sent}명에게 보냈습니다.${r.skipped.isEmpty ? '' : ' (${r.skipped.length}명 건너뜀: ${r.skipped.first})'}',
+        tr('{r.sent}명에게 보냈습니다.{p0}', {
+          'r.sent': r.sent,
+          'p0': r.skipped.isEmpty
+              ? ''
+              : tr(' ({r.skipped.length}명 건너뜀: {r.skipped.first})', {
+                  'r.skipped.length': r.skipped.length,
+                  'r.skipped.first': r.skipped.first,
+                }),
+        }),
       );
       _selected.clear();
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -890,7 +925,7 @@ class _LeavePromotionSectionState extends State<LeavePromotionSection> {
   Future<void> _sendSecond(PromotionMember m) async {
     final dates = await showLeaveDatesDialog(
       context,
-      title: '${m.name} — 회사가 정할 연차 날',
+      title: tr('{m.name} — 회사가 정할 연차 날', {'m.name': m.name}),
       from: dateKeyOf(
         DateTime.parse(widget.ctx.today).add(const Duration(days: 1)),
       ),
@@ -902,11 +937,14 @@ class _LeavePromotionSectionState extends State<LeavePromotionSection> {
     try {
       await widget.api.sendSecondPromotion(m.userId, dates);
       if (mounted) {
-        showAppToast(context, '${m.name}님에게 2차 촉진(사용 시기 지정)을 보냈습니다.');
+        showAppToast(
+          context,
+          tr('{m.name}님에게 2차 촉진(사용 시기 지정)을 보냈습니다.', {'m.name': m.name}),
+        );
       }
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -916,16 +954,32 @@ class _LeavePromotionSectionState extends State<LeavePromotionSection> {
     final first = m.notices.where((n) => n.stage == 1).firstOrNull;
     final second = m.notices.where((n) => n.stage == 2).firstOrNull;
     return [
-      '남은 ${halfDaysText(m.remainingHalfDays)} · 만료 ${m.expiry}',
+      tr('남은 {p0} · 만료 {m.expiry}', {
+        'p0': halfDaysText(m.remainingHalfDays),
+        'm.expiry': m.expiry,
+      }),
       if (first == null && m.stage == PromotionStage.first)
-        '1차 ${m.firstStart}~${m.firstEnd}',
+        tr('1차 {m.firstStart}~{m.firstEnd}', {
+          'm.firstStart': m.firstStart,
+          'm.firstEnd': m.firstEnd,
+        }),
       if (first == null && m.stage == PromotionStage.upcoming)
-        '1차 ${m.firstStart}부터',
+        tr('1차 {m.firstStart}부터', {'m.firstStart': m.firstStart}),
       if (first != null)
-        '1차 보냄${first.readAt != null ? '·확인함' : ''}${first.planDates.isNotEmpty ? '·계획 ${first.planDates.length}일' : ''}',
-      if (second != null) '2차 지정 ${second.designatedDates.length}일',
+        tr('1차 보냄{p0}{p1}', {
+          'p0': first.readAt != null ? tr('·확인함') : '',
+          'p1': first.planDates.isNotEmpty
+              ? tr('·계획 {first.planDates.length}일', {
+                  'first.planDates.length': first.planDates.length,
+                })
+              : '',
+        }),
+      if (second != null)
+        tr('2차 지정 {second.designatedDates.length}일', {
+          'second.designatedDates.length': second.designatedDates.length,
+        }),
       if (first != null && second == null && first.planDates.isEmpty)
-        '2차 마감 ${m.secondDeadline}',
+        tr('2차 마감 {m.secondDeadline}', {'m.secondDeadline': m.secondDeadline}),
     ].join(' · ');
   }
 
@@ -945,26 +999,33 @@ class _LeavePromotionSectionState extends State<LeavePromotionSection> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         GroupwareSectionHeader(
-          '연차 사용 촉진',
+          tr('연차 사용 촉진'),
           trailing: FilledButton(
             key: const ValueKey('gw-promotion-send'),
             onPressed: _busy || _selected.isEmpty ? null : _sendFirst,
-            child: Text('1차 보내기 (${_selected.length})'),
+            child: Text(
+              tr('1차 보내기 ({_selected.length})', {
+                '_selected.length': _selected.length,
+              }),
+            ),
           ),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
-            '근로기준법 제61조 — 연차 기간 만료 6개월 전(입사 첫해는 3개월 전)을 기준으로 10일 안에 1차(남은 연차를 알리고 쓸 날을 내라고 요구), '
-            '받은 사람이 10일 안에 내지 않으면 만료 2개월 전(첫해는 1개월 전)까지 2차(회사가 쓸 날을 정함)를 보냅니다. 보낸·확인한·낸 시각이 남습니다. '
-            '전자 통지를 서면으로 인정하는지는 노무 담당과 확인하세요.',
+            tr(
+              '근로기준법 제61조 — 연차 기간 만료 6개월 전(입사 첫해는 3개월 전)을 기준으로 10일 안에 1차(남은 연차를 알리고 쓸 날을 내라고 요구), 받은 사람이 10일 안에 내지 않으면 만료 2개월 전(첫해는 1개월 전)까지 2차(회사가 쓸 날을 정함)를 보냅니다. 보낸·확인한·낸 시각이 남습니다. 전자 통지를 서면으로 인정하는지는 노무 담당과 확인하세요.',
+            ),
             style: TextStyle(fontSize: 12, color: hint),
           ),
         ),
         if (members.isEmpty)
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Text('입사일이 있는 구성원이 없습니다.', style: TextStyle(color: hint)),
+            child: Text(
+              tr('입사일이 있는 구성원이 없습니다.'),
+              style: TextStyle(color: hint),
+            ),
           ),
         for (final m in members)
           ListTile(
@@ -1003,7 +1064,7 @@ class _LeavePromotionSectionState extends State<LeavePromotionSection> {
                 ? TextButton(
                     key: ValueKey('gw-promotion-second-${m.userId}'),
                     onPressed: _busy ? null : () => _sendSecond(m),
-                    child: const Text('2차 통보'),
+                    child: Text(tr('2차 통보')),
                   )
                 : null,
           ),

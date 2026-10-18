@@ -11,6 +11,7 @@ import '../../widgets/muted_scrollbar.dart';
 import 'task_detail_panel.dart' show TaskPanelScope;
 import 'task_views.dart';
 import '../../widgets/grab_cursors.dart';
+import '../../l10n/tr.dart';
 
 /// 간트차트 눈금 단위.
 enum GanttScale { day, week, month, quarter }
@@ -56,15 +57,21 @@ class _Scale {
   String unitLabel(DateTime s) => switch (kind) {
     GanttScale.day => '${s.day}',
     GanttScale.week => '${s.month}/${s.day}',
-    GanttScale.month => '${s.month}월',
-    GanttScale.quarter => '${(s.month - 1) ~/ 3 + 1}분기',
+    GanttScale.month => tr('{s.month}월', {'s.month': s.month}),
+    GanttScale.quarter => tr('{p0}분기', {'p0': (s.month - 1) ~/ 3 + 1}),
   };
 
   /// 위 줄 묶음 이름 — 같은 이름이 이어지는 칸들을 한 칸으로 합쳐 그린다.
   String groupLabel(DateTime s) => switch (kind) {
-    GanttScale.day || GanttScale.week => '${s.year}년 ${s.month}월',
-    GanttScale.month => '${s.year} ${(s.month - 1) ~/ 3 + 1}분기',
-    GanttScale.quarter => '${s.year}년',
+    GanttScale.day || GanttScale.week => tr('{s.year}년 {s.month}월', {
+      's.year': s.year,
+      's.month': s.month,
+    }),
+    GanttScale.month => tr('{s.year} {p0}분기', {
+      's.year': s.year,
+      'p0': (s.month - 1) ~/ 3 + 1,
+    }),
+    GanttScale.quarter => tr('{s.year}년', {'s.year': s.year}),
   };
 }
 
@@ -295,7 +302,7 @@ class _GanttChartViewState extends State<GanttChartView> {
       if (seen.add(t.projectId)) {
         out.add((
           id: t.projectId,
-          name: t.projectName ?? '프로젝트',
+          name: t.projectName ?? tr('프로젝트'),
           color: Colors.blueGrey,
           key: t.key?.split('-').first ?? '',
         ));
@@ -358,7 +365,7 @@ class _GanttChartViewState extends State<GanttChartView> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _pending.remove(t.id));
-      showAppToast(context, '일정을 바꾸지 못했습니다: $e');
+      showAppToast(context, tr('일정을 바꾸지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -370,7 +377,11 @@ class _GanttChartViewState extends State<GanttChartView> {
     (DateTime, DateTime) to,
     String mode,
   ) async {
-    String fmt(DateTime d) => '${d.year}년 ${d.month}월 ${d.day}일';
+    String fmt(DateTime d) => tr('{d.year}년 {d.month}월 {d.day}일', {
+      'd.year': d.year,
+      'd.month': d.month,
+      'd.day': d.day,
+    });
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -426,8 +437,8 @@ class _GanttChartViewState extends State<GanttChartView> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          '일정 변경',
+                        Text(
+                          tr('일정 변경'),
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
@@ -441,8 +452,8 @@ class _GanttChartViewState extends State<GanttChartView> {
                             fontWeight: FontWeight.w500,
                           ),
                         ),
-                        if (mode != 'end') row('시작일', from.$1, to.$1),
-                        if (mode != 'start') row('마감일', from.$2, to.$2),
+                        if (mode != 'end') row(tr('시작일'), from.$1, to.$1),
+                        if (mode != 'start') row(tr('마감일'), from.$2, to.$2),
                       ],
                     ),
                   ),
@@ -460,7 +471,7 @@ class _GanttChartViewState extends State<GanttChartView> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          child: const Text('취소'),
+                          child: Text(tr('취소')),
                         ),
                         const SizedBox(width: 8),
                         FilledButton(
@@ -471,7 +482,7 @@ class _GanttChartViewState extends State<GanttChartView> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          child: const Text('확인'),
+                          child: Text(tr('확인')),
                         ),
                       ],
                     ),
@@ -541,10 +552,10 @@ class _GanttChartViewState extends State<GanttChartView> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          item('일', GanttScale.day),
-          item('주', GanttScale.week),
-          item('월', GanttScale.month),
-          item('분기', GanttScale.quarter),
+          item(tr('일'), GanttScale.day),
+          item(tr('주'), GanttScale.week),
+          item(tr('월'), GanttScale.month),
+          item(tr('분기'), GanttScale.quarter),
         ],
       ),
     );
@@ -570,7 +581,7 @@ class _GanttChartViewState extends State<GanttChartView> {
       children: [
         button(
           Icons.remove,
-          '축소',
+          tr('축소'),
           i > 0 ? () => _rescale(() => _p.zoom = _zoomSteps[i - 1]) : null,
         ),
         SizedBox(
@@ -583,7 +594,7 @@ class _GanttChartViewState extends State<GanttChartView> {
         ),
         button(
           Icons.add,
-          '확대',
+          tr('확대'),
           i < _zoomSteps.length - 1
               ? () => _rescale(() => _p.zoom = _zoomSteps[i + 1])
               : null,
@@ -606,7 +617,7 @@ class _GanttChartViewState extends State<GanttChartView> {
             color: _p.mineOnly ? theme.colorScheme.primary : theme.hintColor,
           ),
           const SizedBox(width: 6),
-          const Text('내 업무', style: TextStyle(fontSize: 13)),
+          Text(tr('내 업무'), style: TextStyle(fontSize: 13)),
         ],
       ),
     ),
@@ -1193,7 +1204,7 @@ class _GanttChartViewState extends State<GanttChartView> {
                         alignment: Alignment.centerLeft,
                         padding: const EdgeInsets.only(left: 16),
                         child: Text(
-                          _byStatus ? '상태 / 업무' : '프로젝트 / 업무',
+                          _byStatus ? tr('상태 / 업무') : tr('프로젝트 / 업무'),
                           style: TextStyle(
                             fontSize: 12,
                             color: theme.hintColor,
@@ -1239,7 +1250,7 @@ class _GanttChartViewState extends State<GanttChartView> {
                             padding: const EdgeInsets.symmetric(vertical: 40),
                             child: Center(
                               child: Text(
-                                '표시할 업무가 없습니다.',
+                                tr('표시할 업무가 없습니다.'),
                                 style: TextStyle(color: theme.hintColor),
                               ),
                             ),
@@ -1372,8 +1383,8 @@ class _ProjectPickerState extends State<_ProjectPicker> {
                           controller: _search,
                           autofocus: true,
                           style: const TextStyle(fontSize: 13),
-                          decoration: const InputDecoration(
-                            hintText: '프로젝트 이름/프로젝트 키',
+                          decoration: InputDecoration(
+                            hintText: tr('프로젝트 이름/프로젝트 키'),
                             border: InputBorder.none,
                             isDense: true,
                           ),
@@ -1394,7 +1405,7 @@ class _ProjectPickerState extends State<_ProjectPicker> {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        child: Text(allOn ? '전체 해제' : '전체 선택'),
+                        child: Text(allOn ? tr('전체 해제') : tr('전체 선택')),
                       ),
                     ],
                   ),
@@ -1407,7 +1418,7 @@ class _ProjectPickerState extends State<_ProjectPicker> {
                     ? Padding(
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         child: Text(
-                          '일치하는 프로젝트가 없습니다.',
+                          tr('일치하는 프로젝트가 없습니다.'),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 12,
@@ -1536,7 +1547,7 @@ class _ProjectPickerState extends State<_ProjectPicker> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  '$count개 프로젝트 선택됨',
+                  tr('{count}개 프로젝트 선택됨', {'count': count}),
                   style: TextStyle(
                     fontSize: 12,
                     color: theme.colorScheme.onSurface,
@@ -1569,7 +1580,7 @@ class _TodayButton extends StatelessWidget {
       side: BorderSide(color: Theme.of(context).dividerColor),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     ),
-    child: const Text('오늘'),
+    child: Text(tr('오늘')),
   );
 }
 

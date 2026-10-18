@@ -23,6 +23,7 @@ import '../widgets/search_result_parts.dart';
 import '../widgets/todo_widgets.dart' show todoProgressColor;
 import '../widgets/todos_panel.dart' show openTodoInPanel;
 import 'chat_screen.dart';
+import '../l10n/tr.dart';
 
 /// 검색 패널의 종류 탭 — 전체 / 메시지 / 투표 / 할 일 / 파일(꺽쇠로 파일 형식) / 대화방(내가 멤버인 방의 이름).
 /// 전체 탭은 메시지·투표·파일에 더해 이름이 맞는 대화방 몇 개를 맨 위 묶음으로 보여 준다. 할 일 탭은 메시지가 아니라
@@ -396,7 +397,7 @@ class _SearchScreenState extends State<SearchScreen> {
   void _openRoomResult(RoomSearchResult result) {
     final room = widget.session.roomById(result.roomId);
     if (room == null) {
-      showAppToast(context, '대화방을 찾을 수 없습니다.');
+      showAppToast(context, tr('대화방을 찾을 수 없습니다.'));
       return;
     }
     _openRoom(room);
@@ -454,14 +455,16 @@ class _SearchScreenState extends State<SearchScreen> {
             controller: _query,
             autofocus: true,
             decoration: InputDecoration(
-              hintText: _type == SearchType.room ? '대화방 이름 검색' : '통합 검색',
+              hintText: _type == SearchType.room
+                  ? tr('대화방 이름 검색')
+                  : tr('통합 검색'),
               isDense: true,
               prefixIcon: const Icon(Icons.search, size: 20),
               suffixIcon: _query.text.isEmpty
                   ? null
                   : IconButton(
                       icon: const Icon(Icons.close, size: 18),
-                      tooltip: '지우기',
+                      tooltip: tr('지우기'),
                       onPressed: () {
                         _query.clear();
                         setState(() {});
@@ -569,7 +572,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      '검색',
+                      tr('검색'),
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
@@ -588,14 +591,14 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     if (widget.asDialog) {
       return FloatingDialog(
-        title: '검색',
+        title: tr('검색'),
         maxWidth: 640,
         maxHeight: 700,
         child: body,
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('검색')),
+      appBar: AppBar(title: Text(tr('검색'))),
       body: body,
     );
   }
@@ -614,25 +617,25 @@ class _SearchScreenState extends State<SearchScreen> {
                 children: [
                   PanelTab(
                     key: const ValueKey('search-tab-all'),
-                    label: '전체',
+                    label: tr('전체'),
                     selected: _type == SearchType.all,
                     onTap: () => _selectType(SearchType.all),
                   ),
                   PanelTab(
                     key: const ValueKey('search-tab-message'),
-                    label: '메시지',
+                    label: tr('메시지'),
                     selected: _type == SearchType.message,
                     onTap: () => _selectType(SearchType.message),
                   ),
                   PanelTab(
                     key: const ValueKey('search-tab-poll'),
-                    label: '투표',
+                    label: tr('투표'),
                     selected: _type == SearchType.poll,
                     onTap: () => _selectType(SearchType.poll),
                   ),
                   PanelTab(
                     key: const ValueKey('search-tab-todo'),
-                    label: '할 일',
+                    label: tr('할 일'),
                     selected: _type == SearchType.todo,
                     onTap: () => _selectType(SearchType.todo),
                   ),
@@ -650,7 +653,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
                   PanelTab(
                     key: const ValueKey('search-tab-room'),
-                    label: '대화방',
+                    label: tr('대화방'),
                     selected: _type == SearchType.room,
                     onTap: () => _selectType(SearchType.room),
                   ),
@@ -695,10 +698,10 @@ class _SearchScreenState extends State<SearchScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(switch (_type) {
-                  SearchType.room => '내가 참여 중인 토픽·그룹채팅·채팅의 이름을 검색합니다.',
-                  SearchType.todo => '참여한 대화방의 할 일을 제목·설명으로 검색합니다.',
-                  SearchType.all => '대화방 이름과 메시지·파일을 검색합니다.',
-                  _ => '내가 속한 모든 방을 대상으로 검색합니다.',
+                  SearchType.room => tr('내가 참여 중인 토픽·그룹채팅·채팅의 이름을 검색합니다.'),
+                  SearchType.todo => tr('참여한 대화방의 할 일을 제목·설명으로 검색합니다.'),
+                  SearchType.all => tr('대화방 이름과 메시지·파일을 검색합니다.'),
+                  _ => tr('내가 속한 모든 방을 대상으로 검색합니다.'),
                 }, textAlign: TextAlign.center),
               ),
             );
@@ -735,7 +738,7 @@ class _SearchScreenState extends State<SearchScreen> {
       TextSpan(
         style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
         children: [
-          const TextSpan(text: '결과 '),
+          TextSpan(text: tr('결과 ')),
           TextSpan(
             text: '$total',
             style: TextStyle(
@@ -743,10 +746,13 @@ class _SearchScreenState extends State<SearchScreen> {
               color: theme.colorScheme.onSurface,
             ),
           ),
-          const TextSpan(text: '건'),
+          TextSpan(text: tr('건')),
           // 한도를 넘으면 목록에는 앞의 일부만 있다는 걸 알린다.
           if (total > shown)
-            TextSpan(text: ' ($shown건까지 표시)', style: theme.textTheme.bodySmall),
+            TextSpan(
+              text: tr(' ({shown}건까지 표시)', {'shown': shown}),
+              style: theme.textTheme.bodySmall,
+            ),
         ],
       ),
     );
@@ -763,11 +769,11 @@ class _SearchScreenState extends State<SearchScreen> {
         children: [
           resultLine,
           const Divider(height: 1),
-          const Expanded(
+          Expanded(
             child: Center(
               child: Padding(
                 padding: EdgeInsets.all(16),
-                child: Text('검색 결과가 없습니다.'),
+                child: Text(tr('검색 결과가 없습니다.')),
               ),
             ),
           ),
@@ -790,7 +796,7 @@ class _SearchScreenState extends State<SearchScreen> {
       lead.add(
         _SectionHeader(
           key: const ValueKey('search-section-rooms'),
-          label: '대화방',
+          label: tr('대화방'),
           count: roomTotal,
           onMore: roomTotal > preview.length
               ? () => _selectType(SearchType.room)
@@ -815,7 +821,7 @@ class _SearchScreenState extends State<SearchScreen> {
         lead.add(
           _SectionHeader(
             key: const ValueKey('search-section-messages'),
-            label: '메시지',
+            label: tr('메시지'),
             count: _total,
           ),
         );
@@ -978,7 +984,7 @@ class _SearchResultRow extends StatelessWidget {
                           context,
                           result.isPoll
                               ? pollPreviewText(result.text)
-                              : result.text ?? result.fileName ?? '(파일)',
+                              : result.text ?? result.fileName ?? tr('(파일)'),
                           query,
                         ),
                     ],
@@ -999,7 +1005,7 @@ class _SearchResultRow extends StatelessWidget {
     return [
       Row(
         children: [
-          const ResultKindBadge('게시글'),
+          ResultKindBadge(tr('게시글')),
           const SizedBox(width: 6),
           Expanded(
             child: _highlighted(
@@ -1084,7 +1090,7 @@ class _TodoResultRow extends StatelessWidget {
             const SizedBox(height: 6),
             Row(
               children: [
-                const ResultKindBadge('할 일'),
+                ResultKindBadge(tr('할 일')),
                 const SizedBox(width: 6),
                 Expanded(
                   child: highlightedText(
@@ -1106,7 +1112,7 @@ class _TodoResultRow extends StatelessWidget {
               TextSpan(
                 style: small,
                 children: [
-                  const TextSpan(text: '진행률 '),
+                  TextSpan(text: tr('진행률 ')),
                   TextSpan(
                     text: '${todo.progress}%',
                     style: TextStyle(
@@ -1114,7 +1120,11 @@ class _TodoResultRow extends StatelessWidget {
                       color: todoProgressColor(context, todo.progress),
                     ),
                   ),
-                  TextSpan(text: ' · 일정: ${todo.periodText ?? '없음'}'),
+                  TextSpan(
+                    text: tr(' · 일정: {p0}', {
+                      'p0': todo.periodText ?? tr('없음'),
+                    }),
+                  ),
                   if (todo.creator != null)
                     TextSpan(text: ' · ${todo.creator!.name}'),
                 ],
@@ -1185,7 +1195,7 @@ class _SectionHeader extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          '더 보기',
+                          tr('더 보기'),
                           style: TextStyle(
                             fontSize: 12,
                             color: theme.hintColor,
@@ -1228,9 +1238,9 @@ class _RoomResultRow extends StatelessWidget {
   });
 
   static String kindLabel(String type) => switch (type) {
-    'topic' => '토픽',
-    'group' => '그룹채팅',
-    _ => '채팅',
+    'topic' => tr('토픽'),
+    'group' => tr('그룹채팅'),
+    _ => tr('채팅'),
   };
 
   Widget _avatar(BuildContext context) {
@@ -1311,11 +1321,16 @@ class _RoomResultRow extends StatelessWidget {
                     children: [
                       Text(kindLabel(result.type), style: small),
                       if (result.archived)
-                        const TopicBadge.archived(
+                        TopicBadge.archived(
                           key: ValueKey('search-room-archived'),
                         ),
                       if (!result.isSelf && result.memberCount > 0)
-                        Text('· 멤버 ${result.memberCount}명', style: small),
+                        Text(
+                          tr('· 멤버 {result.memberCount}명', {
+                            'result.memberCount': result.memberCount,
+                          }),
+                          style: small,
+                        ),
                       if (showTeam && result.teamName.isNotEmpty)
                         TeamNameChip(
                           key: const ValueKey('search-team-chip'),

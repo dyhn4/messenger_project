@@ -12,6 +12,7 @@ import '../services/app_links.dart';
 import '../services/mention_logic.dart';
 
 export '../models/text_format.dart';
+import '../l10n/tr.dart';
 
 // 글자 서식(굵게·기울임·밑줄·취소선·코드·인용·링크).
 //
@@ -975,7 +976,7 @@ class RichFormatToolbar extends StatelessWidget {
             };
             final on = c.isActive(flag);
             return Tooltip(
-              message: '제목 $level',
+              message: tr('제목 {level}', {'level': level}),
               child: InkWell(
                 borderRadius: BorderRadius.circular(6),
                 onTap: () {
@@ -1024,7 +1025,7 @@ class RichFormatToolbar extends StatelessWidget {
                           Padding(
                             padding: const EdgeInsets.all(3),
                             child: Tooltip(
-                              message: rgb == null ? '기본색' : '',
+                              message: rgb == null ? tr('기본색') : '',
                               child: InkWell(
                                 customBorder: const CircleBorder(),
                                 onTap: () {
@@ -1063,7 +1064,7 @@ class RichFormatToolbar extends StatelessWidget {
                 ),
               ],
               builder: (context, menu, _) => Tooltip(
-                message: '글자색',
+                message: tr('글자색'),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(6),
                   onTap: () => menu.isOpen ? menu.close() : menu.open(),
@@ -1110,61 +1111,61 @@ class RichFormatToolbar extends StatelessWidget {
                   ],
                   button(
                     Icons.format_bold,
-                    '굵게 (Ctrl+B)',
+                    tr('굵게 (Ctrl+B)'),
                     () => c.toggle(Fmt.bold),
                     active: c.isActive(Fmt.bold),
                   ),
                   button(
                     Icons.format_italic,
-                    '기울임 (Ctrl+I)',
+                    tr('기울임 (Ctrl+I)'),
                     () => c.toggle(Fmt.italic),
                     active: c.isActive(Fmt.italic),
                   ),
                   button(
                     Icons.format_underlined,
-                    '밑줄 (Ctrl+U)',
+                    tr('밑줄 (Ctrl+U)'),
                     () => c.toggle(Fmt.underline),
                     active: c.isActive(Fmt.underline),
                   ),
                   button(
                     Icons.format_strikethrough,
-                    '취소선',
+                    tr('취소선'),
                     () => c.toggle(Fmt.strike),
                     active: c.isActive(Fmt.strike),
                   ),
                   gap(),
                   button(
                     Icons.link,
-                    '링크',
+                    tr('링크'),
                     () => _link(context),
                     active: c.currentHref != null,
                   ),
                   button(
                     Icons.code,
-                    '코드',
+                    tr('코드'),
                     () => c.toggle(Fmt.code),
                     active: c.isActive(Fmt.code),
                   ),
                   button(
                     Icons.format_quote,
-                    '인용',
+                    tr('인용'),
                     c.toggleQuote,
                     active: c.isActive(Fmt.quote),
                   ),
                   gap(),
                   button(
                     Icons.format_list_numbered,
-                    '번호 목록',
+                    tr('번호 목록'),
                     () => c.toggleList(ordered: true),
                   ),
                   button(
                     Icons.format_list_bulleted,
-                    '글머리 목록',
+                    tr('글머리 목록'),
                     () => c.toggleList(ordered: false),
                   ),
                   if (showRule) ...[
                     gap(),
-                    button(Icons.horizontal_rule, '구분선', c.insertRule),
+                    button(Icons.horizontal_rule, tr('구분선'), c.insertRule),
                   ],
                   if (trailing.isNotEmpty) ...[gap(), ...trailing],
                 ],
@@ -1208,7 +1209,7 @@ class _LinkDialogState extends State<_LinkDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('링크'),
+      title: Text(tr('링크')),
       content: SizedBox(
         width: 360,
         child: Column(
@@ -1218,8 +1219,8 @@ class _LinkDialogState extends State<_LinkDialog> {
               TextField(
                 controller: _label,
                 autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: '표시할 글',
+                decoration: InputDecoration(
+                  labelText: tr('표시할 글'),
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
@@ -1231,9 +1232,9 @@ class _LinkDialogState extends State<_LinkDialog> {
               controller: _url,
               autofocus: !widget.needsLabel,
               decoration: InputDecoration(
-                labelText: '주소',
+                labelText: tr('주소'),
                 hintText: 'https://',
-                helperText: widget.needsLabel ? null : '비우면 링크를 뗍니다.',
+                helperText: widget.needsLabel ? null : tr('비우면 링크를 뗍니다.'),
                 border: const OutlineInputBorder(),
                 isDense: true,
               ),
@@ -1245,9 +1246,9 @@ class _LinkDialogState extends State<_LinkDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
-        FilledButton(onPressed: _ok, child: const Text('확인')),
+        FilledButton(onPressed: _ok, child: Text(tr('확인'))),
       ],
     );
   }
@@ -1397,7 +1398,7 @@ class RichFormatToggleButton extends StatelessWidget {
           Icons.text_format,
           color: open ? richFormatActiveColor : null,
         ),
-        tooltip: open ? '서식 도구 닫기' : '서식 도구',
+        tooltip: open ? tr('서식 도구 닫기') : tr('서식 도구'),
         onPressed: onPressed,
       ),
     );

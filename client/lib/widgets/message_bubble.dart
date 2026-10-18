@@ -38,6 +38,7 @@ import 'self_destruct_countdown.dart';
 import 'shared_album_card.dart';
 import 'todo_message_card.dart';
 import 'user_status_dialogs.dart';
+import '../l10n/tr.dart';
 
 final _timeFormat = DateFormat('a h:mm');
 
@@ -219,8 +220,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         context,
         editDeleteWindowExpiredMessage(
           widget.session,
-          what: '메시지',
-          action: '수정',
+          what: tr('메시지'),
+          action: tr('수정'),
         ),
       );
       return;
@@ -286,7 +287,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('수정 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('수정 실패: {e}', {'e': e}))));
       }
     } finally {
       if (mounted) setState(() => _savingEdit = false);
@@ -299,16 +300,16 @@ class _MessageBubbleState extends State<MessageBubble> {
     final delete = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('메시지 삭제'),
-        content: const Text('첨부를 모두 지우고 내용도 없으면 남는 메시지가 없습니다.\n메시지를 삭제할까요?'),
+        title: Text(tr('메시지 삭제')),
+        content: Text(tr('첨부를 모두 지우고 내용도 없으면 남는 메시지가 없습니다.\n메시지를 삭제할까요?')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('계속 수정'),
+            child: Text(tr('계속 수정')),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+            child: Text(tr('삭제'), style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -320,7 +321,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('삭제 실패: $e')));
+      ).showSnackBar(SnackBar(content: Text(tr('삭제 실패: {e}', {'e': e}))));
     }
   }
 
@@ -348,7 +349,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   Future<void> _confirmDelete(BuildContext context) async {
     final moderating = !_isMine;
     final isPost = widget.message.isPost;
-    final noun = isPost ? '게시글' : '메시지';
+    final noun = isPost ? tr('게시글') : tr('메시지');
     if (!isEditDeleteAllowed(widget.session)) {
       showEditWindowExpiredDialog(context, editDeleteDisabledMessage);
       return;
@@ -360,8 +361,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         context,
         editDeleteWindowExpiredMessage(
           widget.session,
-          what: '메시지',
-          action: '삭제',
+          what: tr('메시지'),
+          action: tr('삭제'),
         ),
       );
       return;
@@ -369,20 +370,26 @@ class _MessageBubbleState extends State<MessageBubble> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('$noun 삭제'),
+        title: Text(tr('{noun} 삭제', {'noun': noun})),
         content: Text(
           moderating
-              ? '관리자 권한으로 다른 사람의 $noun${isPost ? '을' : '를'} 삭제합니다. 계속할까요?'
-              : '이 $noun${isPost ? '을' : '를'} 삭제할까요?',
+              ? tr('관리자 권한으로 다른 사람의 {noun}{p0} 삭제합니다. 계속할까요?', {
+                  'noun': noun,
+                  'p0': isPost ? tr('을') : tr('를'),
+                })
+              : tr('이 {noun}{p0} 삭제할까요?', {
+                  'noun': noun,
+                  'p0': isPost ? tr('을') : tr('를'),
+                }),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+            child: Text(tr('삭제'), style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -394,7 +401,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('삭제 실패: $e')));
+      ).showSnackBar(SnackBar(content: Text(tr('삭제 실패: {e}', {'e': e}))));
     }
   }
 
@@ -541,7 +548,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                         ),
                   child: message.deleted
                       ? Text(
-                          '삭제된 메시지입니다',
+                          tr('삭제된 메시지입니다'),
                           style: TextStyle(
                             fontStyle: FontStyle.italic,
                             color: Theme.of(context).hintColor,
@@ -558,7 +565,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              '이 메시지는 복호화할 수 없습니다',
+                              tr('이 메시지는 복호화할 수 없습니다'),
                               style: TextStyle(
                                 fontStyle: FontStyle.italic,
                                 color: Theme.of(context).hintColor,
@@ -589,7 +596,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                                   ),
                                   const SizedBox(width: 3),
                                   Text(
-                                    '공지',
+                                    tr('공지'),
                                     style: Theme.of(context)
                                         .textTheme
                                         .labelSmall
@@ -607,7 +614,13 @@ class _MessageBubbleState extends State<MessageBubble> {
                             // "메시지 전달"로 생겼고 "포함" 토글이 켜져 있었으면 원본 발신자 표시.
                             if (message.forwardedFromSenderName != null) ...[
                               Text(
-                                '${message.forwardedFromSenderName}에서 전달한 메시지입니다',
+                                tr(
+                                  '{message.forwardedFromSenderName}에서 전달한 메시지입니다',
+                                  {
+                                    'message.forwardedFromSenderName':
+                                        message.forwardedFromSenderName,
+                                  },
+                                ),
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontStyle: FontStyle.italic,
@@ -679,7 +692,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     ),
                                     const SizedBox(width: 4),
                                     Text(
-                                      '문의함 바로가기',
+                                      tr('문의함 바로가기'),
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
@@ -707,7 +720,10 @@ class _MessageBubbleState extends State<MessageBubble> {
                               const Divider(height: 1),
                               const SizedBox(height: 8),
                               Text(
-                                '${message.quotedSenderName}에서 공유된 메시지입니다',
+                                tr('{message.quotedSenderName}에서 공유된 메시지입니다', {
+                                  'message.quotedSenderName':
+                                      message.quotedSenderName,
+                                }),
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: Theme.of(context).hintColor,
@@ -722,7 +738,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                             if (message.editedAt != null && !_editing) ...[
                               const SizedBox(height: 2),
                               Text(
-                                '(수정됨)',
+                                tr('(수정됨)'),
                                 style: Theme.of(context).textTheme.labelSmall
                                     ?.copyWith(
                                       color: Theme.of(context).hintColor,
@@ -887,7 +903,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         HoverToolbarButton(
           key: const ValueKey('toolbar-reaction'),
           icon: Icons.add_reaction_outlined,
-          tooltip: '공감',
+          tooltip: tr('공감'),
           visible: canReactToMessage(widget.session, message),
           onMenuOpenChanged: _setMenuOpen,
           menuChildren: [
@@ -911,12 +927,12 @@ class _MessageBubbleState extends State<MessageBubble> {
         ),
         HoverToolbarButton(
           icon: Icons.mode_comment_outlined,
-          tooltip: '댓글',
+          tooltip: tr('댓글'),
           onPressed: () => widget.onOpenThread!(message),
         ),
         HoverToolbarButton(
           icon: Icons.more_vert,
-          tooltip: '더보기',
+          tooltip: tr('더보기'),
           onMenuOpenChanged: _setMenuOpen,
           menuChildren: [
             ...messageActionMenuItems(
@@ -938,7 +954,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             if (_canEditMessage)
               hoverMenuItem(
                 icon: Icons.edit,
-                label: '수정',
+                label: tr('수정'),
                 onPressed: _startEdit,
               ),
             if (isMine &&
@@ -946,7 +962,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                 isEditDeleteAllowed(widget.session))
               hoverMenuItem(
                 icon: Icons.delete,
-                label: '삭제',
+                label: tr('삭제'),
                 color: Colors.redAccent,
                 onPressed: () => _confirmDelete(context),
               ),
@@ -955,7 +971,7 @@ class _MessageBubbleState extends State<MessageBubble> {
               hoverMenuDivider(),
               hoverMenuItem(
                 icon: Icons.shield_outlined,
-                label: '삭제 (관리자)',
+                label: tr('삭제 (관리자)'),
                 color: Colors.redAccent,
                 onPressed: () => _confirmDelete(context),
               ),
@@ -1011,7 +1027,7 @@ class _MessageBubbleState extends State<MessageBubble> {
               decoration: InputDecoration(
                 isDense: true,
                 border: const OutlineInputBorder(),
-                hintText: _isEditableMedia ? '설명 (선택)' : null,
+                hintText: _isEditableMedia ? tr('설명 (선택)') : null,
               ),
               onSubmitted: (_) => _saveEdit(),
             ),
@@ -1024,7 +1040,7 @@ class _MessageBubbleState extends State<MessageBubble> {
           children: [
             TextButton(
               onPressed: _savingEdit ? null : _cancelEdit,
-              child: const Text('취소'),
+              child: Text(tr('취소')),
             ),
             const SizedBox(width: 4),
             FilledButton(
@@ -1038,7 +1054,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                         color: Colors.white,
                       ),
                     )
-                  : const Text('저장'),
+                  : Text(tr('저장')),
             ),
           ],
         ),
@@ -1085,7 +1101,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         return DownloadableFile(
           session: widget.session,
           url: url,
-          fileName: message.fileName ?? '파일',
+          fileName: message.fileName ?? tr('파일'),
           message: message,
           attachmentId: message.attachments.isEmpty
               ? null
@@ -1180,7 +1196,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             Icon(Icons.dashboard_outlined, size: 13, color: hint),
             const SizedBox(width: 4),
             Text(
-              '게시글',
+              tr('게시글'),
               style: theme.textTheme.labelSmall?.copyWith(color: hint),
             ),
           ],
@@ -1454,7 +1470,9 @@ class _LinkPreviewImageState extends State<_LinkPreviewImage> {
     final refresh = widget.refreshPath;
     if (_refreshTried || refresh == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_failed && _path == failedPath) setState(() => _failed = true);
+        if (mounted && !_failed && _path == failedPath) {
+          setState(() => _failed = true);
+        }
       });
       return;
     }
@@ -1564,9 +1582,9 @@ class _AppLinkCard extends StatelessWidget {
                     const SizedBox(height: 5),
                     Text(
                       [
-                        isTask ? '업무' : '노트',
+                        isTask ? tr('업무') : tr('노트'),
                         if (person != null && person.isNotEmpty)
-                          '${isTask ? '담당자' : '작성자'} $person',
+                          '${isTask ? tr('담당자') : tr('작성자')} $person',
                       ].join('  ·  '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

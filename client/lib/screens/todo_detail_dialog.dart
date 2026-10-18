@@ -28,6 +28,7 @@ import '../widgets/todo_widgets.dart';
 import '../widgets/user_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'todo_editor_dialog.dart';
+import '../l10n/tr.dart';
 
 /// 방을 여는 손잡이 — 패널이 자기 context로 만든다(대화상자 안의 context로는 홈 화면을 못 찾는다).
 typedef TodoOpenRoom = void Function(Room room, {String? messageId});
@@ -234,7 +235,7 @@ class _TodoDetailState extends State<TodoDetail> {
     if (route == null || !route.isActive) return;
     // 같은 알림이 또 와도 다시 닫지 않게, 떠 있던 삭제 확인이 닫혀도 DELETE를 보내지 않게.
     _deleting = true;
-    _toast('이 할 일이 삭제되었습니다.');
+    _toast(tr('이 할 일이 삭제되었습니다.'));
     final nav = Navigator.of(context);
     // 패널 모드에서는 상세(패널의 중첩 Navigator)와 달리 삭제 확인과 메뉴(••• · 진척률 · 수정 화면의 알림 메뉴)가 창 전체
     // (루트 Navigator)에 떠 있어 아래 popUntil로는 안 닫힌다 — 따로 닫는다.
@@ -263,7 +264,9 @@ class _TodoDetailState extends State<TodoDetail> {
       final comments = await _api.comments(_todo.id);
       if (mounted) setState(() => _comments = comments);
     } catch (e) {
-      if (mounted) setState(() => _commentsError = '댓글을 불러오지 못했습니다: $e');
+      if (mounted) {
+        setState(() => _commentsError = tr('댓글을 불러오지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 
@@ -314,7 +317,7 @@ class _TodoDetailState extends State<TodoDetail> {
       if (mounted && _commentController.text.isEmpty) {
         _commentController.text = text;
       }
-      if (mounted) _toast('댓글을 등록하지 못했습니다: $e');
+      if (mounted) _toast(tr('댓글을 등록하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _sendingComment = false);
     }
@@ -350,7 +353,7 @@ class _TodoDetailState extends State<TodoDetail> {
         _changed = true;
       });
     } catch (e) {
-      if (mounted) _toast('진척률을 바꾸지 못했습니다: $e');
+      if (mounted) _toast(tr('진척률을 바꾸지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _pendingProgress = null);
     }
@@ -375,7 +378,7 @@ class _TodoDetailState extends State<TodoDetail> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _todo = _todo.copyWith(favorite: before));
-      _toast('즐겨찾기를 바꾸지 못했습니다: $e');
+      _toast(tr('즐겨찾기를 바꾸지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _favoriteBusy = false);
     }
@@ -396,7 +399,7 @@ class _TodoDetailState extends State<TodoDetail> {
       _todo = updated;
       _changed = true;
     });
-    _toast('할 일을 수정했습니다.');
+    _toast(tr('할 일을 수정했습니다.'));
   }
 
   /// 첨부 전부 받기(••• → 파일 다운로드) — 받는 동안 첨부 칸에 진행 막대를 보이고, 끝난 알림은 내려받기 쪽이 띄운다.
@@ -418,7 +421,7 @@ class _TodoDetailState extends State<TodoDetail> {
         },
       );
     } catch (e) {
-      if (mounted) _toast('다운로드하지 못했습니다: $e');
+      if (mounted) _toast(tr('다운로드하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) {
         setState(() {
@@ -443,11 +446,11 @@ class _TodoDetailState extends State<TodoDetail> {
     _deleting = true;
     try {
       await _api.delete(_todo.id);
-      showAppToastOnOverlay(overlay, '할 일을 삭제했습니다.');
+      showAppToastOnOverlay(overlay, tr('할 일을 삭제했습니다.'));
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       _deleting = false;
-      if (mounted) _toast('할 일을 삭제하지 못했습니다: $e');
+      if (mounted) _toast(tr('할 일을 삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -468,7 +471,7 @@ class _TodoDetailState extends State<TodoDetail> {
     if (error == null || !mounted) return;
     if (!AppPlatform.isWindows) {
       await Clipboard.setData(ClipboardData(text: path));
-      if (mounted) _toast('$error 경로를 복사했습니다.');
+      if (mounted) _toast(tr('{error} 경로를 복사했습니다.', {'error': error}));
       return;
     }
     _toast(error);
@@ -552,14 +555,14 @@ class _TodoDetailState extends State<TodoDetail> {
                   children: [
                     Expanded(
                       child: Text(
-                        '할 일',
+                        tr('할 일'),
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
                     IconButton(
                       key: const ValueKey('todo-detail-close'),
                       icon: const Icon(Icons.close),
-                      tooltip: '닫기',
+                      tooltip: tr('닫기'),
                       onPressed: () => Navigator.of(context).pop(_changed),
                     ),
                   ],
@@ -591,10 +594,10 @@ class _TodoDetailState extends State<TodoDetail> {
         leading: IconButton(
           key: const ValueKey('todo-detail-close'),
           icon: const Icon(Icons.arrow_back),
-          tooltip: '뒤로',
+          tooltip: tr('뒤로'),
           onPressed: () => Navigator.of(context).pop(_changed),
         ),
-        title: const Text('할 일'),
+        title: Text(tr('할 일')),
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -719,7 +722,12 @@ class _TodoDetailState extends State<TodoDetail> {
       _infoBox(context, room, canOpenRoom),
       if (t.attachments.isNotEmpty) ...[
         const SizedBox(height: 20),
-        _Label('첨부', trailing: '${t.attachments.length}개'),
+        _Label(
+          tr('첨부'),
+          trailing: tr('{t.attachments.length}개', {
+            't.attachments.length': t.attachments.length,
+          }),
+        ),
         if (_downloadDone != null) _downloadProgress(context),
         // 전부 받기는 •••의 "파일 다운로드"(사진·파일 모두)가 맡아서 말풍선의 "전체 다운로드" 줄은 두지 않는다 — 사진
         // 격자 아래에도, 파일 목록 아래에도.
@@ -739,7 +747,7 @@ class _TodoDetailState extends State<TodoDetail> {
             child: DownloadableFile(
               session: widget.session,
               url: widget.session.resolveUrl(f.fileUrl),
-              fileName: f.fileName ?? '파일',
+              fileName: f.fileName ?? tr('파일'),
               // 다운로드 단추는 카드와 겹치지 않게 카드 바깥 오른쪽에.
               actionsBeside: true,
             ),
@@ -749,7 +757,7 @@ class _TodoDetailState extends State<TodoDetail> {
       // 폴더 경로(만든 사람이 생성 창에서 고른 것) — 누르면 이 PC의 윈도우 탐색기로 연다.
       if (t.downloadPath case final path?) ...[
         const SizedBox(height: 20),
-        const _Label('파일 다운로드'),
+        _Label(tr('파일 다운로드')),
         _FolderPathLink(
           key: const ValueKey('todo-detail-download-path'),
           path: path,
@@ -758,7 +766,7 @@ class _TodoDetailState extends State<TodoDetail> {
       ],
       if (t.uploadPath case final path?) ...[
         const SizedBox(height: 20),
-        const _Label('파일 업로드'),
+        _Label(tr('파일 업로드')),
         _FolderPathLink(
           key: const ValueKey('todo-detail-upload-path'),
           path: path,
@@ -778,7 +786,7 @@ class _TodoDetailState extends State<TodoDetail> {
               visualDensity: VisualDensity.compact,
             ),
             icon: const Icon(Icons.chat_bubble_outline, size: 16),
-            label: const Text('원본 메시지 보기'),
+            label: Text(tr('원본 메시지 보기')),
           ),
         ),
       ],
@@ -792,7 +800,7 @@ class _TodoDetailState extends State<TodoDetail> {
     final theme = Theme.of(context);
     final hint = theme.hintColor;
     final creator = _todo.creator;
-    final name = creator?.name ?? '알 수 없음';
+    final name = creator?.name ?? tr('알 수 없음');
     return Row(
       key: const ValueKey('todo-detail-created'),
       children: [
@@ -821,7 +829,7 @@ class _TodoDetailState extends State<TodoDetail> {
                         color: theme.colorScheme.onSurface,
                       ),
                     ),
-                    const TextSpan(text: ' 님이 할 일을 추가했습니다.'),
+                    TextSpan(text: tr(' 님이 할 일을 추가했습니다.')),
                   ],
                 ),
                 maxLines: 1,
@@ -849,7 +857,7 @@ class _TodoDetailState extends State<TodoDetail> {
     final on = _todo.favorite;
     return IconButton(
       key: const ValueKey('todo-detail-star'),
-      tooltip: on ? '즐겨찾기 해제' : '즐겨찾기',
+      tooltip: on ? tr('즐겨찾기 해제') : tr('즐겨찾기'),
       onPressed: _toggleFavorite,
       icon: Icon(
         on ? Icons.star : Icons.star_border,
@@ -865,7 +873,7 @@ class _TodoDetailState extends State<TodoDetail> {
   Widget _menu(BuildContext context) {
     return PopupMenuButton<TodoMenuAction>(
       key: const ValueKey('todo-detail-menu'),
-      tooltip: '더보기',
+      tooltip: tr('더보기'),
       icon: Icon(Icons.more_horiz, color: Theme.of(context).hintColor),
       useRootNavigator: true,
       routeSettings: todoPopupRouteSettings,
@@ -931,7 +939,7 @@ class _TodoDetailState extends State<TodoDetail> {
     final selectable = t.assignees.isEmpty && t.canSetProgress;
     return Row(
       children: [
-        _fieldLabel(context, '진행률'),
+        _fieldLabel(context, tr('진행률')),
         if (selectable)
           TodoProgressSelect(
             key: const ValueKey('todo-detail-my-progress'),
@@ -959,10 +967,10 @@ class _TodoDetailState extends State<TodoDetail> {
     final name =
         room?.displayName(widget.session.userId ?? '') ??
         _todo.roomName ??
-        '대화방';
+        tr('대화방');
     return Row(
       children: [
-        _fieldLabel(context, '대화방'),
+        _fieldLabel(context, tr('대화방')),
         Flexible(
           child: InkWell(
             key: const ValueKey('todo-detail-room'),
@@ -1008,7 +1016,7 @@ class _TodoDetailState extends State<TodoDetail> {
     if (t.assignees.isEmpty) {
       return [
         Text(
-          '담당자 없음',
+          tr('담당자 없음'),
           key: const ValueKey('todo-detail-no-assignee'),
           style: TextStyle(fontSize: 14, color: hint),
         ),
@@ -1019,7 +1027,7 @@ class _TodoDetailState extends State<TodoDetail> {
       Text.rich(
         TextSpan(
           children: [
-            const TextSpan(text: '총 '),
+            TextSpan(text: tr('총 ')),
             TextSpan(
               text: '${t.assignees.length}',
               style: TextStyle(
@@ -1027,7 +1035,7 @@ class _TodoDetailState extends State<TodoDetail> {
                 color: theme.colorScheme.onSurface,
               ),
             ),
-            const TextSpan(text: '명'),
+            TextSpan(text: tr('명')),
           ],
         ),
         key: const ValueKey('todo-detail-assignee-summary'),
@@ -1066,7 +1074,7 @@ class _TodoDetailState extends State<TodoDetail> {
                 if (isMe) ...[
                   const SizedBox(width: 4),
                   Text(
-                    '(나)',
+                    tr('(나)'),
                     style: TextStyle(
                       fontSize: 14,
                       color: Theme.of(context).hintColor,
@@ -1097,13 +1105,13 @@ class _TodoDetailState extends State<TodoDetail> {
     final period = t.periodText;
     final overdue = t.isOverdue();
     return [
-      Text('일정', style: TextStyle(fontSize: 14, color: hint)),
+      Text(tr('일정'), style: TextStyle(fontSize: 14, color: hint)),
       const SizedBox(height: 8),
       _iconLine(
         context,
         Icons.schedule,
         Text(
-          period ?? '없음',
+          period ?? tr('없음'),
           key: const ValueKey('todo-detail-period'),
           style: TextStyle(
             fontSize: 14,
@@ -1122,7 +1130,7 @@ class _TodoDetailState extends State<TodoDetail> {
         Icons.alarm,
         t.reminders.isEmpty
             ? Text(
-                '없음',
+                tr('없음'),
                 key: const ValueKey('todo-detail-no-reminder'),
                 style: TextStyle(fontSize: 14, color: hint),
               )
@@ -1135,7 +1143,7 @@ class _TodoDetailState extends State<TodoDetail> {
                       padding: EdgeInsets.only(top: i == 0 ? 0 : 4),
                       child: Text(
                         formatTodoDateTime(r.remindAt) +
-                            (r.sent ? ' (알림 보냄)' : ''),
+                            (r.sent ? tr(' (알림 보냄)') : ''),
                         style: TextStyle(
                           fontSize: 14,
                           color: r.sent ? hint : null,
@@ -1170,7 +1178,10 @@ class _TodoDetailState extends State<TodoDetail> {
       child: Row(
         children: [
           Text(
-            '다운로드 중 $done/$_downloadTotal',
+            tr('다운로드 중 {done}/{_downloadTotal}', {
+              'done': done,
+              '_downloadTotal': _downloadTotal,
+            }),
             style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
           ),
           const SizedBox(width: 10),
@@ -1201,7 +1212,7 @@ class _FolderPathLink extends StatelessWidget {
     return Align(
       alignment: Alignment.centerLeft,
       child: Tooltip(
-        message: '윈도우 탐색기로 열기',
+        message: tr('윈도우 탐색기로 열기'),
         child: InkWell(
           onTap: onOpen,
           borderRadius: BorderRadius.circular(6),

@@ -5,6 +5,7 @@ import '../services/session.dart';
 import 'app_toast.dart';
 import 'date_time_range_field.dart' show DateTimePointPanel;
 import 'muted_scrollbar.dart';
+import '../l10n/tr.dart';
 
 /// 상태 메시지와 방해 금지를 정하는 창(계정 메뉴 — account_menu_button.dart)과, 다른 사람의 상태를 보여 주는 작은 조각들.
 /// 규칙은 models/user_status.dart(서버 server/src/statusRules.js와 같음).
@@ -16,7 +17,13 @@ String untilLabel(DateTime until, {DateTime? now}) {
       until.year == n.year && until.month == n.month && until.day == n.day;
   final time =
       '${until.hour.toString().padLeft(2, '0')}:${until.minute.toString().padLeft(2, '0')}';
-  return sameDay ? '$time까지' : '${until.month}/${until.day} $time까지';
+  return sameDay
+      ? tr('{time}까지', {'time': time})
+      : tr('{until.month}/{until.day} {time}까지', {
+          'until.month': until.month,
+          'until.day': until.day,
+          'time': time,
+        });
 }
 
 /// 방해 금지 상태를 한 줄로 — "🌙 방해 금지 중 · 13:00까지", 일정만이면 "🌙 방해 금지 중(19:00~08:00)". 꺼져 있으면 null.
@@ -25,10 +32,13 @@ String? dndLabel(DndState? dnd, {DateTime? now}) {
   if (dnd == null || !dnd.isActiveAt(n)) return null;
   final until = dnd.until;
   if (until != null && n.isBefore(until)) {
-    return '🌙 방해 금지 중 · ${untilLabel(until, now: n)}';
+    return tr('🌙 방해 금지 중 · {p0}', {'p0': untilLabel(until, now: n)});
   }
   final s = dnd.schedule!;
-  return '🌙 방해 금지 중(${formatDayMinute(s.start)}~${formatDayMinute(s.end)})';
+  return tr('🌙 방해 금지 중({p0}~{p1})', {
+    'p0': formatDayMinute(s.start),
+    'p1': formatDayMinute(s.end),
+  });
 }
 
 /// 이름 옆에 붙이는 작은 표시 — 상태 이모지와(있으면) 방해 금지 달. 둘 다 없으면 아무것도 그리지 않는다. 마우스를 올리면
@@ -124,11 +134,16 @@ class _StatusDialogState extends State<_StatusDialog> {
     final clear = _empty;
     // 저장해도 창은 닫지 않는다 — 알약으로만 알린다(닫기는 [취소]).
     if (clear && widget.session.myStatus == null) {
-      showAppToast(context, '저장했습니다.');
+      showAppToast(context, tr('저장했습니다.'));
       return;
     }
     if (!clear && text.characters.length > statusTextMax) {
-      showAppToast(context, '상태 글은 $statusTextMax자까지 쓸 수 있습니다.');
+      showAppToast(
+        context,
+        tr('상태 글은 {statusTextMax}자까지 쓸 수 있습니다.', {
+          'statusTextMax': statusTextMax,
+        }),
+      );
       return;
     }
     setState(() => _saving = true);
@@ -138,9 +153,9 @@ class _StatusDialogState extends State<_StatusDialog> {
         text: clear || text.isEmpty ? null : text,
         until: clear ? null : _clear.untilFrom(DateTime.now()),
       );
-      if (mounted) showAppToast(context, '저장했습니다.');
+      if (mounted) showAppToast(context, tr('저장했습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '상태를 저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('상태를 저장하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -152,7 +167,7 @@ class _StatusDialogState extends State<_StatusDialog> {
     final scheme = theme.colorScheme;
     final hasStatus = widget.session.myStatus != null;
     return AlertDialog(
-      title: const Text('상태 설정'),
+      title: Text(tr('상태 설정')),
       content: SizedBox(
         width: 400,
         child: SingleChildScrollView(
@@ -185,16 +200,16 @@ class _StatusDialogState extends State<_StatusDialog> {
               TextField(
                 controller: _text,
                 maxLength: statusTextMax,
-                decoration: const InputDecoration(
-                  labelText: '상태 글',
-                  hintText: '예: 회의 중, 외근 중',
+                decoration: InputDecoration(
+                  labelText: tr('상태 글'),
+                  hintText: tr('예: 회의 중, 외근 중'),
                   border: OutlineInputBorder(),
                 ),
               ),
               DropdownButtonFormField<StatusClearAfter>(
                 initialValue: _clear,
-                decoration: const InputDecoration(
-                  labelText: '지우는 시점',
+                decoration: InputDecoration(
+                  labelText: tr('지우는 시점'),
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
@@ -208,7 +223,7 @@ class _StatusDialogState extends State<_StatusDialog> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
-                    '[저장]을 누르면 상태가 지워집니다.',
+                    tr('[저장]을 누르면 상태가 지워집니다.'),
                     key: const ValueKey('status-clear-hint'),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.hintColor,
@@ -217,7 +232,7 @@ class _StatusDialogState extends State<_StatusDialog> {
                 ),
               const SizedBox(height: 16),
               Text(
-                '자주 쓰는 상태',
+                tr('자주 쓰는 상태'),
                 style: theme.textTheme.labelLarge?.copyWith(
                   color: theme.hintColor,
                 ),
@@ -251,16 +266,13 @@ class _StatusDialogState extends State<_StatusDialog> {
           TextButton(
             key: const ValueKey('status-clear'),
             onPressed: _saving || _empty ? null : _clearFields,
-            child: const Text('상태 지우기'),
+            child: Text(tr('상태 지우기')),
           ),
         TextButton(
           onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: const Text('저장'),
-        ),
+        FilledButton(onPressed: _saving ? null : _save, child: Text(tr('저장'))),
       ],
     );
   }
@@ -282,10 +294,10 @@ class _DndDialog extends StatefulWidget {
 }
 
 /// "지금부터 알림 멈추기"의 정해 둔 길이 — 칩 키는 'dnd-for-<이름>'.
-const _pauseDurations = [
-  ('30분', Duration(minutes: 30)),
-  ('1시간', Duration(hours: 1)),
-  ('2시간', Duration(hours: 2)),
+final _pauseDurations = [
+  (tr('30분'), Duration(minutes: 30)),
+  (tr('1시간'), Duration(hours: 1)),
+  (tr('2시간'), Duration(hours: 2)),
 ];
 
 /// "지정"으로 고를 수 있는 가장 먼 시각 — 서버(statusRules.js UNTIL_MAX_MS)와 같은 31일.
@@ -359,9 +371,9 @@ class _DndDialogState extends State<_DndDialog> {
   String? _customProblem(DateTime now) {
     final until = _customUntil;
     if (until == null || !until.isAfter(now)) {
-      return '지금보다 뒤의 시각을 고르세요.';
+      return tr('지금보다 뒤의 시각을 고르세요.');
     }
-    if (until.difference(now) > _pauseMax) return '한 달 안으로만 정할 수 있습니다.';
+    if (until.difference(now) > _pauseMax) return tr('한 달 안으로만 정할 수 있습니다.');
     return null;
   }
 
@@ -382,15 +394,15 @@ class _DndDialogState extends State<_DndDialog> {
   Future<void> _save() async {
     final scheduleChanged = _scheduleChanged;
     if (_pauseKey == null && !scheduleChanged) {
-      showAppToast(context, '저장했습니다.');
+      showAppToast(context, tr('저장했습니다.'));
       return;
     }
     if (scheduleChanged && _scheduleOn && _days.isEmpty) {
-      showAppToast(context, '요일을 하나 이상 고르세요.');
+      showAppToast(context, tr('요일을 하나 이상 고르세요.'));
       return;
     }
     if (scheduleChanged && _scheduleOn && _start == _end) {
-      showAppToast(context, '시작과 끝 시간이 같습니다.');
+      showAppToast(context, tr('시작과 끝 시간이 같습니다.'));
       return;
     }
     final now = DateTime.now();
@@ -421,9 +433,9 @@ class _DndDialogState extends State<_DndDialog> {
       if (!mounted) return;
       // 적용했으니 고른 칩은 푼다 — 위쪽의 지금 상태("13:00까지 알림을 멈춥니다" 등)가 새 값을 보여 준다.
       setState(() => _pauseKey = null);
-      showAppToast(context, '저장했습니다.');
+      showAppToast(context, tr('저장했습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '방해 금지를 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('방해 금지를 바꾸지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -457,7 +469,7 @@ class _DndDialogState extends State<_DndDialog> {
         final label = dndLabel(dnd);
         final manualOn = dnd?.until != null;
         return AlertDialog(
-          title: const Text('방해 금지'),
+          title: Text(tr('방해 금지')),
           // 내용이 창보다 길면 스크롤바를 늘 보이고, 창 오른쪽 끝에 붙인다 — 그래서 내용 칸의 좌우 여백을 빼고 그 여백을
           // 스크롤 안쪽에 준다(내용 폭 400은 그대로).
           contentPadding: const EdgeInsets.only(top: 16),
@@ -473,7 +485,7 @@ class _DndDialogState extends State<_DndDialog> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      label ?? '지금은 알림을 받고 있습니다.',
+                      label ?? tr('지금은 알림을 받고 있습니다.'),
                       key: const ValueKey('dnd-state'),
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.bold,
@@ -481,12 +493,13 @@ class _DndDialogState extends State<_DndDialog> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '방해 금지 중에는 메시지·멘션·업무 알림이 오지 않습니다. 메시지와 안 읽은 수는 그대로 쌓이고, '
-                      '화상회의 호출은 옵니다. 같은 팀 사람들에게는 🌙로 보입니다.',
+                      tr(
+                        '방해 금지 중에는 메시지·멘션·업무 알림이 오지 않습니다. 메시지와 안 읽은 수는 그대로 쌓이고, 화상회의 호출은 옵니다. 같은 팀 사람들에게는 🌙로 보입니다.',
+                      ),
                       style: theme.textTheme.bodySmall?.copyWith(color: hint),
                     ),
                     const SizedBox(height: 16),
-                    Text('지금부터 알림 멈추기', style: theme.textTheme.labelLarge),
+                    Text(tr('지금부터 알림 멈추기'), style: theme.textTheme.labelLarge),
                     const SizedBox(height: 6),
                     // 고르기만 하고 [저장]을 눌러야 적용된다(고른 칩은 다시 누르면 풀린다).
                     Wrap(
@@ -504,7 +517,7 @@ class _DndDialogState extends State<_DndDialog> {
                           ),
                         ChoiceChip(
                           key: const ValueKey('dnd-until-morning'),
-                          label: const Text('내일 오전 9시까지'),
+                          label: Text(tr('내일 오전 9시까지')),
                           selected: _pauseKey == 'morning',
                           onSelected: _saving
                               ? null
@@ -517,7 +530,7 @@ class _DndDialogState extends State<_DndDialog> {
                           label: Text(
                             _pauseKey == 'custom' && _customUntil != null
                                 ? untilLabel(_customUntil!)
-                                : '지정',
+                                : tr('지정'),
                           ),
                           selected: _pauseKey == 'custom',
                           onSelected: _saving ? null : (_) => _toggleCustom(),
@@ -529,7 +542,7 @@ class _DndDialogState extends State<_DndDialog> {
                               Icons.notifications_active_outlined,
                               size: 18,
                             ),
-                            label: const Text('지금 다시 받기'),
+                            label: Text(tr('지금 다시 받기')),
                             selected: _pauseKey == 'resume',
                             onSelected: _saving
                                 ? null
@@ -553,8 +566,8 @@ class _DndDialogState extends State<_DndDialog> {
                           child: DateTimePointPanel(
                             keyPrefix: 'dnd',
                             value: _customUntil!,
-                            caption: '언제까지 알림을 멈출까요?',
-                            timeLabel: '종료 시간',
+                            caption: tr('언제까지 알림을 멈출까요?'),
+                            timeLabel: tr('종료 시간'),
                             firstDay: DateTime.now(),
                             lastDay: DateTime.now().add(_pauseMax),
                             onChanged: (v) => setState(() => _customUntil = v),
@@ -575,7 +588,7 @@ class _DndDialogState extends State<_DndDialog> {
                     if (_pauseKey != null) ...[
                       const SizedBox(height: 6),
                       Text(
-                        '[저장]을 누르면 적용됩니다.',
+                        tr('[저장]을 누르면 적용됩니다.'),
                         style: theme.textTheme.bodySmall?.copyWith(color: hint),
                       ),
                     ],
@@ -583,7 +596,7 @@ class _DndDialogState extends State<_DndDialog> {
                     SwitchListTile(
                       key: const ValueKey('dnd-schedule-switch'),
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('매일 정해진 시간에 방해 금지'),
+                      title: Text(tr('매일 정해진 시간에 방해 금지')),
                       value: _scheduleOn,
                       onChanged: _saving
                           ? null
@@ -612,7 +625,7 @@ class _DndDialogState extends State<_DndDialog> {
                         if (_end < _start) ...[
                           const SizedBox(width: 8),
                           Text(
-                            '(다음 날)',
+                            tr('(다음 날)'),
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: hint,
                             ),
@@ -646,12 +659,12 @@ class _DndDialogState extends State<_DndDialog> {
           actions: [
             TextButton(
               onPressed: _saving ? null : () => Navigator.of(context).pop(),
-              child: const Text('취소'),
+              child: Text(tr('취소')),
             ),
             FilledButton(
               key: const ValueKey('dnd-save'),
               onPressed: _saving ? null : _save,
-              child: const Text('저장'),
+              child: Text(tr('저장')),
             ),
           ],
         );
@@ -695,14 +708,15 @@ class UserStatusLines extends StatelessWidget {
 }
 
 /// 계정 메뉴의 한 줄 요약 — "🗓️ 회의 중" 또는 "상태 설정".
-String myStatusMenuLabel(Session session) => session.myStatus?.label ?? '상태 설정';
+String myStatusMenuLabel(Session session) =>
+    session.myStatus?.label ?? tr('상태 설정');
 
 /// 계정 메뉴의 방해 금지 한 줄 — "방해 금지 · 켜짐(13:00까지)" 또는 "방해 금지".
 String myDndMenuLabel(Session session) {
   final dnd = session.myDnd;
-  if (dnd == null || !dnd.isActiveAt(DateTime.now())) return '방해 금지';
+  if (dnd == null || !dnd.isActiveAt(DateTime.now())) return tr('방해 금지');
   final until = dnd.until;
   return until != null && DateTime.now().isBefore(until)
-      ? '방해 금지 · ${untilLabel(until)}'
-      : '방해 금지 · 켜짐';
+      ? tr('방해 금지 · {p0}', {'p0': untilLabel(until)})
+      : tr('방해 금지 · 켜짐');
 }

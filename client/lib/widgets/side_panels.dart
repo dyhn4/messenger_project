@@ -32,6 +32,7 @@ import 'todos_panel.dart';
 export 'home_shell_scope.dart'
     show HomeShellScope, PanelLeaveGuard, openRoomFromPanel;
 export 'side_panel_header.dart';
+import '../l10n/tr.dart';
 
 // ──────────────────────────────────────────────────────────────────────────
 // "패널" 등록 구조 — 새 패널을 만들 때 읽을 것
@@ -98,7 +99,7 @@ class SidePanelSpec {
 final sidePanelSpecs = <SidePanelSpec>[
   SidePanelSpec(
     key: 'search',
-    title: '검색',
+    title: tr('검색'),
     ownHeader: true,
     builder: (context, session, onClose) => SearchScreen(
       session: session,
@@ -110,7 +111,7 @@ final sidePanelSpecs = <SidePanelSpec>[
   ),
   SidePanelSpec(
     key: 'files',
-    title: '파일',
+    title: tr('파일'),
     ownHeader: true,
     builder: (context, session, onClose) {
       final shell = HomeShellScope.maybeOf(context);
@@ -125,7 +126,7 @@ final sidePanelSpecs = <SidePanelSpec>[
   ),
   SidePanelSpec(
     key: 'links',
-    title: '링크',
+    title: tr('링크'),
     ownHeader: true,
     builder: (context, session, onClose) {
       final shell = HomeShellScope.maybeOf(context);
@@ -142,7 +143,7 @@ final sidePanelSpecs = <SidePanelSpec>[
   ),
   SidePanelSpec(
     key: 'albums',
-    title: '앨범',
+    title: tr('앨범'),
     ownHeader: true,
     builder: (context, session, onClose) {
       final shell = HomeShellScope.maybeOf(context);
@@ -157,28 +158,28 @@ final sidePanelSpecs = <SidePanelSpec>[
   ),
   SidePanelSpec(
     key: 'todos',
-    title: '할 일',
+    title: tr('할 일'),
     ownHeader: true,
     builder: (context, session, onClose) =>
         TodosPanel(session: session, onClose: onClose),
   ),
   SidePanelSpec(
     key: 'scheduled',
-    title: '메시지 예약',
+    title: tr('메시지 예약'),
     ownHeader: true,
     builder: (context, session, onClose) =>
         ScheduledPanel(session: session, onClose: onClose),
   ),
   SidePanelSpec(
     key: 'reminders',
-    title: '리마인더',
+    title: tr('리마인더'),
     ownHeader: true,
     builder: (context, session, onClose) =>
         RemindersPanel(session: session, onClose: onClose),
   ),
   SidePanelSpec(
     key: 'inquiries',
-    title: '문의함',
+    title: tr('문의함'),
     ownHeader: true,
     builder: (context, session, onClose) => InquiriesPanel(
       session: session,
@@ -188,35 +189,35 @@ final sidePanelSpecs = <SidePanelSpec>[
   ),
   SidePanelSpec(
     key: 'favorites',
-    title: '즐겨찾기',
+    title: tr('즐겨찾기'),
     ownHeader: true,
     builder: (context, session, onClose) =>
         FavoritesScreen(session: session, onClose: onClose),
   ),
   SidePanelSpec(
     key: 'polls',
-    title: '투표',
+    title: tr('투표'),
     ownHeader: true,
     builder: (context, session, onClose) =>
         PollsScreen(session: session, onClose: onClose),
   ),
   SidePanelSpec(
     key: 'myposts',
-    title: '내가 쓴 글',
+    title: tr('내가 쓴 글'),
     ownHeader: true,
     builder: (context, session, onClose) =>
         MyPostsScreen(session: session, onClose: onClose),
   ),
   SidePanelSpec(
     key: 'bookmarks',
-    title: '북마크',
+    title: tr('북마크'),
     ownHeader: true,
     builder: (context, session, onClose) =>
         BookmarksPanel(session: session, onClose: onClose),
   ),
   SidePanelSpec(
     key: 'notifications',
-    title: '알림 센터',
+    title: tr('알림 센터'),
     ownHeader: true,
     builder: (context, session, onClose) => NotificationsPanel(
       session: session,
@@ -246,7 +247,7 @@ final sidePanelSpecs = <SidePanelSpec>[
   ),
   SidePanelSpec(
     key: 'members',
-    title: '팀 멤버',
+    title: tr('팀 멤버'),
     ownHeader: true,
     builder: (context, session, onClose) {
       // 방 헤더의 "멤버" 버튼으로 열면 그 방의 참여 멤버, 상단 "팀 멤버"로 열면 팀 전체.
@@ -274,7 +275,7 @@ final sidePanelSpecs = <SidePanelSpec>[
   ),
   SidePanelSpec(
     key: announcementPanelKey,
-    title: '공지',
+    title: tr('공지'),
     ownHeader: true,
     builder: (context, session, onClose) {
       // 토픽 ⋯의 "공지"·알림 센터의 안 읽은 공지로 연 방. 방 없이 열렸으면(시험 하네스 등) 지금 보고 있는 토픽.

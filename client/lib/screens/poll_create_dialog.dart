@@ -18,6 +18,7 @@ import '../widgets/room_picker_field.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'post_editor_dialog.dart' show fileIconFor;
 import 'schedule_message_dialog.dart' show ScheduleDateTimeField;
+import '../l10n/tr.dart';
 
 /// 투표를 만들 수 있는 방인지 — 비밀 대화에서는 못 만든다(서버가 400으로 막는다). 읽기 전용·보관된
 /// 토픽은 토픽 관리자만 글을 쓸 수 있으니 투표도 같다. 입력칸 옆 "투표" 단추와 보드의 단추가 같이 쓴다.
@@ -138,7 +139,7 @@ class PollCreatorState extends State<PollCreator> {
       }
     });
     if (hadFiles && !room.isBoard) {
-      showAppToast(context, '보드 토픽이 아니라서 붙인 파일을 뺐습니다.');
+      showAppToast(context, tr('보드 토픽이 아니라서 붙인 파일을 뺐습니다.'));
     }
   }
 
@@ -240,7 +241,12 @@ class PollCreatorState extends State<PollCreator> {
     final room = pollAttachmentsMaxCount - _files.length;
     final accepted = files.take(math.max(0, room)).toList();
     if (accepted.length < files.length) {
-      showAppToast(context, '첨부 파일은 $pollAttachmentsMaxCount개까지 올릴 수 있습니다.');
+      showAppToast(
+        context,
+        tr('첨부 파일은 {pollAttachmentsMaxCount}개까지 올릴 수 있습니다.', {
+          'pollAttachmentsMaxCount': pollAttachmentsMaxCount,
+        }),
+      );
     }
     if (accepted.isEmpty) return;
     final added = [
@@ -290,7 +296,13 @@ class PollCreatorState extends State<PollCreator> {
         } catch (e) {
           if (!mounted || next.removed) continue;
           setState(() => next.error = '$e');
-          showAppToast(context, "'${next.name}' 파일을 올리지 못했습니다: $e");
+          showAppToast(
+            context,
+            tr('\'{next.name}\' 파일을 올리지 못했습니다: {e}', {
+              'next.name': next.name,
+              'e': e,
+            }),
+          );
         }
       }
     } finally {
@@ -339,19 +351,16 @@ class PollCreatorState extends State<PollCreator> {
       final discard = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('작성 취소'),
-          content: const Text('작성 중인 투표를 버리고 닫을까요?'),
+          title: Text(tr('작성 취소')),
+          content: Text(tr('작성 중인 투표를 버리고 닫을까요?')),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('계속 쓰기'),
+              child: Text(tr('계속 쓰기')),
             ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text(
-                '닫기',
-                style: TextStyle(color: Colors.redAccent),
-              ),
+              child: Text(tr('닫기'), style: TextStyle(color: Colors.redAccent)),
             ),
           ],
         ),
@@ -395,7 +404,7 @@ class PollCreatorState extends State<PollCreator> {
                   Icon(Icons.poll_outlined, color: theme.colorScheme.primary),
                   const SizedBox(width: 10),
                   Text(
-                    '투표 만들기',
+                    tr('투표 만들기'),
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
@@ -405,7 +414,7 @@ class PollCreatorState extends State<PollCreator> {
                   IconButton(
                     key: const ValueKey('poll-create-close'),
                     icon: const Icon(Icons.close),
-                    tooltip: '닫기',
+                    tooltip: tr('닫기'),
                     onPressed: _submitting ? null : _requestClose,
                   ),
                 ],
@@ -427,7 +436,7 @@ class PollCreatorState extends State<PollCreator> {
                 children: [
                   TextButton(
                     onPressed: _submitting ? null : _requestClose,
-                    child: const Text('취소'),
+                    child: Text(tr('취소')),
                   ),
                   const SizedBox(width: 8),
                   _submitButton(),
@@ -445,10 +454,10 @@ class PollCreatorState extends State<PollCreator> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.close),
-          tooltip: '취소',
+          tooltip: tr('취소'),
           onPressed: _submitting ? null : _requestClose,
         ),
-        title: const Text('투표 만들기'),
+        title: Text(tr('투표 만들기')),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -510,7 +519,7 @@ class PollCreatorState extends State<PollCreator> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '투표는 만든 뒤에 수정할 수 없습니다. 마감하거나 삭제만 할 수 있어요.',
+                    tr('투표는 만든 뒤에 수정할 수 없습니다. 마감하거나 삭제만 할 수 있어요.'),
                     key: const ValueKey('poll-no-edit-notice'),
                     style: TextStyle(fontSize: 12, color: hint),
                   ),
@@ -534,7 +543,7 @@ class PollCreatorState extends State<PollCreator> {
               height: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : Text(uploading ? '업로드 중' : '만들기'),
+          : Text(uploading ? tr('업로드 중') : tr('만들기')),
     );
   }
 
@@ -546,7 +555,7 @@ class PollCreatorState extends State<PollCreator> {
     return [
       // 어느 대화방에 올라가는지 — 투표는 그 방의 모든 멤버가 함께 본다. 입력창의 "투표"로 열었으면
       // 그 방이 미리 채워져 있고(바꿀 수 있다), 메뉴의 "투표"로 열었으면 비어 있다.
-      const _SectionLabel('대화방'),
+      _SectionLabel(tr('대화방')),
       KeyedSubtree(
         key: const ValueKey('poll-room-field'),
         child: IgnorePointer(
@@ -560,7 +569,7 @@ class PollCreatorState extends State<PollCreator> {
         ),
       ),
       const SizedBox(height: 16),
-      const _SectionLabel('투표 제목'),
+      _SectionLabel(tr('투표 제목')),
       TextField(
         key: const ValueKey('poll-title-field'),
         controller: _title,
@@ -568,13 +577,16 @@ class PollCreatorState extends State<PollCreator> {
         autofocus: _room != null,
         maxLength: pollTitleMaxLength,
         textInputAction: TextInputAction.next,
-        decoration: const InputDecoration(
-          hintText: '투표 제목을 입력하세요',
+        decoration: InputDecoration(
+          hintText: tr('투표 제목을 입력하세요'),
           border: OutlineInputBorder(),
         ),
       ),
       const SizedBox(height: 8),
-      _SectionLabel('보기', trailing: '${_options.length}/$pollOptionsMaxCount'),
+      _SectionLabel(
+        tr('보기'),
+        trailing: '${_options.length}/$pollOptionsMaxCount',
+      ),
       for (var i = 0; i < _options.length; i++)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
@@ -599,7 +611,7 @@ class PollCreatorState extends State<PollCreator> {
                       ? TextInputAction.done
                       : TextInputAction.next,
                   decoration: InputDecoration(
-                    hintText: '보기 ${i + 1}',
+                    hintText: tr('보기 {p0}', {'p0': i + 1}),
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -618,7 +630,7 @@ class PollCreatorState extends State<PollCreator> {
                     ? IconButton(
                         key: ValueKey('poll-option-remove-$i'),
                         icon: const Icon(Icons.remove_circle_outline),
-                        tooltip: '보기 삭제',
+                        tooltip: tr('보기 삭제'),
                         visualDensity: VisualDensity.compact,
                         onPressed: _submitting ? null : () => _removeOption(i),
                       )
@@ -635,19 +647,21 @@ class PollCreatorState extends State<PollCreator> {
               ? null
               : _addOption,
           icon: const Icon(Icons.add, size: 18),
-          label: const Text('보기 추가'),
+          label: Text(tr('보기 추가')),
         ),
       ),
       if (filled < pollOptionsMinCount)
         Padding(
           padding: const EdgeInsets.only(bottom: 4),
           child: Text(
-            '보기를 $pollOptionsMinCount개 이상 입력하세요.',
+            tr('보기를 {pollOptionsMinCount}개 이상 입력하세요.', {
+              'pollOptionsMinCount': pollOptionsMinCount,
+            }),
             style: TextStyle(fontSize: 12, color: hint),
           ),
         ),
       const SizedBox(height: 8),
-      const _SectionLabel('마감 시각'),
+      _SectionLabel(tr('마감 시각')),
       ScheduleDateTimeField(
         value: _closesAt,
         enabled: !_submitting,
@@ -660,7 +674,9 @@ class PollCreatorState extends State<PollCreator> {
         padding: const EdgeInsets.only(top: 6),
         child: Text(
           check.closesAtError ??
-              '지금부터 최대 $scheduledMaxDaysAhead일 안에서 15분 단위로 고를 수 있습니다.',
+              tr('지금부터 최대 {scheduledMaxDaysAhead}일 안에서 15분 단위로 고를 수 있습니다.', {
+                'scheduledMaxDaysAhead': scheduledMaxDaysAhead,
+              }),
           key: const ValueKey('poll-closes-hint'),
           style: TextStyle(
             fontSize: 12,
@@ -669,12 +685,12 @@ class PollCreatorState extends State<PollCreator> {
         ),
       ),
       const SizedBox(height: 12),
-      const _SectionLabel('옵션'),
+      _SectionLabel(tr('옵션')),
       SwitchListTile(
         key: const ValueKey('poll-description-switch'),
         contentPadding: EdgeInsets.zero,
         dense: true,
-        title: const Text('자세한 설명'),
+        title: Text(tr('자세한 설명')),
         value: _showDescription,
         onChanged: _submitting
             ? null
@@ -690,8 +706,8 @@ class PollCreatorState extends State<PollCreator> {
             maxLength: pollDescriptionMaxLength,
             minLines: 3,
             maxLines: 6,
-            decoration: const InputDecoration(
-              hintText: '투표에 대한 자세한 설명을 입력하세요',
+            decoration: InputDecoration(
+              hintText: tr('투표에 대한 자세한 설명을 입력하세요'),
               border: OutlineInputBorder(),
             ),
           ),
@@ -700,8 +716,8 @@ class PollCreatorState extends State<PollCreator> {
         key: const ValueKey('poll-anonymous-switch'),
         contentPadding: EdgeInsets.zero,
         dense: true,
-        title: const Text('익명 투표'),
-        subtitle: const Text('누가 어떤 보기에 투표했는지 볼 수 없습니다.'),
+        title: Text(tr('익명 투표')),
+        subtitle: Text(tr('누가 어떤 보기에 투표했는지 볼 수 없습니다.')),
         value: _anonymous,
         onChanged: _submitting ? null : (v) => setState(() => _anonymous = v),
       ),
@@ -709,15 +725,15 @@ class PollCreatorState extends State<PollCreator> {
         key: const ValueKey('poll-multiple-switch'),
         contentPadding: EdgeInsets.zero,
         dense: true,
-        title: const Text('복수 선택'),
-        subtitle: const Text('보기를 여러 개 고를 수 있습니다.'),
+        title: Text(tr('복수 선택')),
+        subtitle: Text(tr('보기를 여러 개 고를 수 있습니다.')),
         value: _multiple,
         onChanged: _submitting ? null : (v) => setState(() => _multiple = v),
       ),
       if (_isBoard) ...[
         const SizedBox(height: 8),
         _SectionLabel(
-          '첨부 파일',
+          tr('첨부 파일'),
           trailing: '${_files.length}/$pollAttachmentsMaxCount',
         ),
         Align(
@@ -726,7 +742,7 @@ class PollCreatorState extends State<PollCreator> {
             key: const ValueKey('poll-attach'),
             onPressed: _submitting ? null : _pickFiles,
             icon: const Icon(Icons.attach_file, size: 18),
-            label: const Text('파일 첨부'),
+            label: Text(tr('파일 첨부')),
             style: OutlinedButton.styleFrom(
               visualDensity: VisualDensity.compact,
             ),
@@ -808,7 +824,7 @@ class _FileTile extends StatelessWidget {
       status = InkWell(
         onTap: onRetry,
         child: Text(
-          '올리지 못함 · 다시 시도',
+          tr('올리지 못함 · 다시 시도'),
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
@@ -890,7 +906,7 @@ class _FileTile extends StatelessWidget {
             top: -6,
             right: -6,
             child: Tooltip(
-              message: '첨부 빼기',
+              message: tr('첨부 빼기'),
               child: GestureDetector(
                 onTap: onRemove,
                 child: Container(

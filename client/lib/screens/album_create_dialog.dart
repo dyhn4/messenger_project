@@ -7,6 +7,7 @@ import '../models/room.dart';
 import '../services/session.dart';
 import '../widgets/room_picker_field.dart';
 import 'home_screen.dart' show wideBreakpoint;
+import '../l10n/tr.dart';
 
 /// 앨범을 만들 수 있는 방인지 — 비밀 대화는 서버가 파일 내용을 못 보므로 제외하고, 읽기 전용·보관된 토픽은 토픽 관리자만
 /// 쓸 수 있다(서버 albumRoomDenial/albumWriteDenial과 같은 규칙). 보드 뷰 토픽은 만들 수 있다(공유만 안 된다).
@@ -162,19 +163,18 @@ class _AlbumEditorState extends State<AlbumEditor> {
       final discard = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('작성 취소'),
-          content: Text(_isEdit ? '고친 내용을 버리고 닫을까요?' : '작성 중인 앨범을 버리고 닫을까요?'),
+          title: Text(tr('작성 취소')),
+          content: Text(
+            _isEdit ? tr('고친 내용을 버리고 닫을까요?') : tr('작성 중인 앨범을 버리고 닫을까요?'),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('계속 쓰기'),
+              child: Text(tr('계속 쓰기')),
             ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text(
-                '닫기',
-                style: TextStyle(color: Colors.redAccent),
-              ),
+              child: Text(tr('닫기'), style: TextStyle(color: Colors.redAccent)),
             ),
           ],
         ),
@@ -195,7 +195,7 @@ class _AlbumEditorState extends State<AlbumEditor> {
     );
   }
 
-  String get _heading => _isEdit ? '앨범 수정' : '앨범 생성';
+  String get _heading => _isEdit ? tr('앨범 수정') : tr('앨범 생성');
 
   Widget _submitButton() => FilledButton(
     key: const ValueKey('album-editor-submit'),
@@ -206,7 +206,7 @@ class _AlbumEditorState extends State<AlbumEditor> {
             height: 16,
             child: CircularProgressIndicator(strokeWidth: 2),
           )
-        : Text(_isEdit ? '저장' : '만들기'),
+        : Text(_isEdit ? tr('저장') : tr('만들기')),
   );
 
   Widget _buildDialog(BuildContext context) {
@@ -242,7 +242,7 @@ class _AlbumEditorState extends State<AlbumEditor> {
                   IconButton(
                     key: const ValueKey('album-editor-close'),
                     icon: const Icon(Icons.close),
-                    tooltip: '닫기',
+                    tooltip: tr('닫기'),
                     onPressed: _submitting ? null : _requestClose,
                   ),
                 ],
@@ -263,7 +263,7 @@ class _AlbumEditorState extends State<AlbumEditor> {
                 children: [
                   TextButton(
                     onPressed: _submitting ? null : _requestClose,
-                    child: const Text('취소'),
+                    child: Text(tr('취소')),
                   ),
                   const SizedBox(width: 8),
                   _submitButton(),
@@ -281,7 +281,7 @@ class _AlbumEditorState extends State<AlbumEditor> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.close),
-          tooltip: '취소',
+          tooltip: tr('취소'),
           onPressed: _submitting ? null : _requestClose,
         ),
         title: Text(_heading),
@@ -307,7 +307,7 @@ class _AlbumEditorState extends State<AlbumEditor> {
     final myId = widget.session.userId ?? '';
     return [
       if (!_isEdit) ...[
-        const _Label('대화방'),
+        _Label(tr('대화방')),
         if (widget.lockRoom && room != null)
           Container(
             key: const ValueKey('album-room-locked'),
@@ -342,21 +342,21 @@ class _AlbumEditorState extends State<AlbumEditor> {
           ),
         const SizedBox(height: 16),
       ],
-      const _Label('앨범 제목'),
+      _Label(tr('앨범 제목')),
       TextField(
         key: const ValueKey('album-title-field'),
         controller: _title,
         enabled: !_submitting,
         autofocus: _isEdit || widget.lockRoom,
         maxLength: albumTitleMaxLength,
-        decoration: const InputDecoration(
-          hintText: '앨범 제목을 입력하세요.',
+        decoration: InputDecoration(
+          hintText: tr('앨범 제목을 입력하세요.'),
           border: OutlineInputBorder(),
           isDense: true,
         ),
       ),
       const SizedBox(height: 12),
-      const _Label('설명 (선택)'),
+      _Label(tr('설명 (선택)')),
       TextField(
         key: const ValueKey('album-description-field'),
         controller: _description,
@@ -364,8 +364,8 @@ class _AlbumEditorState extends State<AlbumEditor> {
         maxLength: albumDescriptionMaxLength,
         minLines: 3,
         maxLines: 5,
-        decoration: const InputDecoration(
-          hintText: '앨범에 대한 설명을 입력하세요.',
+        decoration: InputDecoration(
+          hintText: tr('앨범에 대한 설명을 입력하세요.'),
           border: OutlineInputBorder(),
           isDense: true,
         ),
@@ -383,7 +383,10 @@ class _AlbumEditorState extends State<AlbumEditor> {
         Padding(
           padding: const EdgeInsets.only(top: 12),
           child: Text(
-            '앨범은 그 대화방의 멤버가 함께 보고 사진·영상을 올릴 수 있습니다. 한 번에 최대 $albumUploadMaxCount개까지 올릴 수 있어요.',
+            tr(
+              '앨범은 그 대화방의 멤버가 함께 보고 사진·영상을 올릴 수 있습니다. 한 번에 최대 {albumUploadMaxCount}개까지 올릴 수 있어요.',
+              {'albumUploadMaxCount': albumUploadMaxCount},
+            ),
             style: TextStyle(fontSize: 12, color: theme.hintColor),
           ),
         ),

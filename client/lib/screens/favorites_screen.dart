@@ -15,6 +15,7 @@ import '../widgets/poll_card.dart';
 import '../widgets/side_panel_header.dart';
 import '../widgets/user_avatar.dart';
 import 'member_profile_dialog.dart';
+import '../l10n/tr.dart';
 
 /// "즐겨찾기" 패널 — 내가 즐겨찾기한 메시지·파일·댓글·투표·대화방·멤버를 한곳에 모아 보고, 항목을 누르면 그 자리로
 /// 이동한다(메시지·댓글·투표는 그 대화방의 그 메시지로, 파일은 열기, 멤버는 프로필, 대화방은 그 방). 파일 패널과 같은
@@ -167,7 +168,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   void _openRoom(String? roomId, {String? messageId}) {
     final room = roomId == null ? null : widget.session.roomById(roomId);
     if (room == null) {
-      showAppToast(context, '대화방을 찾을 수 없습니다.');
+      showAppToast(context, tr('대화방을 찾을 수 없습니다.'));
       return;
     }
     openRoomFromPanel(context, widget.session, room, messageId: messageId);
@@ -187,7 +188,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     session: widget.session,
     message: item.message!,
     url: widget.session.resolveUrl(item.fileUrl ?? ''),
-    fileName: item.fileName ?? '파일',
+    fileName: item.fileName ?? tr('파일'),
   );
 
   void _open(FavoriteItem item) {
@@ -245,9 +246,9 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
           if (on == false) _favorites.removeItem(item);
           return;
       }
-      if (mounted) showAppToast(context, '즐겨찾기에서 뺐습니다.');
+      if (mounted) showAppToast(context, tr('즐겨찾기에서 뺐습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '즐겨찾기를 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('즐겨찾기를 바꾸지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -292,7 +293,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     key: const ValueKey('favorites-kind'),
     values: const [null, ...FavoriteKind.values],
     selected: _kind,
-    labelOf: (kind) => kind?.label ?? '전체',
+    labelOf: (kind) => kind?.label ?? tr('전체'),
     itemKey: (kind) => ValueKey('favorites-tab-${kind?.name ?? 'all'}'),
     onChanged: _selectKind,
   );
@@ -300,7 +301,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   /// "N개가 로딩되었습니다." 줄 — 비어 있어도 보이고, 직접 설정한 기간은 그 오른쪽에 보인다.
   Widget _countLine(BuildContext context, int count) => PanelResultLine(
     summary: Text(
-      '"$count"개가 로딩되었습니다.',
+      tr('"{count}"개가 로딩되었습니다.', {'count': count}),
       key: const ValueKey('panel-loaded-count'),
       style: Theme.of(context).textTheme.labelLarge,
     ),
@@ -329,7 +330,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             Text(feed.error!),
             TextButton(
               onPressed: () => _favorites.load(_kind, refresh: true),
-              child: const Text('다시 시도'),
+              child: Text(tr('다시 시도')),
             ),
           ],
         ),
@@ -346,7 +347,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             child: _message(
               context,
               _kind?.emptyHint ??
-                  '즐겨찾기한 항목이 없습니다.\n메시지·파일·댓글·투표·대화방·멤버를 즐겨찾기에 담아 두세요.',
+                  tr('즐겨찾기한 항목이 없습니다.\n메시지·파일·댓글·투표·대화방·멤버를 즐겨찾기에 담아 두세요.'),
               const ValueKey('favorites-empty'),
             ),
           ),
@@ -364,7 +365,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
           child: items.isEmpty && footer == 0
               ? _message(
                   context,
-                  '조건에 맞는 즐겨찾기가 없습니다.',
+                  tr('조건에 맞는 즐겨찾기가 없습니다.'),
                   const ValueKey('favorites-no-match'),
                 )
               : RefreshIndicator(
@@ -431,7 +432,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
           : TextButton(
               key: const ValueKey('favorites-more'),
               onPressed: () => _favorites.loadMore(_kind),
-              child: const Text('더 보기'),
+              child: Text(tr('더 보기')),
             ),
     ),
   );
@@ -444,10 +445,10 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SidePanelHeader(title: '즐겨찾기', onClose: widget.onClose),
+          SidePanelHeader(title: tr('즐겨찾기'), onClose: widget.onClose),
           const Divider(height: 1),
           PanelFilterBar(
-            searchHint: '즐겨찾기 검색',
+            searchHint: tr('즐겨찾기 검색'),
             onQueryChanged: (q) => setState(() => _query = q),
             session: widget.session,
             roomId: _roomId,
@@ -493,7 +494,7 @@ class _FavoriteTile extends StatelessWidget {
   Widget _star(BuildContext context) => IconButton(
     key: ValueKey('favorite-unstar-${item.key}'),
     icon: const Icon(Icons.star, color: Colors.amber),
-    tooltip: '즐겨찾기 해제',
+    tooltip: tr('즐겨찾기 해제'),
     visualDensity: VisualDensity.compact,
     onPressed: onUnfavorite,
   );
@@ -563,7 +564,7 @@ class _FavoriteTile extends StatelessWidget {
                 IconButton(
                   key: ValueKey('favorite-goto-${item.key}'),
                   icon: const Icon(Icons.chat_bubble_outline, size: 20),
-                  tooltip: '대화방으로 이동',
+                  tooltip: tr('대화방으로 이동'),
                   visualDensity: VisualDensity.compact,
                   onPressed: onOpenRoom,
                 ),
@@ -635,10 +636,13 @@ class _FavoriteTile extends StatelessWidget {
           body,
           origin.isEmpty
               ? formatDateTime(c.createdAt)
-              : '${formatDateTime(c.createdAt)} · 원문 $origin',
+              : tr('{p0} · 원문 {origin}', {
+                  'p0': formatDateTime(c.createdAt),
+                  'origin': origin,
+                }),
         );
       case FavoriteKind.file:
-        final name = item.fileName ?? '파일';
+        final name = item.fileName ?? tr('파일');
         final isImage = item.message?.type == MessageType.image;
         return (
           icon(
@@ -670,9 +674,9 @@ class _FavoriteTile extends StatelessWidget {
           ),
           room,
           switch (type) {
-            'topic' => '토픽',
-            'group' => '그룹채팅',
-            _ => item.isSelf ? '나와의 대화' : '1:1 대화',
+            'topic' => tr('토픽'),
+            'group' => tr('그룹채팅'),
+            _ => item.isSelf ? tr('나와의 대화') : tr('1:1 대화'),
           },
           null,
         );
@@ -685,7 +689,7 @@ class _FavoriteTile extends StatelessWidget {
           null,
         );
       case FavoriteKind.poll:
-        throw StateError('투표는 카드로 그린다.');
+        throw StateError(tr('투표는 카드로 그린다.'));
     }
   }
 
@@ -715,7 +719,7 @@ class _FavoriteTile extends StatelessWidget {
                 style: TextButton.styleFrom(
                   visualDensity: VisualDensity.compact,
                 ),
-                child: const Text('대화방으로 이동'),
+                child: Text(tr('대화방으로 이동')),
               ),
               _star(context),
             ],

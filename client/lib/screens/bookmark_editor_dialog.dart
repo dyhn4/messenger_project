@@ -10,6 +10,7 @@ import '../services/app_platform.dart';
 import '../services/bookmark_controller.dart';
 import '../services/session.dart';
 import '../widgets/bookmark_image.dart';
+import '../l10n/tr.dart';
 
 /// 북마크 추가/수정 창. PC는 대화상자, 모바일은 전체 화면([fullScreen]으로 바꿀 수 있다). 저장했으면 true.
 ///
@@ -202,7 +203,7 @@ class _BookmarkEditorState extends State<BookmarkEditor> {
       _fetching = false;
       final p = preview;
       if (p == null || p.isEmpty) {
-        if (manual) _fetchNote = '이 주소에서 가져올 수 있는 정보가 없어요. 직접 입력해 주세요.';
+        if (manual) _fetchNote = tr('이 주소에서 가져올 수 있는 정보가 없어요. 직접 입력해 주세요.');
         return;
       }
       if (manual) {
@@ -248,7 +249,7 @@ class _BookmarkEditorState extends State<BookmarkEditor> {
         _imageTouched = true;
       });
     } catch (e) {
-      if (mounted) setState(() => _error = '이미지를 올리지 못했습니다: $e');
+      if (mounted) setState(() => _error = tr('이미지를 올리지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -318,12 +319,12 @@ class _BookmarkEditorState extends State<BookmarkEditor> {
         const SizedBox(height: 4),
         Text(
           locked
-              ? '북마크 종류는 만든 뒤에 바꿀 수 없어요.'
+              ? tr('북마크 종류는 만든 뒤에 바꿀 수 없어요.')
               : !_canMakeTeam
-              ? '준회원은 개인 북마크만 만들 수 있어요.'
+              ? tr('준회원은 개인 북마크만 만들 수 있어요.')
               : _kind == BookmarkKind.team
-              ? '팀 멤버 모두에게 보여요.'
-              : '나에게만 보여요.',
+              ? tr('팀 멤버 모두에게 보여요.')
+              : tr('나에게만 보여요.'),
           style: Theme.of(
             context,
           ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
@@ -360,7 +361,7 @@ class _BookmarkEditorState extends State<BookmarkEditor> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.image_outlined, size: 18),
-                label: const Text('이미지 선택'),
+                label: Text(tr('이미지 선택')),
               ),
               if (image != null)
                 TextButton(
@@ -369,7 +370,7 @@ class _BookmarkEditorState extends State<BookmarkEditor> {
                     _image = null;
                     _imageTouched = true;
                   }),
-                  child: const Text('지우기'),
+                  child: Text(tr('지우기')),
                 ),
             ],
           ),
@@ -400,7 +401,7 @@ class _BookmarkEditorState extends State<BookmarkEditor> {
             errorText:
                 _urlController.text.trim().isNotEmpty &&
                     !_validUrl(_urlController.text)
-                ? 'http:// 또는 https://로 시작하는 주소를 입력하세요.'
+                ? tr('http:// 또는 https://로 시작하는 주소를 입력하세요.')
                 : null,
             suffixIcon: _fetching
                 ? const Padding(
@@ -422,7 +423,7 @@ class _BookmarkEditorState extends State<BookmarkEditor> {
                 ? null
                 : () => _fetchPreview(manual: true),
             icon: const Icon(Icons.travel_explore, size: 18),
-            label: const Text('링크 정보 가져오기'),
+            label: Text(tr('링크 정보 가져오기')),
           ),
         ),
         if (_fetchNote != null)
@@ -444,8 +445,8 @@ class _BookmarkEditorState extends State<BookmarkEditor> {
             _error = null;
             _titleTouched = text.isNotEmpty && text != _autoTitle;
           }),
-          decoration: const InputDecoration(
-            labelText: '제목',
+          decoration: InputDecoration(
+            labelText: tr('제목'),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -466,8 +467,8 @@ class _BookmarkEditorState extends State<BookmarkEditor> {
 
   @override
   Widget build(BuildContext context) {
-    final title = _isEdit ? '북마크 수정' : '북마크 추가';
-    final saveLabel = _isEdit ? '저장' : '추가';
+    final title = _isEdit ? tr('북마크 수정') : tr('북마크 추가');
+    final saveLabel = _isEdit ? tr('저장') : tr('추가');
     final saveButton = FilledButton(
       key: const ValueKey('bookmark-save'),
       onPressed: _canSave ? _save : null,
@@ -518,7 +519,7 @@ class _BookmarkEditorState extends State<BookmarkEditor> {
             children: [
               TextButton(
                 onPressed: _saving ? null : () => widget.onDone(false),
-                child: const Text('취소'),
+                child: Text(tr('취소')),
               ),
               const SizedBox(width: 8),
               saveButton,

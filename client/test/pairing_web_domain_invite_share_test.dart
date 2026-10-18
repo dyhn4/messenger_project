@@ -16,7 +16,7 @@ void main() {
   const web = 'https://xxx.iptime.org';
   const iphone = '아이폰은 앱 대신 웹 앱을 씁니다: $web 을 Safari로 열어 가입하고 홈 화면에 추가하세요.';
   const token = 'a1b2c3d4e5f60718293a4b5c';
-  const iphoneBlock = '$iphone\n$kIphoneSignupCaution';
+  final iphoneBlock = '$iphone\n$kIphoneSignupCaution';
 
   tearDown(() => rememberWebAppUrl(null));
 

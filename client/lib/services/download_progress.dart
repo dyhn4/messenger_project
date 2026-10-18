@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import '../l10n/tr.dart';
 
 /// 지금 내려받고 있는 것들.
 ///
@@ -37,7 +38,7 @@ class DownloadCancelled implements Exception {
   const DownloadCancelled();
 
   @override
-  String toString() => '다운로드를 취소했습니다.';
+  String toString() => tr('다운로드를 취소했습니다.');
 }
 
 /// 내려받기 하나(파일 여러 개를 차례로 받는 것도 하나).

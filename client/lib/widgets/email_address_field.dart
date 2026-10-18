@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
-const emailDomainCustomOption = '직접 입력';
-const emailDomainPresets = [
+final emailDomainCustomOption = tr('직접 입력');
+final emailDomainPresets = [
   'naver.com',
   'gmail.com',
   'daum.net',
@@ -55,8 +56,8 @@ class _EmailAddressFieldState extends State<EmailAddressField> {
         Expanded(
           child: TextField(
             controller: _local,
-            decoration: const InputDecoration(
-              hintText: '이메일 주소',
+            decoration: InputDecoration(
+              hintText: tr('이메일 주소'),
               border: OutlineInputBorder(),
             ),
             keyboardType: TextInputType.emailAddress,
@@ -70,8 +71,8 @@ class _EmailAddressFieldState extends State<EmailAddressField> {
           child: _domainChoice == emailDomainCustomOption
               ? TextField(
                   controller: _domainCustom,
-                  decoration: const InputDecoration(
-                    hintText: '도메인 입력',
+                  decoration: InputDecoration(
+                    hintText: tr('도메인 입력'),
                     border: OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.emailAddress,

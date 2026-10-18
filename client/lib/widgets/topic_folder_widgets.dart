@@ -8,6 +8,7 @@ import '../services/app_platform.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'unread_badge.dart';
+import '../l10n/tr.dart';
 
 // 토픽 목록의 개인 폴더 — 데스크톱 사이드바(desktop_home_screen.dart)와 모바일 토픽 탭
 // (room_list_screen.dart)이 같이 쓰는 묶기 규칙, 폴더 머리글, 이름 입력 창, 폴더 작업 도우미.
@@ -105,13 +106,19 @@ Future<TopicFolder?> createTopicFolderFlow(
   Session session, {
   Room? moveIn,
 }) async {
-  final name = await askTopicFolderName(context, title: '폴더 생성', action: '생성');
+  final name = await askTopicFolderName(
+    context,
+    title: tr('폴더 생성'),
+    action: tr('생성'),
+  );
   if (name == null || !context.mounted) return null;
   final TopicFolder folder;
   try {
     folder = await session.createTopicFolder(name);
   } catch (e) {
-    if (context.mounted) showAppToast(context, '폴더를 만들지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('폴더를 만들지 못했습니다: {e}', {'e': e}));
+    }
     return null;
   }
   if (moveIn != null) {
@@ -121,7 +128,7 @@ Future<TopicFolder?> createTopicFolderFlow(
       // 폴더는 이미 생겼다 — "못 만들었다"고 하면 다시 눌러 같은 폴더가 또 생기므로 옮기기만
       // 실패했다고 알린다.
       if (context.mounted) {
-        showAppToast(context, '폴더는 만들었지만 토픽을 옮기지 못했습니다: $e');
+        showAppToast(context, tr('폴더는 만들었지만 토픽을 옮기지 못했습니다: {e}', {'e': e}));
       }
     }
   }
@@ -135,15 +142,17 @@ Future<void> renameTopicFolderFlow(
 ) async {
   final name = await askTopicFolderName(
     context,
-    title: '폴더 이름 변경',
-    action: '변경',
+    title: tr('폴더 이름 변경'),
+    action: tr('변경'),
     initial: folder.name,
   );
   if (name == null || name == folder.name || !context.mounted) return;
   try {
     await session.renameTopicFolder(folder.id, name);
   } catch (e) {
-    if (context.mounted) showAppToast(context, '폴더 이름을 바꾸지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('폴더 이름을 바꾸지 못했습니다: {e}', {'e': e}));
+    }
   }
 }
 
@@ -156,16 +165,16 @@ Future<void> deleteTopicFolderFlow(
   final ok = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: Text("'${folder.name}' 폴더 삭제"),
-      content: const Text('폴더만 삭제되고 안의 토픽은 목록에 그대로 남습니다.'),
+      title: Text(tr('\'{folder.name}\' 폴더 삭제', {'folder.name': folder.name})),
+      content: Text(tr('폴더만 삭제되고 안의 토픽은 목록에 그대로 남습니다.')),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text('삭제'),
+          child: Text(tr('삭제')),
         ),
       ],
     ),
@@ -174,7 +183,9 @@ Future<void> deleteTopicFolderFlow(
   try {
     await session.deleteTopicFolder(folder.id);
   } catch (e) {
-    if (context.mounted) showAppToast(context, '폴더를 삭제하지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('폴더를 삭제하지 못했습니다: {e}', {'e': e}));
+    }
   }
 }
 
@@ -188,7 +199,9 @@ Future<void> toggleTopicFolderFlow(
   try {
     await session.setTopicFolderCollapsed(folder.id, !folder.collapsed);
   } catch (e) {
-    if (context.mounted) showAppToast(context, '폴더 상태를 저장하지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('폴더 상태를 저장하지 못했습니다: {e}', {'e': e}));
+    }
   }
 }
 
@@ -205,7 +218,9 @@ Future<void> moveTopicToFolderFlow(
     if (!context.mounted) return;
     showAppToast(
       context,
-      folderId == null ? '폴더에서 빼지 못했습니다: $e' : '폴더로 옮기지 못했습니다: $e',
+      folderId == null
+          ? tr('폴더에서 빼지 못했습니다: {e}', {'e': e})
+          : tr('폴더로 옮기지 못했습니다: {e}', {'e': e}),
     );
   }
 }
@@ -228,7 +243,9 @@ Future<void> reorderTopicFolderFlow(
   try {
     await session.reorderTopicFolders(ids);
   } catch (e) {
-    if (context.mounted) showAppToast(context, '폴더 순서를 바꾸지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('폴더 순서를 바꾸지 못했습니다: {e}', {'e': e}));
+    }
   }
 }
 
@@ -257,7 +274,7 @@ Future<String?> showTopicFolderPickerSheet(
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Text(
-                '폴더로 이동',
+                tr('폴더로 이동'),
                 style: Theme.of(sheetContext).textTheme.titleMedium,
               ),
             ),
@@ -284,7 +301,7 @@ Future<String?> showTopicFolderPickerSheet(
             if (folders.isNotEmpty) const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.create_new_folder_outlined),
-              title: const Text('새 폴더…'),
+              title: Text(tr('새 폴더…')),
               onTap: () =>
                   Navigator.of(sheetContext).pop(kNewTopicFolderChoice),
             ),
@@ -339,7 +356,7 @@ class _TopicFolderNameDialogState extends State<TopicFolderNameDialog> {
           controller: _controller,
           autofocus: true,
           maxLength: topicFolderNameMaxLength,
-          decoration: const InputDecoration(hintText: '폴더 이름'),
+          decoration: InputDecoration(hintText: tr('폴더 이름')),
           onChanged: (_) => setState(() {}),
           onSubmitted: (_) => _submit(),
         ),
@@ -347,7 +364,7 @@ class _TopicFolderNameDialogState extends State<TopicFolderNameDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: _name.isEmpty ? null : _submit,
@@ -545,13 +562,13 @@ class _TopicFolderHeaderState extends State<TopicFolderHeader> {
                         if (widget.onRename != null)
                           _menuItem(
                             Icons.edit_outlined,
-                            '이름 변경',
+                            tr('이름 변경'),
                             widget.onRename!,
                           ),
                         if (widget.onDelete != null)
                           _menuItem(
                             Icons.delete_outline,
-                            '폴더 삭제',
+                            tr('폴더 삭제'),
                             widget.onDelete!,
                           ),
                       ],
@@ -561,7 +578,7 @@ class _TopicFolderHeaderState extends State<TopicFolderHeader> {
                         child: IconButton(
                           padding: EdgeInsets.zero,
                           iconSize: mobile ? 20 : 16,
-                          tooltip: '폴더 메뉴',
+                          tooltip: tr('폴더 메뉴'),
                           icon: Icon(Icons.more_horiz, color: hint),
                           onPressed: _toggleMenu,
                         ),
@@ -750,21 +767,21 @@ class TopicStatusChip extends StatelessWidget {
 /// [room]에 붙일 상태 칩들(토픽이 아니거나 해당 없으면 빈 목록).
 List<Widget> topicStatusChips(Room room) => [
   if (room.isBoard)
-    const TopicStatusChip(
+    TopicStatusChip(
       key: ValueKey('topic-chip-board'),
-      label: '보드 뷰',
+      label: tr('보드 뷰'),
       icon: Icons.dashboard_outlined,
     ),
   if (room.type == RoomType.topic && room.readOnly)
-    const TopicStatusChip(
+    TopicStatusChip(
       key: ValueKey('topic-chip-read-only'),
-      label: '읽기 전용',
+      label: tr('읽기 전용'),
       icon: Icons.edit_off_outlined,
     ),
   if (room.type == RoomType.topic && room.isArchived)
-    const TopicStatusChip(
+    TopicStatusChip(
       key: ValueKey('topic-chip-archived'),
-      label: '보관됨',
+      label: tr('보관됨'),
       icon: Icons.inventory_2_outlined,
     ),
 ];

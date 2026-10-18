@@ -1,5 +1,7 @@
 // 웹메일의 데이터 모양 — 서버 webmail.js·webmailRules.js(계정·폴더·목록·읽기)를 옮긴 것과 답장·전달 쓰기 도우미.
 
+import '../l10n/tr.dart';
+
 /// 주소 하나 — 이름이 없을 수 있다.
 class MailAddress {
   final String name;
@@ -176,7 +178,7 @@ class MailSummary {
 
   factory MailSummary.fromJson(Map<String, dynamic> json) => MailSummary(
     uid: (json['uid'] as num).toInt(),
-    subject: json['subject'] as String? ?? '(제목 없음)',
+    subject: json['subject'] as String? ?? tr('(제목 없음)'),
     from: MailAddress.fromJson(json['from']),
     to: _addresses(json['to']),
     date: json['date'] == null
@@ -215,7 +217,7 @@ class MailAttachment {
 
   factory MailAttachment.fromJson(Map<String, dynamic> json) => MailAttachment(
     index: (json['index'] as num).toInt(),
-    fileName: json['fileName'] as String? ?? '첨부',
+    fileName: json['fileName'] as String? ?? tr('첨부'),
     contentType: json['contentType'] as String?,
     size: (json['size'] as num?)?.toInt() ?? 0,
   );
@@ -256,7 +258,7 @@ class MailMessage {
 
   factory MailMessage.fromJson(Map<String, dynamic> json) => MailMessage(
     uid: (json['uid'] as num).toInt(),
-    subject: json['subject'] as String? ?? '(제목 없음)',
+    subject: json['subject'] as String? ?? tr('(제목 없음)'),
     from: MailAddress.fromJson(json['from']),
     to: _addresses(json['to']),
     cc: _addresses(json['cc']),
@@ -309,7 +311,7 @@ String mailQuoteTime(DateTime? d) {
   if (d == null) return '';
   final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
   final m = d.minute.toString().padLeft(2, '0');
-  return '${d.year}. ${d.month}. ${d.day}. ${d.hour < 12 ? '오전' : '오후'} $h:$m';
+  return '${d.year}. ${d.month}. ${d.day}. ${d.hour < 12 ? tr('오전') : tr('오후')} $h:$m';
 }
 
 /// 제목 앞머리 — 이미 "Re:"/"Fwd:"(대소문자·"RE :"·"답장:" 등)가 있으면 또 붙이지 않는다.
@@ -328,7 +330,10 @@ MailDraft draftFrom(
   required String folder,
   required String myEmail,
 }) {
-  final quotedHeader = '${mailQuoteTime(m.date)}, ${m.from.wire} 님이 작성:';
+  final quotedHeader = tr('{p0}, {m.from.wire} 님이 작성:', {
+    'p0': mailQuoteTime(m.date),
+    'm.from.wire': m.from.wire,
+  });
   final quoted = m.text
       .trimRight()
       .split('\n')
@@ -336,12 +341,14 @@ MailDraft draftFrom(
       .join('\n');
   if (kind == MailReplyKind.forward) {
     final header = [
-      '---------- 전달된 메일 ----------',
-      '보낸 사람: ${m.from.wire}',
-      if (m.date != null) '날짜: ${mailQuoteTime(m.date)}',
-      '제목: ${m.subject}',
-      if (m.to.isNotEmpty) '받는 사람: ${m.to.map((a) => a.wire).join(', ')}',
-      if (m.cc.isNotEmpty) '참조: ${m.cc.map((a) => a.wire).join(', ')}',
+      tr('---------- 전달된 메일 ----------'),
+      tr('보낸 사람: {m.from.wire}', {'m.from.wire': m.from.wire}),
+      if (m.date != null) tr('날짜: {p0}', {'p0': mailQuoteTime(m.date)}),
+      tr('제목: {m.subject}', {'m.subject': m.subject}),
+      if (m.to.isNotEmpty)
+        tr('받는 사람: {p0}', {'p0': m.to.map((a) => a.wire).join(', ')}),
+      if (m.cc.isNotEmpty)
+        tr('참조: {p0}', {'p0': m.cc.map((a) => a.wire).join(', ')}),
     ].join('\n');
     return MailDraft(
       subject: prefixedSubject(m.subject, 'Fwd:'),
@@ -379,9 +386,11 @@ String mailListTime(DateTime? d, DateTime now) {
   if (d == null) return '';
   if (d.year == now.year && d.month == now.month && d.day == now.day) {
     final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
-    return '${d.hour < 12 ? '오전' : '오후'} $h:${d.minute.toString().padLeft(2, '0')}';
+    return '${d.hour < 12 ? tr('오전') : tr('오후')} $h:${d.minute.toString().padLeft(2, '0')}';
   }
-  if (d.year == now.year) return '${d.month}월 ${d.day}일';
+  if (d.year == now.year) {
+    return tr('{d.month}월 {d.day}일', {'d.month': d.month, 'd.day': d.day});
+  }
   return '${d.year}. ${d.month}. ${d.day}.';
 }
 
@@ -391,5 +400,5 @@ String mailSizeText(int bytes) {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
   }
   if (bytes >= 1024) return '${(bytes / 1024).round()}KB';
-  return '$bytes바이트';
+  return tr('{bytes}바이트', {'bytes': bytes});
 }

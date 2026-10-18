@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'email_code_input.dart';
+import '../l10n/tr.dart';
 
 /// "이메일 확인" — 메일이 켜진 서버에서 지금 이메일로 받은 코드를 넣어 본인 이메일인지 확인한다. 확인된 이메일이 있어야 비밀번호·
 /// 아이디를 메일로 찾는다(그 전에는 보안 질문으로 찾는다). 로그인한 뒤 확인하지 않았으면 한 번 띄우고(home_screen.dart),
@@ -47,7 +48,7 @@ class _EmailVerifyDialogState extends State<EmailVerifyDialog> {
 
   Future<void> _verify() async {
     if (!isEmailCodeShape(_code.text)) {
-      setState(() => _error = '메일로 받은 6자리 인증 코드를 넣으세요.');
+      setState(() => _error = tr('메일로 받은 6자리 인증 코드를 넣으세요.'));
       return;
     }
     setState(() {
@@ -57,7 +58,7 @@ class _EmailVerifyDialogState extends State<EmailVerifyDialog> {
     try {
       await widget.session.verifyEmail(_code.text.trim());
       if (!mounted) return;
-      showAppToast(context, '이메일을 확인했습니다.');
+      showAppToast(context, tr('이메일을 확인했습니다.'));
       Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -71,7 +72,7 @@ class _EmailVerifyDialogState extends State<EmailVerifyDialog> {
     final theme = Theme.of(context);
     final email = widget.session.email ?? '';
     return AlertDialog(
-      title: const Text('이메일 확인'),
+      title: Text(tr('이메일 확인')),
       content: SizedBox(
         width: 380,
         child: Column(
@@ -80,9 +81,12 @@ class _EmailVerifyDialogState extends State<EmailVerifyDialog> {
           children: [
             Text(
               widget.prompted
-                  ? '이 서버는 이제 비밀번호·아이디를 이메일로 찾습니다. 등록한 이메일이 본인 것인지 확인해 주세요 — 확인하지 '
-                        '않으면 지금처럼 보안 질문으로 찾습니다.'
-                  : '등록한 이메일로 인증 코드를 보내 본인 것인지 확인합니다. 확인하면 비밀번호·아이디를 이메일로 찾을 수 있습니다.',
+                  ? tr(
+                      '이 서버는 이제 비밀번호·아이디를 이메일로 찾습니다. 등록한 이메일이 본인 것인지 확인해 주세요 — 확인하지 않으면 지금처럼 보안 질문으로 찾습니다.',
+                    )
+                  : tr(
+                      '등록한 이메일로 인증 코드를 보내 본인 것인지 확인합니다. 확인하면 비밀번호·아이디를 이메일로 찾을 수 있습니다.',
+                    ),
               style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: 12),
@@ -105,7 +109,7 @@ class _EmailVerifyDialogState extends State<EmailVerifyDialog> {
             ),
             const SizedBox(height: 8),
             Text(
-              '주소가 틀렸다면 내 프로필 → 개인정보 설정 → 이메일 관리에서 바꾸세요.',
+              tr('주소가 틀렸다면 내 프로필 → 개인정보 설정 → 이메일 관리에서 바꾸세요.'),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
@@ -120,7 +124,7 @@ class _EmailVerifyDialogState extends State<EmailVerifyDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: Text(widget.prompted ? '나중에' : '닫기'),
+          child: Text(widget.prompted ? tr('나중에') : tr('닫기')),
         ),
         FilledButton(
           onPressed: _verifying ? null : _verify,
@@ -130,7 +134,7 @@ class _EmailVerifyDialogState extends State<EmailVerifyDialog> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('확인'),
+              : Text(tr('확인')),
         ),
       ],
     );

@@ -1,11 +1,13 @@
 // 로그인 보안 — 2단계 인증(OTP), 회사 계정 로그인(SSO — Google·Microsoft), 사내 디렉터리(LDAP). 서버는
 // server/src/loginSecurity.js·sso.js·admin.js(/admin/login-security).
 
+import '../l10n/tr.dart';
+
 /// 회사 계정 이름(화면 글자).
 String ssoProviderLabel(String provider) => switch (provider) {
   'google' => 'Google',
   'microsoft' => 'Microsoft',
-  'ldap' => '회사 디렉터리(Windows)',
+  'ldap' => tr('회사 디렉터리(Windows)'),
   _ => provider,
 };
 
@@ -64,7 +66,7 @@ class OtpChallenge implements Exception {
   });
 
   @override
-  String toString() => '2단계 인증이 필요합니다.';
+  String toString() => tr('2단계 인증이 필요합니다.');
 }
 
 /// 2단계 인증 켜기 1단계 — 인증 앱에 넣을 비밀 키와 QR 주소(otpauth://).
@@ -196,7 +198,7 @@ SsoPollResult ssoPollResultFromJson(Map<String, dynamic> j) =>
         email: j['email'] as String? ?? '',
         canEmail: j['canEmail'] == true,
       ),
-      _ => SsoFailed(j['error'] as String? ?? '회사 계정 로그인에 실패했습니다.'),
+      _ => SsoFailed(j['error'] as String? ?? tr('회사 계정 로그인에 실패했습니다.')),
     };
 
 /// 관리자 콘솔 "로그인 보안"이 받는 모양(GET /admin/login-security) — 비밀값은 정했는지([hasClientSecret] 등)만.

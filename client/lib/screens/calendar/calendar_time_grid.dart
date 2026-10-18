@@ -10,6 +10,7 @@ import '../../services/time_format.dart';
 import 'calendar_common.dart';
 import 'calendar_drag.dart';
 import 'calendar_month_view.dart' show CalendarEventBar;
+import '../../l10n/tr.dart';
 
 /// 주간(7일)·일간(1일) 시간표. 위쪽에 종일·여러 날 일정 칸, 아래에 0~24시 시간표가 있고 시간 일정은
 /// 시각에 맞춰 세로로 놓인다. 서로 시간이 겹치는 일정은 나란히 선다.
@@ -357,7 +358,7 @@ class _CalendarTimeGridState extends State<CalendarTimeGrid> {
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            '+${layout.hiddenCounts[c]}개',
+                            tr('+{p0}개', {'p0': layout.hiddenCounts[c]}),
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
@@ -587,8 +588,10 @@ class _CalendarTimeGridState extends State<CalendarTimeGrid> {
 
 /// "오전 9시" / "오후 1시" 시간표 눈금.
 String _hourLabel(int hour) {
-  if (hour == 12) return '오후 12시';
-  return hour < 12 ? '오전 $hour시' : '오후 ${hour - 12}시';
+  if (hour == 12) return tr('오후 12시');
+  return hour < 12
+      ? tr('오전 {hour}시', {'hour': hour})
+      : tr('오후 {p0}시', {'p0': hour - 12});
 }
 
 class _DayHeaderCell extends StatelessWidget {

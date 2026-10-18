@@ -4,6 +4,7 @@ import '../models/favorite.dart';
 import '../models/message.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
+import '../l10n/tr.dart';
 
 /// 메시지·댓글의 "즐겨찾기 / 즐겨찾기 해제" — message_actions.dart의 더보기 메뉴(PC)와 롱프레스 시트(모바일)가
 /// 같은 동작을 쓰도록 한곳에 모았다. 비밀 대화(서버가 내용을 몰라 목록에 못 보여 준다)·시스템 메시지·투표(카드 ⋯ 메뉴에
@@ -41,10 +42,12 @@ Future<void> toggleEntryFavorite(
       next,
     );
     if (context.mounted) {
-      showAppToast(context, next ? '즐겨찾기에 담았습니다.' : '즐겨찾기에서 뺐습니다.');
+      showAppToast(context, next ? tr('즐겨찾기에 담았습니다.') : tr('즐겨찾기에서 뺐습니다.'));
     }
   } catch (e) {
-    if (context.mounted) showAppToast(context, '즐겨찾기를 바꾸지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('즐겨찾기를 바꾸지 못했습니다: {e}', {'e': e}));
+    }
   }
 }
 
@@ -74,7 +77,7 @@ class MemberFavoriteStar extends StatelessWidget {
             on ? Icons.star : Icons.star_border,
             color: on ? Colors.amber : Theme.of(context).hintColor,
           ),
-          tooltip: on ? '즐겨찾기 해제' : '즐겨찾기',
+          tooltip: on ? tr('즐겨찾기 해제') : tr('즐겨찾기'),
           onPressed: () async {
             try {
               await session.favorites.setFavorite(
@@ -85,7 +88,7 @@ class MemberFavoriteStar extends StatelessWidget {
               );
             } catch (e) {
               if (context.mounted) {
-                showAppToast(context, '즐겨찾기를 바꾸지 못했습니다: $e');
+                showAppToast(context, tr('즐겨찾기를 바꾸지 못했습니다: {e}', {'e': e}));
               }
             }
           },

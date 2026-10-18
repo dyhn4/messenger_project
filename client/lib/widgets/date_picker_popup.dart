@@ -1,6 +1,15 @@
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
-const _weekdayHeaders = ['일', '월', '화', '수', '목', '금', '토'];
+final _weekdayHeaders = [
+  tr('일'),
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+];
 
 /// FloatingDatePill의 꺽쇠를 누르면 뜨는 미니 달력 — 날짜를 고르면 채팅 목록에서 그 날짜의
 /// 구분선으로 이동한다(chat_panel.dart의 _jumpToDate 참고). 일요일은 빨강, 토요일은 파랑으로
@@ -62,9 +71,9 @@ class _DatePickerPopupState extends State<DatePickerPopup> {
           children: [
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
-                    '선택 날짜로 이동',
+                    tr('선택 날짜로 이동'),
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -109,7 +118,7 @@ class _DatePickerPopupState extends State<DatePickerPopup> {
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   onPressed: _goToday,
-                  child: const Text('오늘', style: TextStyle(fontSize: 12)),
+                  child: Text(tr('오늘'), style: TextStyle(fontSize: 12)),
                 ),
               ],
             ),

@@ -7,6 +7,7 @@ import '../services/room_chat_controller.dart' show UploadedAttachment;
 import '../services/session.dart';
 import '../services/todo_api.dart';
 import 'app_toast.dart';
+import '../l10n/tr.dart';
 
 /// 메시지·댓글 더보기의 "할 일로 등록"을 보여줄 수 있는지 — 일반 텍스트·사진·파일만(시스템·투표·게시글·스티커·삭제된
 /// 글은 뺀다), 비밀 대화와 할 일을 만들 수 없는 방(읽기 전용·보관 토픽의 일반 멤버)도 뺀다.
@@ -77,6 +78,6 @@ Future<void> registerMessageAsTodo(
     api: api,
   );
   if (saved != null && context.mounted) {
-    showAppToast(context, '할 일로 등록했습니다.');
+    showAppToast(context, tr('할 일로 등록했습니다.'));
   }
 }

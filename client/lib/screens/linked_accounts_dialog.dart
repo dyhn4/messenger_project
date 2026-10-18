@@ -5,6 +5,7 @@ import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/sso_dialogs.dart';
+import '../l10n/tr.dart';
 
 /// 내 프로필 "연결된 회사 계정" — 연결한 Google·Microsoft 회사 계정(과 회사 디렉터리)을 보여 주고, 이 서버에서 쓸 수 있는 회사
 /// 계정을 연결하거나 끊는다(server/src/sso.js). 연결하면 로그인 화면의 회사 계정 단추로 들어올 수 있다.
@@ -49,7 +50,10 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
       provider: provider,
     );
     if (!ok || !mounted) return;
-    showAppToast(context, '${ssoProviderLabel(provider)} 계정을 연결했습니다.');
+    showAppToast(
+      context,
+      tr('{p0} 계정을 연결했습니다.', {'p0': ssoProviderLabel(provider)}),
+    );
     await _load();
   }
 
@@ -57,19 +61,21 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('연결 끊기'),
+        title: Text(tr('연결 끊기')),
         content: Text(
-          '${ssoProviderLabel(provider)} 계정 연결을 끊을까요? 그다음부터는 그 계정으로 로그인할 수 없습니다.',
+          tr('{p0} 계정 연결을 끊을까요? 그다음부터는 그 계정으로 로그인할 수 없습니다.', {
+            'p0': ssoProviderLabel(provider),
+          }),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('linked-unlink-confirm'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('끊기'),
+            child: Text(tr('끊기')),
           ),
         ],
       ),
@@ -78,7 +84,7 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
     setState(() => _busy = true);
     try {
       await widget.session.api!.unlinkIdentity(provider);
-      if (mounted) showAppToast(context, '연결을 끊었습니다.');
+      if (mounted) showAppToast(context, tr('연결을 끊었습니다.'));
       await _load();
     } catch (e) {
       if (mounted) showAppToast(context, e.toString());
@@ -104,7 +110,7 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
         if (!linked.contains(p)) p,
     ];
     return AlertDialog(
-      title: const Text('연결된 회사 계정'),
+      title: Text(tr('연결된 회사 계정')),
       content: SizedBox(
         width: 420,
         child: _error != null
@@ -118,7 +124,9 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
                 shrinkWrap: true,
                 children: [
                   Text(
-                    '회사 계정을 연결하면 로그인 화면의 회사 계정 단추로 들어올 수 있습니다(회사 계정의 2단계 인증이 그대로 적용됩니다).',
+                    tr(
+                      '회사 계정을 연결하면 로그인 화면의 회사 계정 단추로 들어올 수 있습니다(회사 계정의 2단계 인증이 그대로 적용됩니다).',
+                    ),
                     style: TextStyle(fontSize: 12, color: hint),
                   ),
                   const SizedBox(height: 8),
@@ -126,7 +134,7 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       child: Text(
-                        '연결된 회사 계정이 없습니다.',
+                        tr('연결된 회사 계정이 없습니다.'),
                         style: TextStyle(color: hint),
                       ),
                     ),
@@ -140,7 +148,9 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
                         [
                           ?i.email,
                           if (i.lastLoginAt != null)
-                            '마지막 로그인 ${formatPostDateTime(i.lastLoginAt!)}',
+                            tr('마지막 로그인 {p0}', {
+                              'p0': formatPostDateTime(i.lastLoginAt!),
+                            }),
                         ].join(' · '),
                       ),
                       trailing: i.provider == 'ldap'
@@ -150,7 +160,7 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
                               onPressed: _busy
                                   ? null
                                   : () => _unlink(i.provider),
-                              child: const Text('끊기'),
+                              child: Text(tr('끊기')),
                             ),
                     ),
                   for (final p in canLink)
@@ -160,7 +170,9 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
                         key: ValueKey('linked-link-$p'),
                         onPressed: _busy ? null : () => _link(p),
                         icon: const Icon(Icons.link),
-                        label: Text('${ssoProviderLabel(p)} 계정 연결'),
+                        label: Text(
+                          tr('{p0} 계정 연결', {'p0': ssoProviderLabel(p)}),
+                        ),
                       ),
                     ),
                 ],
@@ -169,7 +181,7 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );

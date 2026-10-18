@@ -28,6 +28,7 @@ import '../widgets/xfile_image.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'schedule_message_dialog.dart';
 import '../widgets/retrying_network_image.dart';
+import '../l10n/tr.dart';
 
 /// 게시글 작성·수정 창이 지금 몇 개 떠 있는지. 떠 있는 동안은 뒤에 깔린 채팅방·댓글 패널의 파일
 /// 드롭 영역을 꺼서(chat_panel.dart, message_thread_screen.dart) 편집기에 끌어다 놓은 파일이 뒤
@@ -318,7 +319,12 @@ class PostEditorState extends State<PostEditor> {
     final room = postAttachmentsMaxCount - _drafts.length;
     final accepted = files.take(math.max(0, room)).toList();
     if (accepted.length < files.length) {
-      showAppToast(context, '첨부 파일은 $postAttachmentsMaxCount개까지 올릴 수 있습니다.');
+      showAppToast(
+        context,
+        tr('첨부 파일은 {postAttachmentsMaxCount}개까지 올릴 수 있습니다.', {
+          'postAttachmentsMaxCount': postAttachmentsMaxCount,
+        }),
+      );
     }
     if (accepted.isEmpty) return;
     final added = [
@@ -379,7 +385,13 @@ class PostEditorState extends State<PostEditor> {
         } catch (e) {
           if (!mounted || next.removed || token != next.token) continue;
           setState(() => next.error = '$e');
-          showAppToast(context, "'${next.name}' 파일을 올리지 못했습니다: $e");
+          showAppToast(
+            context,
+            tr('\'{next.name}\' 파일을 올리지 못했습니다: {e}', {
+              'next.name': next.name,
+              'e': e,
+            }),
+          );
         }
       }
     } finally {
@@ -408,14 +420,18 @@ class PostEditorState extends State<PostEditor> {
   /// 서버(parsePostFields)·컨트롤러와 같은 규칙으로 먼저 걸러서 칸 아래에 바로 알려준다.
   bool _validate(String title, String body) {
     final titleError = title.isEmpty
-        ? '제목을 입력하세요.'
+        ? tr('제목을 입력하세요.')
         : postTextLength(title) > postTitleMaxLength
-        ? '제목은 $postTitleMaxLength자까지 쓸 수 있습니다.'
+        ? tr('제목은 {postTitleMaxLength}자까지 쓸 수 있습니다.', {
+            'postTitleMaxLength': postTitleMaxLength,
+          })
         : null;
     final bodyError = body.isEmpty
-        ? '내용을 입력하세요.'
+        ? tr('내용을 입력하세요.')
         : postTextLength(body) > postTextMaxLength
-        ? '내용은 $postTextMaxLength자까지 쓸 수 있습니다.'
+        ? tr('내용은 {postTextMaxLength}자까지 쓸 수 있습니다.', {
+            'postTextMaxLength': postTextMaxLength,
+          })
         : null;
     setState(() {
       _titleError = titleError;
@@ -438,7 +454,7 @@ class PostEditorState extends State<PostEditor> {
     final mentions = mentionsToSend(_body, widget.room, widget.session.userId);
     if (!_validate(title, body.text)) return;
     if (_hasFailedUpload) {
-      showAppToast(context, '올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.');
+      showAppToast(context, tr('올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.'));
       return;
     }
     setState(() => _submitting = true);
@@ -461,7 +477,7 @@ class PostEditorState extends State<PostEditor> {
         }
         if (!mounted) return;
         if (_hasFailedUpload) {
-          showAppToast(context, '올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.');
+          showAppToast(context, tr('올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.'));
           return;
         }
         await _controller.sendPost(
@@ -493,7 +509,7 @@ class PostEditorState extends State<PostEditor> {
   Future<void> _schedule() async {
     if (_submitting || _scheduling || !_canSchedule) return;
     if (_hasFailedUpload) {
-      showAppToast(context, '올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.');
+      showAppToast(context, tr('올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.'));
       return;
     }
     setState(() {
@@ -507,7 +523,7 @@ class PostEditorState extends State<PostEditor> {
       if (!mounted) return;
       setState(() => _waitingUploadsToSchedule = false);
       if (_hasFailedUpload) {
-        showAppToast(context, '올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.');
+        showAppToast(context, tr('올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.'));
         return;
       }
       final body = _body.formatted();
@@ -559,21 +575,18 @@ class PostEditorState extends State<PostEditor> {
       final discard = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: Text(_editing ? '수정 취소' : '작성 취소'),
+          title: Text(_editing ? tr('수정 취소') : tr('작성 취소')),
           content: Text(
-            _editing ? '고친 내용을 저장하지 않고 닫을까요?' : '작성 중인 게시글을 버리고 닫을까요?',
+            _editing ? tr('고친 내용을 저장하지 않고 닫을까요?') : tr('작성 중인 게시글을 버리고 닫을까요?'),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('계속 쓰기'),
+              child: Text(tr('계속 쓰기')),
             ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text(
-                '닫기',
-                style: TextStyle(color: Colors.redAccent),
-              ),
+              child: Text(tr('닫기'), style: TextStyle(color: Colors.redAccent)),
             ),
           ],
         ),
@@ -660,10 +673,10 @@ class PostEditorState extends State<PostEditor> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.close),
-          tooltip: '취소',
+          tooltip: tr('취소'),
           onPressed: _requestClose,
         ),
-        title: Text(_editing ? '게시글 수정' : '게시글 작성'),
+        title: Text(_editing ? tr('게시글 수정') : tr('게시글 작성')),
         // 예약 단추까지 들어가면 360px 휴대폰에서 제목이 잘려서, 아이콘 단추 둘을 조금 좁게 둔다.
         titleSpacing: _canSchedule ? 4 : null,
         actions: [
@@ -694,7 +707,7 @@ class PostEditorState extends State<PostEditor> {
                       : IconButton(
                           key: const ValueKey('post-schedule'),
                           icon: const Icon(Icons.schedule_send_outlined),
-                          tooltip: '예약',
+                          tooltip: tr('예약'),
                           onPressed: _submitting || _scheduling
                               ? null
                               : _schedule,
@@ -758,7 +771,7 @@ class PostEditorState extends State<PostEditor> {
           ),
           const SizedBox(width: 10),
           Text(
-            _editing ? '게시글 수정' : '게시글 작성',
+            _editing ? tr('게시글 수정') : tr('게시글 작성'),
             style: theme.textTheme.titleLarge?.copyWith(
               fontSize: 18,
               fontWeight: FontWeight.w700,
@@ -773,7 +786,7 @@ class PostEditorState extends State<PostEditor> {
           ),
           IconButton(
             icon: const Icon(Icons.close),
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             onPressed: _submitting ? null : _requestClose,
           ),
         ],
@@ -818,7 +831,7 @@ class PostEditorState extends State<PostEditor> {
             initialSelection: _categoryId,
             enabled: !_submitting,
             width: 200,
-            label: const Text('말머리'),
+            label: Text(tr('말머리')),
             inputDecorationTheme: const InputDecorationTheme(
               isDense: true,
               border: OutlineInputBorder(),
@@ -826,7 +839,7 @@ class PostEditorState extends State<PostEditor> {
             ),
             onSelected: (id) => setState(() => _categoryId = id),
             dropdownMenuEntries: [
-              const DropdownMenuEntry<String?>(value: null, label: '말머리 없음'),
+              DropdownMenuEntry<String?>(value: null, label: tr('말머리 없음')),
               for (final c in categories)
                 DropdownMenuEntry<String?>(
                   value: c.id,
@@ -840,7 +853,7 @@ class PostEditorState extends State<PostEditor> {
           ),
         if (_canMarkMustRead)
           Tooltip(
-            message: '멤버에게 "[필독]" 알림이 가고, 읽은 사람·안 읽은 사람을 확인할 수 있습니다.',
+            message: tr('멤버에게 "[필독]" 알림이 가고, 읽은 사람·안 읽은 사람을 확인할 수 있습니다.'),
             child: InkWell(
               borderRadius: BorderRadius.circular(8),
               onTap: _submitting
@@ -856,7 +869,7 @@ class PostEditorState extends State<PostEditor> {
                         ? null
                         : (v) => setState(() => _mustRead = v ?? false),
                   ),
-                  const Text('필독으로 올리기'),
+                  Text(tr('필독으로 올리기')),
                   const SizedBox(width: 8),
                 ],
               ),
@@ -878,7 +891,7 @@ class PostEditorState extends State<PostEditor> {
       onSubmitted: (_) => _bodyFocus.requestFocus(),
       style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
       decoration: InputDecoration(
-        hintText: '제목을 입력하세요',
+        hintText: tr('제목을 입력하세요'),
         errorText: _titleError,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
         contentPadding: const EdgeInsets.symmetric(
@@ -910,8 +923,8 @@ class PostEditorState extends State<PostEditor> {
         keyboardType: TextInputType.multiline,
         textAlignVertical: TextAlignVertical.top,
         style: const TextStyle(fontSize: 14.5, height: 1.5),
-        decoration: const InputDecoration(
-          hintText: '내용을 입력하세요',
+        decoration: InputDecoration(
+          hintText: tr('내용을 입력하세요'),
           border: InputBorder.none,
           contentPadding: EdgeInsets.all(14),
         ),
@@ -1022,7 +1035,7 @@ class PostEditorState extends State<PostEditor> {
         Row(
           children: [
             Text(
-              '첨부 파일',
+              tr('첨부 파일'),
               style: theme.textTheme.labelLarge?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
@@ -1037,7 +1050,7 @@ class PostEditorState extends State<PostEditor> {
               key: const ValueKey('post-attach'),
               onPressed: _submitting ? null : _pickFiles,
               icon: const Icon(Icons.attach_file, size: 18),
-              label: const Text('파일 첨부'),
+              label: Text(tr('파일 첨부')),
               style: OutlinedButton.styleFrom(
                 visualDensity: VisualDensity.compact,
               ),
@@ -1049,8 +1062,10 @@ class PostEditorState extends State<PostEditor> {
             padding: const EdgeInsets.only(top: 4),
             child: Text(
               AppPlatform.isWindows
-                  ? '사진·파일을 이 창에 끌어다 놓거나 붙여넣어도 첨부됩니다.'
-                  : '사진·파일을 $postAttachmentsMaxCount개까지 첨부할 수 있습니다.',
+                  ? tr('사진·파일을 이 창에 끌어다 놓거나 붙여넣어도 첨부됩니다.')
+                  : tr('사진·파일을 {postAttachmentsMaxCount}개까지 첨부할 수 있습니다.', {
+                      'postAttachmentsMaxCount': postAttachmentsMaxCount,
+                    }),
               style: TextStyle(fontSize: 12, color: hint),
             ),
           )
@@ -1101,7 +1116,9 @@ class PostEditorState extends State<PostEditor> {
         Row(
           children: [
             Text(
-              '첨부 파일 ${attachments.length}개',
+              tr('첨부 파일 {attachments.length}개', {
+                'attachments.length': attachments.length,
+              }),
               style: theme.textTheme.labelLarge?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
@@ -1109,7 +1126,7 @@ class PostEditorState extends State<PostEditor> {
             const SizedBox(width: 8),
             Flexible(
               child: Text(
-                '첨부 파일은 수정할 수 없습니다.',
+                tr('첨부 파일은 수정할 수 없습니다.'),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 12, color: theme.hintColor),
@@ -1132,7 +1149,7 @@ class PostEditorState extends State<PostEditor> {
                           attachment: a,
                         )
                       : _FileChip(
-                          name: a.fileName ?? '파일',
+                          name: a.fileName ?? tr('파일'),
                           status: Text(
                             a.fileSize == null
                                 ? ''
@@ -1162,7 +1179,9 @@ class PostEditorState extends State<PostEditor> {
           Expanded(
             child: AppPlatform.isWindows
                 ? Text(
-                    'Ctrl + Enter 로 ${_editing ? '저장' : '게시'} · Esc 로 닫기',
+                    tr('Ctrl + Enter 로 {p0} · Esc 로 닫기', {
+                      'p0': _editing ? tr('저장') : tr('게시'),
+                    }),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: hint),
@@ -1171,7 +1190,7 @@ class PostEditorState extends State<PostEditor> {
           ),
           TextButton(
             onPressed: _submitting || _scheduling ? null : _requestClose,
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           if (_canSchedule) ...[
             const SizedBox(width: 8),
@@ -1185,7 +1204,7 @@ class PostEditorState extends State<PostEditor> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.schedule_send_outlined, size: 18),
-              label: const Text('예약'),
+              label: Text(tr('예약')),
             ),
           ],
           const SizedBox(width: 8),
@@ -1199,12 +1218,15 @@ class PostEditorState extends State<PostEditor> {
     final String busyLabel;
     final pending = _drafts.where((d) => d.pending).length;
     if (_editing) {
-      busyLabel = '저장 중';
+      busyLabel = tr('저장 중');
     } else if (pending > 0) {
       final done = _drafts.length - pending;
-      busyLabel = '업로드 중 $done/${_drafts.length}';
+      busyLabel = tr('업로드 중 {done}/{_drafts.length}', {
+        'done': done,
+        '_drafts.length': _drafts.length,
+      });
     } else {
-      busyLabel = '게시 중';
+      busyLabel = tr('게시 중');
     }
     return FilledButton(
       key: const ValueKey('post-submit'),
@@ -1222,7 +1244,7 @@ class PostEditorState extends State<PostEditor> {
                 Text(busyLabel),
               ],
             )
-          : Text(_editing ? '저장' : '게시'),
+          : Text(_editing ? tr('저장') : tr('게시')),
     );
   }
 }
@@ -1273,7 +1295,7 @@ class _RemoveBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: '첨부 빼기',
+      message: tr('첨부 빼기'),
       child: GestureDetector(
         onTap: onTap,
         child: Container(
@@ -1344,13 +1366,13 @@ class _ImageDraftTile extends StatelessWidget {
                 child: InkWell(
                   borderRadius: BorderRadius.circular(10),
                   onTap: onRetry,
-                  child: const Column(
+                  child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(Icons.refresh, color: Colors.white, size: 20),
                       SizedBox(height: 2),
                       Text(
-                        '다시 시도',
+                        tr('다시 시도'),
                         style: TextStyle(color: Colors.white, fontSize: 11),
                       ),
                     ],
@@ -1376,7 +1398,7 @@ class _ImageDraftTile extends StatelessWidget {
                     Text(
                       uploading && progress != null
                           ? '${(progress * 100).round()}%'
-                          : '대기 중',
+                          : tr('대기 중'),
                       style: const TextStyle(color: Colors.white, fontSize: 9),
                     ),
                     const SizedBox(height: 2),
@@ -1426,7 +1448,7 @@ class _FileDraftTile extends StatelessWidget {
       status = InkWell(
         onTap: onRetry,
         child: Text(
-          '올리지 못함 · 다시 시도',
+          tr('올리지 못함 · 다시 시도'),
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
@@ -1452,7 +1474,7 @@ class _FileDraftTile extends StatelessWidget {
           Text(
             uploading && progress != null
                 ? '${(progress * 100).round()}%'
-                : '대기',
+                : tr('대기'),
             style: TextStyle(fontSize: 11, color: hint),
           ),
         ],

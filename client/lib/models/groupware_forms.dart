@@ -1,5 +1,7 @@
 // 그룹웨어 설문·업무일지 모델(서버 groupwareSurveys.js·groupwareReports.js, 규칙은 surveyRules.js·workReportRules.js).
 
+import '../l10n/tr.dart';
+
 DateTime? _time(Object? v) =>
     v is num ? DateTime.fromMillisecondsSinceEpoch(v.toInt()) : null;
 
@@ -18,8 +20,11 @@ enum SurveyQuestionKind {
   rating('rating', '별점');
 
   final String wire;
-  final String label;
-  const SurveyQuestionKind(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const SurveyQuestionKind(this.wire, this._labelKo);
 
   static SurveyQuestionKind fromWire(String? v) => SurveyQuestionKind.values
       .firstWhere((k) => k.wire == v, orElse: () => SurveyQuestionKind.text);
@@ -79,8 +84,11 @@ enum SurveyResultVisibility {
   all('all', '대상 모두');
 
   final String wire;
-  final String label;
-  const SurveyResultVisibility(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const SurveyResultVisibility(this.wire, this._labelKo);
 
   static SurveyResultVisibility fromWire(String? v) =>
       SurveyResultVisibility.values.firstWhere(
@@ -284,8 +292,11 @@ enum WorkReportKind {
   weekly('weekly', '주간');
 
   final String wire;
-  final String label;
-  const WorkReportKind(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const WorkReportKind(this.wire, this._labelKo);
 
   static WorkReportKind fromWire(String? v) =>
       v == 'weekly' ? WorkReportKind.weekly : WorkReportKind.daily;
@@ -491,7 +502,7 @@ String periodLabel(WorkReportKind kind, String start, String end) {
   if (kind == WorkReportKind.weekly) return '${md(start)}~${md(end)}';
   final p = start.split('-').map(int.tryParse).toList();
   if (p.length != 3 || p.contains(null)) return start;
-  const days = ['월', '화', '수', '목', '금', '토', '일'];
+  final days = [tr('월'), tr('화'), tr('수'), tr('목'), tr('금'), tr('토'), tr('일')];
   final d = DateTime(p[0]!, p[1]!, p[2]!);
   return '${md(start)}(${days[d.weekday - 1]})';
 }

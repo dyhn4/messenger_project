@@ -22,6 +22,7 @@ import 'mention_profile.dart';
 import 'message_actions.dart';
 import 'rich_text_format.dart';
 import 'self_destruct_countdown.dart';
+import '../l10n/tr.dart';
 
 final _timeFormat = DateFormat('a h:mm');
 
@@ -199,7 +200,7 @@ class MessageCommentsCard extends StatelessWidget {
               ),
               if (parentMessage.deleted)
                 Text(
-                  '삭제된 메시지입니다',
+                  tr('삭제된 메시지입니다'),
                   style: TextStyle(
                     fontStyle: FontStyle.italic,
                     color: Theme.of(context).hintColor,
@@ -207,7 +208,7 @@ class MessageCommentsCard extends StatelessWidget {
                 )
               else if (parentMessage.decryptFailed)
                 Text(
-                  '이 메시지는 복호화할 수 없습니다',
+                  tr('이 메시지는 복호화할 수 없습니다'),
                   style: TextStyle(
                     fontStyle: FontStyle.italic,
                     color: Theme.of(context).hintColor,
@@ -227,7 +228,10 @@ class MessageCommentsCard extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    '${parentMessage.comments.length}개 댓글 모두 보기',
+                    tr('{parentMessage.comments.length}개 댓글 모두 보기', {
+                      'parentMessage.comments.length':
+                          parentMessage.comments.length,
+                    }),
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.primary,
                       fontWeight: FontWeight.w600,
@@ -410,8 +414,8 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
         context,
         editDeleteWindowExpiredMessage(
           widget.session,
-          what: '댓글',
-          action: '수정',
+          what: tr('댓글'),
+          action: tr('수정'),
         ),
       );
       return;
@@ -453,7 +457,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('수정 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('수정 실패: {e}', {'e': e}))));
       }
     } finally {
       if (mounted) setState(() => _savingEdit = false);
@@ -486,8 +490,8 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
         context,
         editDeleteWindowExpiredMessage(
           widget.session,
-          what: '댓글',
-          action: '삭제',
+          what: tr('댓글'),
+          action: tr('삭제'),
         ),
       );
       return;
@@ -495,18 +499,20 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('댓글 삭제'),
+        title: Text(tr('댓글 삭제')),
         content: Text(
-          moderating ? '관리자 권한으로 다른 사람의 댓글을 삭제합니다. 계속할까요?' : '이 댓글을 삭제할까요?',
+          moderating
+              ? tr('관리자 권한으로 다른 사람의 댓글을 삭제합니다. 계속할까요?')
+              : tr('이 댓글을 삭제할까요?'),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+            child: Text(tr('삭제'), style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -518,7 +524,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('삭제 실패: $e')));
+      ).showSnackBar(SnackBar(content: Text(tr('삭제 실패: {e}', {'e': e}))));
     }
   }
 
@@ -586,7 +592,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           SelfDestructCountdown(expiresAt: widget.expiresAt!),
         if (comment.deleted)
           Text(
-            '삭제된 댓글입니다',
+            tr('삭제된 댓글입니다'),
             style: TextStyle(
               fontStyle: FontStyle.italic,
               color: Theme.of(context).hintColor,
@@ -603,7 +609,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
               ),
               const SizedBox(width: 4),
               Text(
-                '이 댓글은 복호화할 수 없습니다',
+                tr('이 댓글은 복호화할 수 없습니다'),
                 style: TextStyle(
                   fontStyle: FontStyle.italic,
                   fontSize: 13,
@@ -653,7 +659,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
             _buildAttachment(context),
           if (comment.editedAt != null)
             Text(
-              '(수정됨)',
+              tr('(수정됨)'),
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: Theme.of(context).hintColor,
               ),
@@ -684,7 +690,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
         return DownloadableFile(
           session: widget.session,
           url: widget.resolveUrl(comment.fileUrl ?? ''),
-          fileName: comment.fileName ?? '파일',
+          fileName: comment.fileName ?? tr('파일'),
           message: messageFromComment(comment),
           attachmentKey: comment.attachmentKey,
           attachmentNonce: comment.attachmentNonce,
@@ -717,7 +723,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
       children: [
         HoverToolbarButton(
           icon: Icons.more_vert,
-          tooltip: '더보기',
+          tooltip: tr('더보기'),
           onMenuOpenChanged: _setMenuOpen,
           menuChildren: [
             ...messageActionMenuItems(
@@ -732,13 +738,13 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
             if (canEdit && comment.type == MessageType.text)
               hoverMenuItem(
                 icon: Icons.edit,
-                label: '수정',
+                label: tr('수정'),
                 onPressed: _startEdit,
               ),
             if (canDelete)
               hoverMenuItem(
                 icon: Icons.delete,
-                label: '삭제',
+                label: tr('삭제'),
                 color: Colors.redAccent,
                 onPressed: () => _confirmDelete(context),
               ),
@@ -747,7 +753,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
               hoverMenuDivider(),
               hoverMenuItem(
                 icon: Icons.shield_outlined,
-                label: '삭제 (관리자)',
+                label: tr('삭제 (관리자)'),
                 color: Colors.redAccent,
                 onPressed: () => _confirmDelete(context),
               ),
@@ -925,7 +931,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           children: [
             TextButton(
               onPressed: _savingEdit ? null : _cancelEdit,
-              child: const Text('취소'),
+              child: Text(tr('취소')),
             ),
             const SizedBox(width: 4),
             FilledButton(
@@ -939,7 +945,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
                         color: Colors.white,
                       ),
                     )
-                  : const Text('저장'),
+                  : Text(tr('저장')),
             ),
           ],
         ),

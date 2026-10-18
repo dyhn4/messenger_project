@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../models/calendar.dart';
 import 'api_client.dart' show ApiException;
 import 'calendar_api.dart';
+import '../l10n/tr.dart';
 
 /// 캘린더 일정 제목 검색의 상태 — 입력(디바운스 300ms) → 서버 검색 → 결과 목록(최신순, "더 보기"로 이어 받기).
 /// [CalendarController.search]가 하나만 들고 있고, PC의 상단 검색창과 모바일의 검색 화면이 같이 쓴다.
@@ -94,7 +95,7 @@ class CalendarSearchController extends ChangeNotifier {
       if (epoch != _epoch) return;
       _items = const [];
       _nextBefore = null;
-      error = _message(e, '검색하지 못했습니다.');
+      error = _message(e, tr('검색하지 못했습니다.'));
       searched = true;
     } finally {
       if (epoch == _epoch) {
@@ -130,7 +131,7 @@ class CalendarSearchController extends ChangeNotifier {
       error = null;
     } catch (e) {
       if (epoch != _epoch) return;
-      error = _message(e, '검색하지 못했습니다.');
+      error = _message(e, tr('검색하지 못했습니다.'));
     } finally {
       if (epoch == _epoch) {
         loadingMore = false;
@@ -164,7 +165,7 @@ class CalendarSearchController extends ChangeNotifier {
   }
 
   String _message(Object e, String fallback) =>
-      e is ApiException ? e.message : fallback;
+      e is ApiException ? trServer(e.message) : fallback;
 
   @override
   void notifyListeners() {

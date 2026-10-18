@@ -9,6 +9,7 @@ import '../services/session.dart';
 import '../services/share_intake.dart';
 import '../widgets/room_picker_field.dart';
 import 'message_forward_screen.dart' show canForwardTo;
+import '../l10n/tr.dart';
 
 /// 다른 앱에서 "공유 → TangoTalk"으로 받은 글·파일을 보낼 대화방을 고르는 화면(안드로이드 — share_intake.dart). 글은 고쳐서 보낼 수
 /// 있고 파일은 뺄 수 있다. 사진은 한 말풍선에 모아, 그 밖의 파일은 따로 모아 보낸다(입력칸과 같다). 비밀 대화·보드 뷰·쓸 수 없는
@@ -76,7 +77,12 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
           ],
           onProgress: (index, sent, total) {
             if (mounted) {
-              setState(() => _progress = '올리는 중 ${index + 1}/${_files.length}');
+              setState(
+                () => _progress = tr('올리는 중 {p0}/{_files.length}', {
+                  'p0': index + 1,
+                  '_files.length': _files.length,
+                }),
+              );
             }
           },
         );
@@ -111,7 +117,7 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
           _progress = null;
           _error = e is ApiException
               ? e.message
-              : '보내지 못했습니다. 연결을 확인하고 다시 시도하세요. ($e)';
+              : tr('보내지 못했습니다. 연결을 확인하고 다시 시도하세요. ({e})', {'e': e});
         });
       }
     }
@@ -123,7 +129,7 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
       return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
     }
     if (bytes >= 1024) return '${(bytes / 1024).round()}KB';
-    return '$bytes바이트';
+    return tr('{bytes}바이트', {'bytes': bytes});
   }
 
   @override
@@ -131,7 +137,7 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('공유하기'),
+        title: Text(tr('공유하기')),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -144,7 +150,7 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
                       height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('보내기'),
+                  : Text(tr('보내기')),
             ),
           ),
         ],
@@ -165,14 +171,17 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
             minLines: 2,
             maxLines: 8,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              labelText: '메시지',
+            decoration: InputDecoration(
+              labelText: tr('메시지'),
               border: OutlineInputBorder(),
             ),
           ),
           if (_files.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text('파일 ${_files.length}개', style: theme.textTheme.titleSmall),
+            Text(
+              tr('파일 {_files.length}개', {'_files.length': _files.length}),
+              style: theme.textTheme.titleSmall,
+            ),
             for (final f in _files)
               ListTile(
                 key: ValueKey('share-file-${f.name}'),
@@ -194,7 +203,7 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
                 title: Text(f.name, overflow: TextOverflow.ellipsis),
                 subtitle: Text(_size(f.size)),
                 trailing: IconButton(
-                  tooltip: '빼기',
+                  tooltip: tr('빼기'),
                   icon: const Icon(Icons.close),
                   onPressed: _sending
                       ? null
@@ -218,7 +227,7 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
             ),
           const SizedBox(height: 8),
           Text(
-            '비밀 대화·보드 뷰 토픽·쓸 수 없는 토픽은 고를 수 없습니다.',
+            tr('비밀 대화·보드 뷰 토픽·쓸 수 없는 토픽은 고를 수 없습니다.'),
             style: TextStyle(fontSize: 12, color: theme.hintColor),
           ),
         ],

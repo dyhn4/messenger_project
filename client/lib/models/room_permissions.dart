@@ -2,6 +2,7 @@ import '../services/session.dart';
 import 'app_user.dart';
 import 'room.dart';
 import 'team.dart';
+import '../l10n/tr.dart';
 
 /// 토픽 권한 판정 — Room 모델이 Session을 직접 알지 않게 확장으로 따로 둔다(session.dart가
 /// 이 파일을 다시 내보내므로 session.dart만 import해도 쓸 수 있다). 서버 canManageTopic 등과
@@ -59,7 +60,7 @@ extension RoomPermissions on Room {
 }
 
 /// 준회원이 그룹채팅 정보를 바꾸려 할 때의 안내(서버 403 문구와 같다) — ⋮ 메뉴 툴팁·정보 변경 창이 같이 쓴다.
-const groupInfoGuestNotice = '준회원은 채팅 정보를 바꿀 수 없습니다.';
+final groupInfoGuestNotice = tr('준회원은 채팅 정보를 바꿀 수 없습니다.');
 
 /// 토픽 관리자로 지정할 수 있는 멤버인지 — 정회원 이상(준회원 제외, 서버 PUT /rooms/:id/admins와
 /// 같은 규칙).

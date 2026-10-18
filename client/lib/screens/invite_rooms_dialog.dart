@@ -10,6 +10,7 @@ import '../widgets/muted_scrollbar.dart';
 import '../widgets/private_topic_lock.dart';
 import '../widgets/user_avatar.dart';
 import 'invite_members_screen.dart' show showPickMembers;
+import '../l10n/tr.dart';
 
 /// "여러 토픽/그룹채팅에 초대" — 사이드바 토픽 '+' 메뉴(PC)가 연다. 잔디의 순서 그대로 세 단계다.
 /// ① "멤버 초대하기" 창에서 멤버를 고르고 "다음", ② "토픽/그룹채팅 선택" 창에서 초대할 대화방을 고르고
@@ -23,9 +24,9 @@ Future<void> showInviteToMultipleRooms(
     final users = await showPickMembers(
       context,
       session,
-      title: '멤버 초대하기',
+      title: tr('멤버 초대하기'),
       initialSelected: [for (final u in selected) u.id],
-      confirmLabel: '다음',
+      confirmLabel: tr('다음'),
       requireSelection: true,
     );
     if (users == null || users.isEmpty || !context.mounted) return;
@@ -158,7 +159,9 @@ class _InviteRoomsDialogState extends State<InviteRoomsDialog> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = e is ApiException ? e.message : '초대하지 못했습니다. 잠시 후 다시 시도하세요.';
+        _error = e is ApiException
+            ? e.message
+            : tr('초대하지 못했습니다. 잠시 후 다시 시도하세요.');
       });
     }
   }
@@ -168,7 +171,7 @@ class _InviteRoomsDialogState extends State<InviteRoomsDialog> {
     return PopScope(
       canPop: !_submitting,
       child: FloatingDialog(
-        title: '토픽/그룹채팅 선택',
+        title: tr('토픽/그룹채팅 선택'),
         maxWidth: 600,
         maxHeight: 740,
         child: ListenableBuilder(
@@ -197,9 +200,9 @@ class _InviteRoomsDialogState extends State<InviteRoomsDialog> {
           key: const ValueKey('invite-rooms-search'),
           controller: _search,
           onChanged: (_) => setState(() {}),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             isDense: true,
-            hintText: '토픽/그룹채팅 검색',
+            hintText: tr('토픽/그룹채팅 검색'),
             prefixIcon: Icon(Icons.search, size: 20),
             border: OutlineInputBorder(),
           ),
@@ -218,8 +221,8 @@ class _InviteRoomsDialogState extends State<InviteRoomsDialog> {
                       padding: const EdgeInsets.all(16),
                       child: Text(
                         all.isEmpty
-                            ? '초대할 수 있는 토픽이나 그룹채팅이 없습니다.'
-                            : '검색 결과가 없습니다.',
+                            ? tr('초대할 수 있는 토픽이나 그룹채팅이 없습니다.')
+                            : tr('검색 결과가 없습니다.'),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: theme.hintColor),
                       ),
@@ -231,9 +234,9 @@ class _InviteRoomsDialogState extends State<InviteRoomsDialog> {
                       controller: _scroll,
                       children: [
                         if (topics.isNotEmpty)
-                          ..._buildSection('topic', '토픽', topics),
+                          ..._buildSection('topic', tr('토픽'), topics),
                         if (groups.isNotEmpty)
-                          ..._buildSection('group', '그룹채팅', groups),
+                          ..._buildSection('group', tr('그룹채팅'), groups),
                       ],
                     ),
                   ),
@@ -257,7 +260,7 @@ class _InviteRoomsDialogState extends State<InviteRoomsDialog> {
                   ? null
                   : () =>
                         Navigator.of(context).pop(const InviteRoomsStep.back()),
-              child: const Text('이전'),
+              child: Text(tr('이전')),
             ),
             const SizedBox(width: 8),
             FilledButton(
@@ -269,7 +272,13 @@ class _InviteRoomsDialogState extends State<InviteRoomsDialog> {
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : Text(_picked.isEmpty ? '초대하기' : '초대하기 (${_picked.length})'),
+                  : Text(
+                      _picked.isEmpty
+                          ? tr('초대하기')
+                          : tr('초대하기 ({_picked.length})', {
+                              '_picked.length': _picked.length,
+                            }),
+                    ),
             ),
           ],
         ),
@@ -319,7 +328,7 @@ class _InviteRoomsDialogState extends State<InviteRoomsDialog> {
           ),
           const SizedBox(width: 8),
           Text(
-            '${users.length}명',
+            tr('{users.length}명', {'users.length': users.length}),
             key: const ValueKey('invite-rooms-members-count'),
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
           ),
@@ -388,9 +397,9 @@ class _InviteRoomsDialogState extends State<InviteRoomsDialog> {
     final selected = _picked.contains(room.id);
     final enabled = !full && !_submitting;
     final status = full
-        ? '이미 참여중'
+        ? tr('이미 참여중')
         : already > 0
-        ? '$already명 참여중'
+        ? tr('{already}명 참여중', {'already': already})
         : null;
     return Material(
       type: MaterialType.transparency,
@@ -448,7 +457,7 @@ class _InviteRoomsDialogState extends State<InviteRoomsDialog> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            '보관됨',
+                            tr('보관됨'),
                             style: TextStyle(
                               fontSize: 11,
                               color: theme.hintColor,
@@ -465,7 +474,9 @@ class _InviteRoomsDialogState extends State<InviteRoomsDialog> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      '${room.members.length}명',
+                      tr('{room.members.length}명', {
+                        'room.members.length': room.members.length,
+                      }),
                       style: TextStyle(fontSize: 12, color: theme.hintColor),
                     ),
                     if (status != null)

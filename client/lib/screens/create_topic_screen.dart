@@ -9,6 +9,7 @@ import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'invite_members_screen.dart';
+import '../l10n/tr.dart';
 
 /// 새로운 토픽 생성하기 — 넓은 화면(PC)은 떠 있는 창, 좁은 화면(모바일)은 전체 화면으로 띄우고,
 /// 만들어지면 [onOpenRoom]으로 그 토픽을 연 뒤 바로 "멤버 초대하기"를 띄운다(만든 사람만 멤버라서).
@@ -110,7 +111,7 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
     if (_submitting) return;
     final name = _name.text.trim();
     if (name.isEmpty) {
-      setState(() => _nameError = '토픽 이름을 입력하세요.');
+      setState(() => _nameError = tr('토픽 이름을 입력하세요.'));
       _nameFocus.requestFocus();
       return;
     }
@@ -140,7 +141,7 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
         // 서버가 준 안내(권한 없음 등)는 그대로, 그 밖의 오류는 풀어서 보여준다.
         _error = e is ApiException
             ? e.message
-            : '토픽을 만들지 못했습니다. 잠시 후 다시 시도하세요.';
+            : tr('토픽을 만들지 못했습니다. 잠시 후 다시 시도하세요.');
       });
     }
   }
@@ -159,7 +160,7 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
       children: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         const SizedBox(width: 8),
         FilledButton(
@@ -171,14 +172,14 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('생성'),
+              : Text(tr('생성')),
         ),
       ],
     );
 
     if (widget.asDialog) {
       return FloatingDialog(
-        title: '새로운 토픽 생성하기',
+        title: tr('새로운 토픽 생성하기'),
         maxWidth: 600,
         maxHeight: 820,
         child: Column(
@@ -203,7 +204,7 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('새로운 토픽 생성하기')),
+      appBar: AppBar(title: Text(tr('새로운 토픽 생성하기'))),
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -232,7 +233,7 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _Label('이름'),
+        _Label(tr('이름')),
         TextField(
           key: const ValueKey('create-topic-name'),
           controller: _name,
@@ -241,7 +242,7 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
           maxLength: topicNameMaxLength,
           textInputAction: TextInputAction.done,
           decoration: InputDecoration(
-            hintText: '토픽 이름을 입력하세요',
+            hintText: tr('토픽 이름을 입력하세요'),
             border: const OutlineInputBorder(),
             isDense: true,
             errorText: _nameError,
@@ -252,7 +253,7 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
           onSubmitted: (_) => _submit(),
         ),
         const SizedBox(height: 8),
-        const _Label('보기 방식'),
+        _Label(tr('보기 방식')),
         LayoutBuilder(
           builder: (context, constraints) {
             final cards = [
@@ -294,11 +295,11 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
           children: [
             Icon(Icons.info_outline, size: 14, color: theme.hintColor),
             const SizedBox(width: 4),
-            Expanded(child: Text('보기 방식은 만든 뒤에 바꿀 수 없습니다.', style: small)),
+            Expanded(child: Text(tr('보기 방식은 만든 뒤에 바꿀 수 없습니다.'), style: small)),
           ],
         ),
         const SizedBox(height: 18),
-        const _Label('공개 여부'),
+        _Label(tr('공개 여부')),
         RadioGroup<bool>(
           groupValue: _isPublic,
           onChanged: (v) {
@@ -319,21 +320,21 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
           ),
         ),
         const SizedBox(height: 14),
-        const _Label('토픽 설명', optional: true),
+        _Label(tr('토픽 설명'), optional: true),
         TextField(
           key: const ValueKey('create-topic-description'),
           controller: _description,
           maxLength: topicDescriptionMaxLength,
           minLines: 2,
           maxLines: 4,
-          decoration: const InputDecoration(
-            hintText: '어떤 이야기를 나누는 토픽인지 적어 주세요',
+          decoration: InputDecoration(
+            hintText: tr('어떤 이야기를 나누는 토픽인지 적어 주세요'),
             border: OutlineInputBorder(),
             isDense: true,
           ),
         ),
         const SizedBox(height: 10),
-        const _Label('폴더 선택', optional: true),
+        _Label(tr('폴더 선택'), optional: true),
         // 폴더가 다른 기기에서 생기거나 지워지면 바로 따라가도록 이 칸만 세션 변경을 듣는다.
         ListenableBuilder(
           listenable: widget.session,
@@ -347,11 +348,11 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
           onChanged: _isPublic && !_submitting
               ? (v) => setState(() => _autoInvite = v)
               : null,
-          title: const Text('정회원 자동 초대'),
+          title: Text(tr('정회원 자동 초대')),
           subtitle: Text(
             _isPublic
-                ? '새로 팀에 들어오는 정회원을 이 토픽에 자동으로 초대합니다'
-                : '비공개 토픽은 자동 초대를 쓸 수 없습니다',
+                ? tr('새로 팀에 들어오는 정회원을 이 토픽에 자동으로 초대합니다')
+                : tr('비공개 토픽은 자동 초대를 쓸 수 없습니다'),
             style: small,
           ),
         ),
@@ -360,8 +361,8 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
           contentPadding: EdgeInsets.zero,
           value: _readOnly,
           onChanged: _submitting ? null : (v) => setState(() => _readOnly = v),
-          title: const Text('읽기 전용 설정'),
-          subtitle: Text('토픽 관리자만 글을 쓸 수 있고, 다른 멤버는 읽기만 합니다', style: small),
+          title: Text(tr('읽기 전용 설정')),
+          subtitle: Text(tr('토픽 관리자만 글을 쓸 수 있고, 다른 멤버는 읽기만 합니다'), style: small),
         ),
         if (_error != null) ...[
           const SizedBox(height: 8),
@@ -418,7 +419,7 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
             color: theme.colorScheme.onSurface,
           ),
           items: [
-            const DropdownMenuItem(value: _noFolder, child: Text('폴더 없음')),
+            DropdownMenuItem(value: _noFolder, child: Text(tr('폴더 없음'))),
             for (final f in folders)
               DropdownMenuItem(
                 value: f.id,
@@ -461,13 +462,13 @@ class TopicVisibilityTile extends StatelessWidget {
       value: isPublic,
       title: Row(
         children: [
-          Text(isPublic ? '공개' : '비공개'),
+          Text(isPublic ? tr('공개') : tr('비공개')),
           const SizedBox(width: 6),
           Icon(isPublic ? Icons.public : Icons.lock_outline, size: 16),
         ],
       ),
       subtitle: Text(
-        isPublic ? '정회원이면 누구나 찾아서 참여할 수 있어요' : '초대받은 멤버만 참여할 수 있어요',
+        isPublic ? tr('정회원이면 누구나 찾아서 참여할 수 있어요') : tr('초대받은 멤버만 참여할 수 있어요'),
         style: TextStyle(fontSize: 12, color: hint),
       ),
     );
@@ -492,7 +493,7 @@ class _Label extends StatelessWidget {
           ),
           if (optional)
             TextSpan(
-              text: '  (선택)',
+              text: tr('  (선택)'),
               style: TextStyle(
                 fontSize: 12,
                 color: Theme.of(context).hintColor,

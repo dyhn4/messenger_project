@@ -6,6 +6,7 @@ import 'package:cryptography/cryptography.dart';
 
 import '../models/login_security.dart';
 import 'api_client.dart';
+import '../l10n/tr.dart';
 
 /// 회사 계정 로그인(SSO — Google·Microsoft) 한 번의 흐름 — 서버에 시작을 청해 받은 주소를 브라우저로 열고, 브라우저에서 로그인이
 /// 끝날 때까지 2초마다 결과를 묻는다(server/src/sso.js). PC·안드로이드·아이폰·웹이 모두 같은 길이다 — 앱으로 돌아오는 주소(딥링크)에
@@ -53,12 +54,12 @@ class SsoFlow {
     _state = started.state;
     _verifier = verifier;
     if (!await openUrl(Uri.parse(started.authUrl))) {
-      return const SsoFailed('브라우저를 열지 못했습니다.');
+      return SsoFailed(tr('브라우저를 열지 못했습니다.'));
     }
     final deadline = DateTime.now().add(timeout);
     while (!_cancelled) {
       if (DateTime.now().isAfter(deadline)) {
-        return const SsoFailed('회사 계정 로그인 시간이 지났습니다. 다시 해 보세요.');
+        return SsoFailed(tr('회사 계정 로그인 시간이 지났습니다. 다시 해 보세요.'));
       }
       await Future<void>.delayed(pollInterval);
       if (_cancelled) break;
@@ -71,7 +72,7 @@ class SsoFlow {
       }
       if (result is! SsoPending) return result;
     }
-    return const SsoFailed('회사 계정 로그인을 취소했습니다.');
+    return SsoFailed(tr('회사 계정 로그인을 취소했습니다.'));
   }
 
   /// 같은 이메일의 계정에 잇는 확인 코드를 그 이메일로 보낸다.

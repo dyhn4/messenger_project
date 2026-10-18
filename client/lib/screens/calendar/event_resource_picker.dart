@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/groupware_resources.dart';
 import '../../services/api_client.dart' show ApiException;
 import '../../services/groupware_api.dart';
+import '../../l10n/tr.dart';
 
 /// 일정 편집 창의 "회의실·자원" 고르기 — 그룹웨어 자원 목록을 그 일정 시간의 빈 여부와 함께 보여 준다(잡힌 자원은 누가 잡았는지와 함께
 /// 막아 둠). [from]·[to]는 예약이 잡을 시간(ms — 종일이면 그날 자정부터), [eventId]는 고치는 일정(자기 예약은 빈 것으로 본다).
@@ -71,7 +72,7 @@ class _ResourcePickerDialogState extends State<_ResourcePickerDialog> {
     } catch (e) {
       if (mounted) {
         setState(
-          () => _error = e is ApiException ? e.message : '자원 목록을 받지 못했습니다.',
+          () => _error = e is ApiException ? trServer(e.message) : tr('자원 목록을 받지 못했습니다.'),
         );
       }
     }
@@ -87,7 +88,7 @@ class _ResourcePickerDialogState extends State<_ResourcePickerDialog> {
     final resources = _resources;
     final hint = Theme.of(context).hintColor;
     return AlertDialog(
-      title: const Text('회의실·자원'),
+      title: Text(tr('회의실·자원')),
       content: SizedBox(
         width: 400,
         child: resources == null
@@ -101,7 +102,7 @@ class _ResourcePickerDialogState extends State<_ResourcePickerDialog> {
               )
             : resources.isEmpty
             ? Text(
-                '예약할 수 있는 회의실·자원이 없습니다. 그룹웨어 관리자가 관리 탭에서 더할 수 있습니다.',
+                tr('예약할 수 있는 회의실·자원이 없습니다. 그룹웨어 관리자가 관리 탭에서 더할 수 있습니다.'),
                 style: TextStyle(color: hint),
               )
             : ListView(
@@ -120,11 +121,15 @@ class _ResourcePickerDialogState extends State<_ResourcePickerDialog> {
                       title: Text(r.name),
                       subtitle: Text(
                         r.busy != null
-                            ? '예약됨 ${_clock(r.busy!.start)}~${_clock(r.busy!.end)} ${r.busy!.userName}'
+                            ? tr('예약됨 {p0}~{p1} {p2}', {
+                                'p0': _clock(r.busy!.start),
+                                'p1': _clock(r.busy!.end),
+                                'p2': r.busy!.userName,
+                              })
                             : [
                                 r.kindLabel,
                                 if (r.detail.isNotEmpty) r.detail,
-                                '비어 있음',
+                                tr('비어 있음'),
                               ].join(' · '),
                       ),
                       onTap: r.busy == null
@@ -137,7 +142,7 @@ class _ResourcePickerDialogState extends State<_ResourcePickerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
       ],
     );

@@ -4,6 +4,8 @@
 // 여부, 운영자 여부, 소속 팀 목록)은 운영 화면에서만 의미가 있고, 평소 화면에 흘러들어가면
 // "누가 운영자인지"까지 모두에게 노출되기 때문이다.
 
+import '../l10n/tr.dart';
+
 /// 회원 관리 탭의 한 줄.
 class AdminUser {
   final String id;
@@ -83,14 +85,14 @@ class AdminUser {
 
   /// 목록에서 상태를 한 줄로 — "정회원 · 정지됨 · 서버 운영자"처럼.
   String get statusLabel {
-    if (deleted) return '탈퇴';
+    if (deleted) return tr('탈퇴');
     final parts = [
       accountRoleLabel(role),
-      if (suspended) '정지됨',
-      if (isServerAdmin) '서버 운영자',
-      if (authSource == 'ldap') '회사 디렉터리',
-      if (authSource == 'sso') '회사 계정',
-      if (otpEnabled) '2단계 인증',
+      if (suspended) tr('정지됨'),
+      if (isServerAdmin) tr('서버 운영자'),
+      if (authSource == 'ldap') tr('회사 디렉터리'),
+      if (authSource == 'sso') tr('회사 계정'),
+      if (otpEnabled) tr('2단계 인증'),
     ];
     return parts.join(' · ');
   }
@@ -210,46 +212,46 @@ class AuditLog {
 /// 감사 로그 행위 코드 → 한국어 이름. 모르는 값이면 코드를 그대로 보여준다(서버가 새 행위를
 /// 먼저 배포해도 화면이 깨지지 않도록).
 String auditActionLabel(String action) => switch (action) {
-  'message.delete' => '메시지 삭제',
-  'comment.delete' => '댓글 삭제',
-  'team.member.role' => '팀원 등급·직책 변경',
-  'team.member.add' => '팀원 추가',
-  'team.member.remove' => '팀원 제외',
-  'team.settings' => '팀 설정 변경',
-  'team.create' => '팀 생성',
-  'team.delete' => '팀 삭제',
-  'team.transferOwner' => '소유권 이양',
-  'topic.delete' => '토픽 삭제',
-  'room.convert' => '그룹채팅 토픽 전환',
-  'user.suspend' => '계정 정지',
-  'user.unsuspend' => '정지 해제',
-  'user.logoutAll' => '강제 로그아웃',
+  'message.delete' => tr('메시지 삭제'),
+  'comment.delete' => tr('댓글 삭제'),
+  'team.member.role' => tr('팀원 등급·직책 변경'),
+  'team.member.add' => tr('팀원 추가'),
+  'team.member.remove' => tr('팀원 제외'),
+  'team.settings' => tr('팀 설정 변경'),
+  'team.create' => tr('팀 생성'),
+  'team.delete' => tr('팀 삭제'),
+  'team.transferOwner' => tr('소유권 이양'),
+  'topic.delete' => tr('토픽 삭제'),
+  'room.convert' => tr('그룹채팅 토픽 전환'),
+  'user.suspend' => tr('계정 정지'),
+  'user.unsuspend' => tr('정지 해제'),
+  'user.logoutAll' => tr('강제 로그아웃'),
   // 비밀번호 초기화 대행 기능은 없앴지만(운영자가 남의 평문 비밀번호를 정하는 건 계정을
   // 완전히 탈취할 수 있는 힘이라 위험하다고 판단), 예전에 남은 감사 로그 기록은 계속
   // 사람이 읽을 수 있는 이름으로 보여준다.
-  'user.resetPassword' => '비밀번호 초기화(폐지된 기능)',
-  'user.role' => '계정 등급 변경',
-  'user.org' => '부서·직책 변경',
-  'user.serverAdmin' => '서버 운영자 지정·해제',
-  'server.settings' => '서버 설정 변경',
-  'server.backup' => '백업 설정·실행',
-  'invite.create' => '초대 링크 생성',
-  'invite.revoke' => '초대 링크 폐기',
-  'teamInvite.create' => '팀 초대 링크 생성',
-  'teamInvite.revoke' => '팀 초대 링크 폐기',
-  'invite.email' => '초대 메일 보냄',
-  'teamInvite.email' => '팀 초대 메일 보냄',
-  'groupware.hireDate' => '입사일 변경',
-  'groupware.leaveAdjust' => '연차 조정',
-  'groupware.settings' => '근무 시간 변경',
-  'groupware.cancel' => '승인된 결재 취소',
-  'groupware.form' => '결재 양식 변경',
-  'org.tree' => '조직도 변경',
-  'auth.lockout' => '로그인 시도 차단',
-  'auth.loginSecurity' => '로그인 보안 설정 변경',
-  'user.otpReset' => '2단계 인증 해제',
-  'integration.create' => '외부 연동 만들기',
-  'integration.delete' => '외부 연동 지우기',
+  'user.resetPassword' => tr('비밀번호 초기화(폐지된 기능)'),
+  'user.role' => tr('계정 등급 변경'),
+  'user.org' => tr('부서·직책 변경'),
+  'user.serverAdmin' => tr('서버 운영자 지정·해제'),
+  'server.settings' => tr('서버 설정 변경'),
+  'server.backup' => tr('백업 설정·실행'),
+  'invite.create' => tr('초대 링크 생성'),
+  'invite.revoke' => tr('초대 링크 폐기'),
+  'teamInvite.create' => tr('팀 초대 링크 생성'),
+  'teamInvite.revoke' => tr('팀 초대 링크 폐기'),
+  'invite.email' => tr('초대 메일 보냄'),
+  'teamInvite.email' => tr('팀 초대 메일 보냄'),
+  'groupware.hireDate' => tr('입사일 변경'),
+  'groupware.leaveAdjust' => tr('연차 조정'),
+  'groupware.settings' => tr('근무 시간 변경'),
+  'groupware.cancel' => tr('승인된 결재 취소'),
+  'groupware.form' => tr('결재 양식 변경'),
+  'org.tree' => tr('조직도 변경'),
+  'auth.lockout' => tr('로그인 시도 차단'),
+  'auth.loginSecurity' => tr('로그인 보안 설정 변경'),
+  'user.otpReset' => tr('2단계 인증 해제'),
+  'integration.create' => tr('외부 연동 만들기'),
+  'integration.delete' => tr('외부 연동 지우기'),
   _ => action,
 };
 
@@ -277,18 +279,18 @@ const auditActionFilters = [
 
 /// 계정 등급 코드 → 한국어 이름(관리자 콘솔 목록용).
 String accountRoleLabel(String role) => switch (role) {
-  'admin' => '관리자',
-  'member' => '정회원',
-  _ => '준회원',
+  'admin' => tr('관리자'),
+  'member' => tr('정회원'),
+  _ => tr('준회원'),
 };
 
 /// 팀 생성 권한 설정값 → 한국어 이름. 서버 permissions.js의 TEAM_CREATION_LEVELS와 같은 목록.
 const teamCreationLevels = ['member', 'admin', 'serverAdmin'];
 
 String teamCreationLabel(String value) => switch (value) {
-  'serverAdmin' => '서버 운영자',
-  'admin' => '관리자',
-  _ => '정회원',
+  'serverAdmin' => tr('서버 운영자'),
+  'admin' => tr('관리자'),
+  _ => tr('정회원'),
 };
 
 /// 운영 현황 대시보드 숫자들.

@@ -1,5 +1,7 @@
 // "내 기기"(로그인한 기기 목록) 한 대 — 서버 GET /api/devices(server/src/devices.js toDeviceDto).
 
+import '../l10n/tr.dart';
+
 /// 내 계정으로 로그인한 기기 한 대.
 class MyDevice {
   final String id;
@@ -52,18 +54,18 @@ class MyDevice {
   /// 목록에 보일 이름 — "Windows PC", "Android 앱", "PC 웹 브라우저" 등.
   String get label => switch (kind) {
     'windows' => 'Windows PC',
-    'android' => 'Android 앱',
-    'ios' => 'iPhone 앱',
-    'web-desktop' => 'PC 웹 브라우저',
-    'web-android' => 'Android 웹 브라우저',
-    'web-mobile' => '휴대폰·태블릿 웹 브라우저',
+    'android' => tr('Android 앱'),
+    'ios' => tr('iPhone 앱'),
+    'web-desktop' => tr('PC 웹 브라우저'),
+    'web-android' => tr('Android 웹 브라우저'),
+    'web-mobile' => tr('휴대폰·태블릿 웹 브라우저'),
     _ => switch (name) {
       'windows' => 'Windows PC',
-      'android' => 'Android 앱',
-      'ios' => 'iPhone 앱',
-      'web' => '웹 브라우저',
+      'android' => tr('Android 앱'),
+      'ios' => tr('iPhone 앱'),
+      'web' => tr('웹 브라우저'),
       final n? when n.isNotEmpty => n,
-      _ => '알 수 없는 기기',
+      _ => tr('알 수 없는 기기'),
     },
   };
 

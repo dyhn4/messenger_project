@@ -5,6 +5,7 @@ import '../../services/calendar_layout.dart';
 import '../../services/calendar_move.dart';
 import 'calendar_common.dart';
 import 'calendar_drag.dart';
+import '../../l10n/tr.dart';
 
 /// 월간 보기 — 일요일 시작 격자. 종일·여러 날 일정은 날짜 칸을 가로지르는 막대로 이어지고, 한 칸에
 /// 다 못 넣는 일정은 "+N개"로 접는다. 공휴일은 날짜 숫자를 빨갛게 하고 이름을 옆에 적는다.
@@ -289,7 +290,7 @@ class _WeekRow extends StatelessWidget {
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
-                          '+${layout.hiddenCounts[c]}개',
+                          tr('+{p0}개', {'p0': layout.hiddenCounts[c]}),
                           maxLines: 1,
                           style: TextStyle(
                             fontSize: compact ? 9 : 11,
@@ -440,7 +441,11 @@ class _DayCell extends StatelessWidget {
     if (!inMonth) numberColor = numberColor.withValues(alpha: 0.4);
     final circle = compact ? 18.0 : 22.0;
     return Semantics(
-      label: '${day.month}월 ${day.day}일${isHoliday ? ' $holidayName' : ''}',
+      label: tr('{day.month}월 {day.day}일{p0}', {
+        'day.month': day.month,
+        'day.day': day.day,
+        'p0': isHoliday ? ' $holidayName' : '',
+      }),
       button: true,
       child: InkWell(
         key: ValueKey('cal-day-${_dayKey(day)}'),

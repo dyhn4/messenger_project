@@ -5,6 +5,7 @@ import '../models/login_security.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
+import '../l10n/tr.dart';
 
 /// 관리자 콘솔 "로그인 보안" 탭 — 2단계 인증 정책, 회사 계정 로그인(Google·Microsoft — SSO), 사내 디렉터리(LDAP/Active Directory)
 /// (server/src/admin.js /admin/login-security). 기존 아이디·비밀번호 로그인은 그대로 두고 그 위에 더한다.
@@ -168,7 +169,7 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
     'ssoMicrosoftClientId': _mClientId.text.trim(),
     if (_mSecret.text.isNotEmpty) 'ssoMicrosoftClientSecret': _mSecret.text,
     'ssoSessionDays': int.tryParse(_sessionDays.text.trim()) ?? 0,
-  }, '회사 계정 설정을 저장했습니다.');
+  }, tr('회사 계정 설정을 저장했습니다.'));
 
   Future<void> _saveLdap() => _patch({
     'ldapUrl': _ldapUrl.text.trim(),
@@ -181,7 +182,7 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
     'ldapDepartmentAttr': _deptAttr.text.trim(),
     'ldapTitleAttr': _titleAttr.text.trim(),
     'ldapTlsVerify': _tlsVerify,
-  }, '디렉터리 설정을 저장했습니다. "연결 시험"을 해 보세요.');
+  }, tr('디렉터리 설정을 저장했습니다. "연결 시험"을 해 보세요.'));
 
   Future<void> _testLdap() async {
     setState(() {
@@ -280,9 +281,9 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
       DropdownButton<String>(
         key: key,
         value: value,
-        items: const [
-          DropdownMenuItem(value: 'member', child: Text('정회원')),
-          DropdownMenuItem(value: 'guest', child: Text('준회원')),
+        items: [
+          DropdownMenuItem(value: 'member', child: Text(tr('정회원'))),
+          DropdownMenuItem(value: 'guest', child: Text(tr('준회원'))),
         ],
         onChanged: _busy ? null : (v) => onChanged(v ?? value),
       );
@@ -309,35 +310,38 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
         children: [
           // ── 2단계 인증 ──
           _section(
-            '2단계 인증(OTP)',
-            '로그인할 때 비밀번호와 함께 휴대폰 인증 앱(Google Authenticator 등)의 6자리 코드를 받습니다. 꼭 써야 하는 사람이 아직 켜지 '
-                '않았으면 다음 로그인 때 그 자리에서 켜게 됩니다. 회사 계정(SSO)으로 들어오면 그쪽 2단계 인증을 쓰므로 묻지 않습니다. 휴대폰을 '
-                '잃어버린 회원은 "회원" 탭의 메뉴에서 해제할 수 있습니다.',
+            tr('2단계 인증(OTP)'),
+            tr(
+              '로그인할 때 비밀번호와 함께 휴대폰 인증 앱(Google Authenticator 등)의 6자리 코드를 받습니다. 꼭 써야 하는 사람이 아직 켜지 않았으면 다음 로그인 때 그 자리에서 켜게 됩니다. 회사 계정(SSO)으로 들어오면 그쪽 2단계 인증을 쓰므로 묻지 않습니다. 휴대폰을 잃어버린 회원은 "회원" 탭의 메뉴에서 해제할 수 있습니다.',
+            ),
           ),
           SegmentedButton<String>(
             key: const ValueKey('admin-otp-policy'),
-            segments: const [
-              ButtonSegment(value: 'optional', label: Text('각자 선택')),
-              ButtonSegment(value: 'admins', label: Text('관리자는 필수')),
-              ButtonSegment(value: 'all', label: Text('모두 필수')),
+            segments: [
+              ButtonSegment(value: 'optional', label: Text(tr('각자 선택'))),
+              ButtonSegment(value: 'admins', label: Text(tr('관리자는 필수'))),
+              ButtonSegment(value: 'all', label: Text(tr('모두 필수'))),
             ],
             selected: {s.otpPolicy},
             onSelectionChanged: _busy
                 ? null
-                : (v) => _patch({'otpPolicy': v.first}, '2단계 인증 정책을 바꿨습니다.'),
+                : (v) =>
+                      _patch({'otpPolicy': v.first}, tr('2단계 인증 정책을 바꿨습니다.')),
           ),
           const Divider(height: 32),
 
           // ── 회사 계정(SSO) ──
           _section(
-            '회사 계정 로그인(Google·Microsoft)',
-            '회사의 Google Workspace·Microsoft 365 계정으로 로그인합니다. 퇴사자는 회사 계정만 막으면 되고, 회사 계정의 2단계 인증이 '
-                '그대로 적용됩니다. Google Cloud 콘솔(OAuth 클라이언트 — 웹 애플리케이션) 또는 Microsoft Entra 관리 센터(앱 등록)에서 앱을 만들고, '
-                '아래 "돌아올 주소"를 그쪽의 승인된 리디렉션 URI로 등록한 뒤 받은 값을 넣으세요.',
+            tr('회사 계정 로그인(Google·Microsoft)'),
+            tr(
+              '회사의 Google Workspace·Microsoft 365 계정으로 로그인합니다. 퇴사자는 회사 계정만 막으면 되고, 회사 계정의 2단계 인증이 그대로 적용됩니다. Google Cloud 콘솔(OAuth 클라이언트 — 웹 애플리케이션) 또는 Microsoft Entra 관리 센터(앱 등록)에서 앱을 만들고, 아래 "돌아올 주소"를 그쪽의 승인된 리디렉션 URI로 등록한 뒤 받은 값을 넣으세요.',
+            ),
           ),
           if (redirect == null)
             Text(
-              '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 없어 회사 계정 로그인을 켤 수 없습니다. "DDNS" 탭의 웹 앱 주소를 먼저 설정하세요.',
+              tr(
+                '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 없어 회사 계정 로그인을 켤 수 없습니다. "DDNS" 탭의 웹 앱 주소를 먼저 설정하세요.',
+              ),
               style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
             )
           else
@@ -345,17 +349,17 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
               children: [
                 Expanded(
                   child: SelectableText(
-                    '돌아올 주소: $redirect',
+                    tr('돌아올 주소: {redirect}', {'redirect': redirect}),
                     key: const ValueKey('admin-sso-redirect'),
                     style: const TextStyle(fontSize: 12),
                   ),
                 ),
                 IconButton(
-                  tooltip: '복사',
+                  tooltip: tr('복사'),
                   icon: const Icon(Icons.copy, size: 18),
                   onPressed: () async {
                     await Clipboard.setData(ClipboardData(text: redirect));
-                    if (context.mounted) showAppToast(context, '복사했습니다.');
+                    if (context.mounted) showAppToast(context, tr('복사했습니다.'));
                   },
                 ),
               ],
@@ -364,86 +368,97 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
           SwitchListTile(
             key: const ValueKey('admin-sso-google-enabled'),
             contentPadding: EdgeInsets.zero,
-            title: const Text('Google 회사 계정 로그인'),
+            title: Text(tr('Google 회사 계정 로그인')),
             value: s.google.enabled,
             onChanged: _busy || _ssoDirty || redirect == null
                 ? null
                 : (v) => _patch({
                     'ssoGoogleEnabled': v,
-                  }, v ? 'Google 로그인을 켰습니다.' : 'Google 로그인을 껐습니다.'),
+                  }, v ? tr('Google 로그인을 켰습니다.') : tr('Google 로그인을 껐습니다.')),
           ),
           _problem(s.google.enabled ? null : s.google.problem),
-          _field(_gClientId, '클라이언트 ID', hint: '…apps.googleusercontent.com'),
+          _field(
+            _gClientId,
+            tr('클라이언트 ID'),
+            hint: '…apps.googleusercontent.com',
+          ),
           _field(
             _gSecret,
-            s.google.hasClientSecret ? '새 클라이언트 보안 비밀 (바꿀 때만)' : '클라이언트 보안 비밀',
-            helper: s.google.hasClientSecret ? '보안 비밀: 설정됨' : null,
+            s.google.hasClientSecret
+                ? tr('새 클라이언트 보안 비밀 (바꿀 때만)')
+                : tr('클라이언트 보안 비밀'),
+            helper: s.google.hasClientSecret ? tr('보안 비밀: 설정됨') : null,
             obscure: true,
           ),
           _field(
             _gDomains,
-            '받아들일 회사 도메인',
-            hint: 'company.com (여럿이면 쉼표로)',
-            helper: '이 도메인의 Google Workspace 계정만 들어옵니다(개인 Gmail은 안 됨).',
+            tr('받아들일 회사 도메인'),
+            hint: tr('company.com (여럿이면 쉼표로)'),
+            helper: tr('이 도메인의 Google Workspace 계정만 들어옵니다(개인 Gmail은 안 됨).'),
           ),
           const SizedBox(height: 4),
           SwitchListTile(
             key: const ValueKey('admin-sso-microsoft-enabled'),
             contentPadding: EdgeInsets.zero,
-            title: const Text('Microsoft 회사 계정 로그인'),
+            title: Text(tr('Microsoft 회사 계정 로그인')),
             value: s.microsoft.enabled,
             onChanged: _busy || _ssoDirty || redirect == null
                 ? null
-                : (v) => _patch({
-                    'ssoMicrosoftEnabled': v,
-                  }, v ? 'Microsoft 로그인을 켰습니다.' : 'Microsoft 로그인을 껐습니다.'),
+                : (v) => _patch(
+                    {'ssoMicrosoftEnabled': v},
+                    v ? tr('Microsoft 로그인을 켰습니다.') : tr('Microsoft 로그인을 껐습니다.'),
+                  ),
           ),
           _problem(s.microsoft.enabled ? null : s.microsoft.problem),
           _field(
             _mTenant,
-            '디렉터리(테넌트) ID',
+            tr('디렉터리(테넌트) ID'),
             hint: '1234abcd-…',
-            helper: 'Entra 관리 센터 "개요"의 테넌트 ID — 이 회사 사람만 들어옵니다.',
+            helper: tr('Entra 관리 센터 "개요"의 테넌트 ID — 이 회사 사람만 들어옵니다.'),
           ),
-          _field(_mClientId, '애플리케이션(클라이언트) ID'),
+          _field(_mClientId, tr('애플리케이션(클라이언트) ID')),
           _field(
             _mSecret,
-            s.microsoft.hasClientSecret ? '새 클라이언트 암호 (바꿀 때만)' : '클라이언트 암호',
-            helper: s.microsoft.hasClientSecret ? '클라이언트 암호: 설정됨' : null,
+            s.microsoft.hasClientSecret
+                ? tr('새 클라이언트 암호 (바꿀 때만)')
+                : tr('클라이언트 암호'),
+            helper: s.microsoft.hasClientSecret ? tr('클라이언트 암호: 설정됨') : null,
             obscure: true,
           ),
           _field(
             _sessionDays,
-            '회사 계정 다시 확인 주기(일)',
-            helper: '회사 계정으로만 들어오는 계정은 이 날수가 지나면 다시 회사 계정으로 로그인합니다(1~90).',
+            tr('회사 계정 다시 확인 주기(일)'),
+            helper: tr('회사 계정으로만 들어오는 계정은 이 날수가 지나면 다시 회사 계정으로 로그인합니다(1~90).'),
           ),
           Align(
             alignment: Alignment.centerRight,
             child: FilledButton(
               key: const ValueKey('admin-sso-save'),
               onPressed: _busy || !_ssoDirty ? null : _saveSso,
-              child: const Text('회사 계정 설정 저장'),
+              child: Text(tr('회사 계정 설정 저장')),
             ),
           ),
           SwitchListTile(
             key: const ValueKey('admin-sso-auto-create'),
             contentPadding: EdgeInsets.zero,
-            title: const Text('처음 들어온 회사 계정의 계정을 저절로 만들기'),
+            title: Text(tr('처음 들어온 회사 계정의 계정을 저절로 만들기')),
             subtitle: Text(
-              '끄면 이미 있는 계정에 연결한 사람만 들어옵니다. 같은 이메일의 계정이 있으면 그 이메일로 받은 코드를 넣어야 연결됩니다.',
+              tr(
+                '끄면 이미 있는 계정에 연결한 사람만 들어옵니다. 같은 이메일의 계정이 있으면 그 이메일로 받은 코드를 넣어야 연결됩니다.',
+              ),
               style: TextStyle(fontSize: 12, color: hint),
             ),
             value: s.ssoAutoCreate,
             onChanged: _busy
                 ? null
-                : (v) => _patch({'ssoAutoCreate': v}, '저장했습니다.'),
+                : (v) => _patch({'ssoAutoCreate': v}, tr('저장했습니다.')),
           ),
           Row(
             children: [
-              const Text('새 계정 등급: '),
+              Text(tr('새 계정 등급: ')),
               _roleDropdown(
                 s.ssoDefaultRole,
-                (v) => _patch({'ssoDefaultRole': v}, '저장했습니다.'),
+                (v) => _patch({'ssoDefaultRole': v}, tr('저장했습니다.')),
                 const ValueKey('admin-sso-role'),
               ),
             ],
@@ -452,19 +467,19 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
 
           // ── 사내 디렉터리(LDAP) ──
           _section(
-            '사내 디렉터리(LDAP/Active Directory)',
-            '사내 Windows 도메인 계정 그대로 로그인합니다(로그인 화면의 같은 아이디·비밀번호 칸). 인터넷 없이 사내망에서 동작합니다. '
-                '같은 아이디의 기존 계정은 이메일이 디렉터리와 같을 때 연결되고, 연결된 계정은 디렉터리 비밀번호로만 들어옵니다. 디렉터리에서 '
-                '계정을 막으면 늦어도 10분 안에 앱에서도 끊깁니다.',
+            tr('사내 디렉터리(LDAP/Active Directory)'),
+            tr(
+              '사내 Windows 도메인 계정 그대로 로그인합니다(로그인 화면의 같은 아이디·비밀번호 칸). 인터넷 없이 사내망에서 동작합니다. 같은 아이디의 기존 계정은 이메일이 디렉터리와 같을 때 연결되고, 연결된 계정은 디렉터리 비밀번호로만 들어옵니다. 디렉터리에서 계정을 막으면 늦어도 10분 안에 앱에서도 끊깁니다.',
+            ),
           ),
           SwitchListTile(
             key: const ValueKey('admin-ldap-enabled'),
             contentPadding: EdgeInsets.zero,
-            title: const Text('디렉터리 로그인 사용'),
+            title: Text(tr('디렉터리 로그인 사용')),
             subtitle: Text(
               s.ldap.testedAt == null
-                  ? '값을 저장하고 "연결 시험"을 통과해야 켤 수 있습니다.'
-                  : '시험 통과: ${formatDateTime(s.ldap.testedAt!)}',
+                  ? tr('값을 저장하고 "연결 시험"을 통과해야 켤 수 있습니다.')
+                  : tr('시험 통과: {p0}', {'p0': formatDateTime(s.ldap.testedAt!)}),
               style: TextStyle(fontSize: 12, color: hint),
             ),
             value: s.ldap.enabled,
@@ -474,54 +489,56 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
                 ? null
                 : (v) => _patch({
                     'ldapEnabled': v,
-                  }, v ? '디렉터리 로그인을 켰습니다.' : '디렉터리 로그인을 껐습니다.'),
+                  }, v ? tr('디렉터리 로그인을 켰습니다.') : tr('디렉터리 로그인을 껐습니다.')),
           ),
           _field(
             _ldapUrl,
-            'LDAP 서버 주소',
+            tr('LDAP 서버 주소'),
             hint: 'ldaps://dc01.company.local:636',
             helper: _ldapUrl.text.trim().startsWith('ldap://')
-                ? 'ldap://는 비밀번호가 암호화되지 않고 사내망을 지나갑니다 — 되도록 ldaps://를 쓰세요.'
+                ? tr('ldap://는 비밀번호가 암호화되지 않고 사내망을 지나갑니다 — 되도록 ldaps://를 쓰세요.')
                 : null,
             key: const ValueKey('admin-ldap-url'),
           ),
           _field(
             _bindDn,
-            '서비스 계정 DN',
+            tr('서비스 계정 DN'),
             hint: 'CN=tangotalk,OU=Service,DC=company,DC=local',
-            helper: '사람을 찾을 때 쓰는 읽기 전용 계정(비우면 익명 검색).',
+            helper: tr('사람을 찾을 때 쓰는 읽기 전용 계정(비우면 익명 검색).'),
           ),
           _field(
             _bindPassword,
-            s.ldap.hasBindPassword ? '새 서비스 계정 비밀번호 (바꿀 때만)' : '서비스 계정 비밀번호',
-            helper: s.ldap.hasBindPassword ? '비밀번호: 설정됨' : null,
+            s.ldap.hasBindPassword
+                ? tr('새 서비스 계정 비밀번호 (바꿀 때만)')
+                : tr('서비스 계정 비밀번호'),
+            helper: s.ldap.hasBindPassword ? tr('비밀번호: 설정됨') : null,
             obscure: true,
           ),
-          _field(_baseDn, '검색 위치(Base DN)', hint: 'DC=company,DC=local'),
+          _field(_baseDn, tr('검색 위치(Base DN)'), hint: 'DC=company,DC=local'),
           _field(
             _filter,
-            '사용자 검색 조건',
-            helper: '{username} 자리에 로그인 화면에 넣은 아이디가 들어갑니다.',
+            tr('사용자 검색 조건'),
+            helper: tr('{username} 자리에 로그인 화면에 넣은 아이디가 들어갑니다.'),
           ),
           Row(
             children: [
-              Expanded(child: _field(_nameAttr, '이름 속성')),
+              Expanded(child: _field(_nameAttr, tr('이름 속성'))),
               const SizedBox(width: 8),
-              Expanded(child: _field(_emailAttr, '이메일 속성')),
+              Expanded(child: _field(_emailAttr, tr('이메일 속성'))),
             ],
           ),
           Row(
             children: [
-              Expanded(child: _field(_deptAttr, '부서 속성')),
+              Expanded(child: _field(_deptAttr, tr('부서 속성'))),
               const SizedBox(width: 8),
-              Expanded(child: _field(_titleAttr, '직책 속성')),
+              Expanded(child: _field(_titleAttr, tr('직책 속성'))),
             ],
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('ldaps:// 인증서 확인'),
+            title: Text(tr('ldaps:// 인증서 확인')),
             subtitle: Text(
-              '사내 인증 기관 인증서라 확인이 안 되면 끄세요(사내망 안에서만).',
+              tr('사내 인증 기관 인증서라 확인이 안 되면 끄세요(사내망 안에서만).'),
               style: TextStyle(fontSize: 12, color: hint),
             ),
             value: _tlsVerify,
@@ -532,18 +549,18 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
             child: FilledButton(
               key: const ValueKey('admin-ldap-save'),
               onPressed: _busy || !_ldapDirty ? null : _saveLdap,
-              child: const Text('디렉터리 설정 저장'),
+              child: Text(tr('디렉터리 설정 저장')),
             ),
           ),
           const SizedBox(height: 8),
-          Text('연결 시험', style: theme.textTheme.labelLarge),
+          Text(tr('연결 시험'), style: theme.textTheme.labelLarge),
           const SizedBox(height: 6),
           Row(
             children: [
-              Expanded(child: _field(_testUser, '찾아볼 아이디(선택)')),
+              Expanded(child: _field(_testUser, tr('찾아볼 아이디(선택)'))),
               const SizedBox(width: 8),
               Expanded(
-                child: _field(_testPassword, '그 비밀번호(선택)', obscure: true),
+                child: _field(_testPassword, tr('그 비밀번호(선택)'), obscure: true),
               ),
             ],
           ),
@@ -554,15 +571,17 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
                 onPressed: _busy || _ldapDirty || s.ldap.problem != null
                     ? null
                     : _testLdap,
-                child: const Text('연결 시험'),
+                child: Text(tr('연결 시험')),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   _ldapDirty
-                      ? '바꾼 값을 먼저 저장하세요.'
+                      ? tr('바꾼 값을 먼저 저장하세요.')
                       : s.ldap.problem ??
-                            '아이디를 넣으면 그 사람을 찾아 보고, 비밀번호까지 넣으면 로그인도 해 봅니다(남기지 않음).',
+                            tr(
+                              '아이디를 넣으면 그 사람을 찾아 보고, 비밀번호까지 넣으면 로그인도 해 봅니다(남기지 않음).',
+                            ),
                   style: TextStyle(fontSize: 12, color: hint),
                 ),
               ),
@@ -585,18 +604,18 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
           SwitchListTile(
             key: const ValueKey('admin-ldap-auto-create'),
             contentPadding: EdgeInsets.zero,
-            title: const Text('처음 들어온 디렉터리 계정의 계정을 저절로 만들기'),
+            title: Text(tr('처음 들어온 디렉터리 계정의 계정을 저절로 만들기')),
             value: s.ldap.autoCreate,
             onChanged: _busy
                 ? null
-                : (v) => _patch({'ldapAutoCreate': v}, '저장했습니다.'),
+                : (v) => _patch({'ldapAutoCreate': v}, tr('저장했습니다.')),
           ),
           Row(
             children: [
-              const Text('새 계정 등급: '),
+              Text(tr('새 계정 등급: ')),
               _roleDropdown(
                 s.ldap.defaultRole,
-                (v) => _patch({'ldapDefaultRole': v}, '저장했습니다.'),
+                (v) => _patch({'ldapDefaultRole': v}, tr('저장했습니다.')),
                 const ValueKey('admin-ldap-role'),
               ),
             ],

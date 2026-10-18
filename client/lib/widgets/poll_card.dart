@@ -10,6 +10,7 @@ import '../services/edit_policy.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'attachment_widgets.dart';
+import '../l10n/tr.dart';
 
 /// 투표 카드 — 채팅 말풍선 안, 보드 목록, "즐겨찾기한 투표" 목록에서 같이 쓴다. 제목·설명·배지·마감
 /// 시각, 보기(라디오/체크박스 + 득표 막대·수·비율), 참여자 수, 투표하기/다시 투표하기 버튼, 더보기(⋯)
@@ -175,7 +176,7 @@ class _PollCardState extends State<PollCard> {
       if (!mounted) return;
       setState(() {});
       widget.onChanged?.call();
-      showAppToast(context, now ? '즐겨찾기에 추가했습니다.' : '즐겨찾기에서 뺐습니다.');
+      showAppToast(context, now ? tr('즐겨찾기에 추가했습니다.') : tr('즐겨찾기에서 뺐습니다.'));
     } catch (e) {
       if (mounted) showAppToast(context, '$e');
     }
@@ -190,7 +191,7 @@ class _PollCardState extends State<PollCard> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -207,9 +208,11 @@ class _PollCardState extends State<PollCard> {
 
   Future<void> _close(Poll poll) async {
     if (!await _confirm(
-      '투표 마감',
-      "'${poll.title}' 투표를 마감할까요? 마감하면 더 이상 투표할 수 없습니다.",
-      '마감',
+      tr('투표 마감'),
+      tr('\'{poll.title}\' 투표를 마감할까요? 마감하면 더 이상 투표할 수 없습니다.', {
+        'poll.title': poll.title,
+      }),
+      tr('마감'),
     )) {
       return;
     }
@@ -228,11 +231,13 @@ class _PollCardState extends State<PollCard> {
     final mine =
         poll.creatorId != null && poll.creatorId == widget.session.userId;
     if (!await _confirm(
-      '투표 삭제',
+      tr('투표 삭제'),
       mine
-          ? "'${poll.title}' 투표를 삭제할까요?"
-          : "관리자 권한으로 '${poll.title}' 투표를 삭제합니다. 계속할까요?",
-      '삭제',
+          ? tr('\'{poll.title}\' 투표를 삭제할까요?', {'poll.title': poll.title})
+          : tr('관리자 권한으로 \'{poll.title}\' 투표를 삭제합니다. 계속할까요?', {
+              'poll.title': poll.title,
+            }),
+      tr('삭제'),
     )) {
       return;
     }
@@ -258,14 +263,17 @@ class _PollCardState extends State<PollCard> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(
-          '${option.text} · ${option.voteCount}표',
+          tr('{option.text} · {option.voteCount}표', {
+            'option.text': option.text,
+            'option.voteCount': option.voteCount,
+          }),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
         content: SizedBox(
           width: 320,
           child: voters.isEmpty
-              ? const Text('투표한 사람이 없습니다.')
+              ? Text(tr('투표한 사람이 없습니다.'))
               : ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 320),
                   child: ListView(
@@ -276,7 +284,7 @@ class _PollCardState extends State<PollCard> {
                           dense: true,
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.person_outline, size: 20),
-                          title: Text(v.name.isEmpty ? '(알 수 없음)' : v.name),
+                          title: Text(v.name.isEmpty ? tr('(알 수 없음)') : v.name),
                         ),
                     ],
                   ),
@@ -285,7 +293,7 @@ class _PollCardState extends State<PollCard> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('닫기'),
+            child: Text(tr('닫기')),
           ),
         ],
       ),
@@ -356,12 +364,15 @@ class _PollCardState extends State<PollCard> {
                 runSpacing: 4,
                 children: [
                   if (poll.anonymous)
-                    _Badge(label: '익명 투표', icon: Icons.visibility_off_outlined),
+                    _Badge(
+                      label: tr('익명 투표'),
+                      icon: Icons.visibility_off_outlined,
+                    ),
                   if (poll.multiple)
-                    _Badge(label: '복수 선택', icon: Icons.checklist),
+                    _Badge(label: tr('복수 선택'), icon: Icons.checklist),
                   if (closed)
                     _Badge(
-                      label: '마감됨',
+                      label: tr('마감됨'),
                       icon: Icons.lock_outline,
                       color: theme.colorScheme.error,
                     ),
@@ -370,8 +381,10 @@ class _PollCardState extends State<PollCard> {
               const SizedBox(height: 6),
               Text(
                 closed
-                    ? '${formatPollTime(poll.closedAt ?? poll.closesAt)}에 마감됨'
-                    : '~ ${formatPollTime(poll.closesAt)} 마감',
+                    ? tr('{p0}에 마감됨', {
+                        'p0': formatPollTime(poll.closedAt ?? poll.closesAt),
+                      })
+                    : tr('~ {p0} 마감', {'p0': formatPollTime(poll.closesAt)}),
                 key: const ValueKey('poll-deadline'),
                 style: TextStyle(fontSize: 12, color: hint),
               ),
@@ -397,7 +410,9 @@ class _PollCardState extends State<PollCard> {
                   Icon(Icons.people_outline, size: 15, color: hint),
                   const SizedBox(width: 4),
                   Text(
-                    '참여자 ${poll.voterCount}명',
+                    tr('참여자 {poll.voterCount}명', {
+                      'poll.voterCount': poll.voterCount,
+                    }),
                     key: const ValueKey('poll-voters'),
                     style: TextStyle(fontSize: 12, color: hint),
                   ),
@@ -407,7 +422,9 @@ class _PollCardState extends State<PollCard> {
                       key: const ValueKey('poll-comments'),
                       onTap: () => widget.onOpenThread!(widget.message),
                       child: Text(
-                        '댓글 $_commentCount',
+                        tr('댓글 {_commentCount}', {
+                          '_commentCount': _commentCount,
+                        }),
                         style: TextStyle(
                           fontSize: 12,
                           color: theme.colorScheme.primary,
@@ -481,7 +498,10 @@ class _PollCardState extends State<PollCard> {
       children: [
         Icon(Icons.poll_outlined, size: 14, color: hint),
         const SizedBox(width: 4),
-        Text('투표', style: theme.textTheme.labelSmall?.copyWith(color: hint)),
+        Text(
+          tr('투표'),
+          style: theme.textTheme.labelSmall?.copyWith(color: hint),
+        ),
         if (poll.favorite) ...[
           const SizedBox(width: 6),
           const Icon(
@@ -505,27 +525,31 @@ class _PollCardState extends State<PollCard> {
         isEditDeleteAllowed(widget.session);
     final items = <PopupMenuEntry<String>>[
       if (widget.onOpenThread != null)
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'comment',
-          child: _MenuRow(Icons.mode_comment_outlined, '댓글'),
+          child: _MenuRow(Icons.mode_comment_outlined, tr('댓글')),
         ),
       PopupMenuItem(
         value: 'favorite',
         child: _MenuRow(
           poll.favorite ? Icons.star : Icons.star_border,
-          poll.favorite ? '즐겨찾기 해제' : '즐겨찾기',
+          poll.favorite ? tr('즐겨찾기 해제') : tr('즐겨찾기'),
         ),
       ),
       if (canClose)
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'close',
-          child: _MenuRow(Icons.lock_clock_outlined, '투표 마감'),
+          child: _MenuRow(Icons.lock_clock_outlined, tr('투표 마감')),
         ),
       if (canDelete) ...[
         const PopupMenuDivider(),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'delete',
-          child: _MenuRow(Icons.delete_outline, '삭제', color: Colors.redAccent),
+          child: _MenuRow(
+            Icons.delete_outline,
+            tr('삭제'),
+            color: Colors.redAccent,
+          ),
         ),
       ],
     ];
@@ -533,7 +557,7 @@ class _PollCardState extends State<PollCard> {
       height: 28,
       child: PopupMenuButton<String>(
         key: const ValueKey('poll-more'),
-        tooltip: '더보기',
+        tooltip: tr('더보기'),
         padding: EdgeInsets.zero,
         iconSize: 20,
         icon: const Icon(Icons.more_horiz),
@@ -573,7 +597,7 @@ class _PollCardState extends State<PollCard> {
                   _revoting = true;
                   _picked = null;
                 }),
-          child: const Text('다시 투표하기'),
+          child: Text(tr('다시 투표하기')),
         ),
       );
     }
@@ -590,7 +614,7 @@ class _PollCardState extends State<PollCard> {
                     _picked = null;
                     _error = null;
                   }),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           const SizedBox(width: 8),
         ],
@@ -604,7 +628,7 @@ class _PollCardState extends State<PollCard> {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Text(cancelling ? '투표 취소' : '투표하기'),
+                : Text(cancelling ? tr('투표 취소') : tr('투표하기')),
           ),
         ),
       ],
@@ -715,7 +739,10 @@ class _OptionRow extends StatelessWidget {
     }
 
     final count = Text(
-      '${option.voteCount}표 · $percent%',
+      tr('{option.voteCount}표 · {percent}%', {
+        'option.voteCount': option.voteCount,
+        'percent': percent,
+      }),
       style: TextStyle(
         fontSize: 12,
         fontWeight: FontWeight.w600,

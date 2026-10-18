@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/tr.dart';
 import '../models/message.dart';
 
 final _timeFormat = DateFormat('a h:mm');
@@ -22,8 +23,9 @@ class SystemMessageRow extends StatelessWidget {
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(12),
             ),
+            // 서버가 남긴 안내("OOO 님이 참여했습니다.")라 앱에서 지금 언어로 옮긴다.
             child: Text(
-              message.text ?? '',
+              trServer(message.text ?? ''),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

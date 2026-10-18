@@ -9,6 +9,7 @@ import 'app_platform.dart';
 import 'call_hands.dart';
 import 'call_quality.dart';
 import 'call_whiteboard.dart';
+import '../l10n/tr.dart';
 
 /// 통화 중에만 도는 Android 포그라운드 서비스. 이게 없으면 통화 중에 홈으로 나가는 순간
 /// OS가 카메라/마이크 접근을 끊어서(Android 14+) 상대방에게 내 영상·소리가 안 간다.
@@ -24,8 +25,8 @@ Future<void> _startCallForegroundService(
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'ongoing_call',
-      channelName: '통화 중',
-      channelDescription: '화상회의가 진행되는 동안 표시됩니다.',
+      channelName: tr('통화 중'),
+      channelDescription: tr('화상회의가 진행되는 동안 표시됩니다.'),
       onlyAlertOnce: true,
     ),
     iosNotificationOptions: const IOSNotificationOptions(
@@ -46,7 +47,7 @@ Future<void> _startCallForegroundService(
       // 시작할 수 있다 — 공유를 켤 때만 포함해서 다시 띄운다.
       if (includeMediaProjection) ForegroundServiceTypes.mediaProjection,
     ],
-    notificationTitle: '통화 중',
+    notificationTitle: tr('통화 중'),
     notificationText: roomName,
     // 기본값은 앱 아이콘(적응형)이라 알림 아이콘으로 쓰면 안 된다 — 흰 실루엣으로(AndroidManifest.xml).
     notificationIcon: const NotificationIcon(
@@ -71,13 +72,13 @@ String? callDisconnectNotice(DisconnectReason? reason) {
     case DisconnectReason.clientInitiated:
       return null;
     case DisconnectReason.participantRemoved:
-      return '화상회의에서 내보내졌습니다';
+      return tr('화상회의에서 내보내졌습니다');
     case DisconnectReason.roomDeleted:
-      return '화상회의가 종료되었습니다';
+      return tr('화상회의가 종료되었습니다');
     case DisconnectReason.duplicateIdentity:
-      return '다른 기기에서 화상회의에 참여해 이 기기의 통화를 끝냈습니다';
+      return tr('다른 기기에서 화상회의에 참여해 이 기기의 통화를 끝냈습니다');
     default:
-      return '화상회의 연결이 끊겼습니다';
+      return tr('화상회의 연결이 끊겼습니다');
   }
 }
 
@@ -181,7 +182,7 @@ class CallController extends ChangeNotifier {
       // 그사이 끊겼으면(서버가 바로 내보냄 등 — _onRoomDisconnected가 이미 정리했다) "통화 중" 알림을 다시 띄우지 않는다.
       if (!identical(_room, room)) return;
       // 연결에 성공한 뒤에 띄운다 — 실패한 통화에 알림만 남는 걸 막는다.
-      _screenShareLabel = roomLabel ?? '화상회의';
+      _screenShareLabel = roomLabel ?? tr('화상회의');
       await _startCallForegroundService(_screenShareLabel);
     } catch (e) {
       _error = e.toString();
@@ -276,7 +277,7 @@ class CallController extends ChangeNotifier {
       return;
     }
     await me.setMicrophoneEnabled(false);
-    _notices.add('진행자가 마이크를 껐습니다');
+    _notices.add(tr('진행자가 마이크를 껐습니다'));
     notifyListeners();
   }
 
@@ -509,7 +510,7 @@ class CallController extends ChangeNotifier {
       if (message == null) return;
       if (message is WhiteboardOpened) {
         final name = sender.name.isEmpty ? sender.identity : sender.name;
-        _notices.add('$name님이 화이트보드를 열었습니다');
+        _notices.add(tr('{name}님이 화이트보드를 열었습니다', {'name': name}));
         return;
       }
       _whiteboard?.receive(sender.identity, message);
@@ -531,7 +532,7 @@ class CallController extends ChangeNotifier {
     // 이미 통화 중인 사람들에게 누가 들어왔는지 알린다(퇴장 알림과 짝). 내가 들어갈 때 이미 있던
     // 사람들은 이 이벤트로 오지 않으므로(연결 시점의 기존 참가자) 들어가자마자 알림이 쏟아지지 않는다.
     final name = e.participant.name.isEmpty ? identity : e.participant.name;
-    _notices.add('$name님이 들어왔습니다');
+    _notices.add(tr('{name}님이 들어왔습니다', {'name': name}));
     _scheduleWhiteboardSnapshot(identity);
     if (!handRaised) return;
     // 막 들어온 사람의 데이터 채널이 아직 열리기 전일 수 있어 잠깐 뒤에 보낸다.
@@ -548,7 +549,9 @@ class CallController extends ChangeNotifier {
     // 끊겨 빠진 경우도 같은 이벤트라 "나갔습니다"로 묶는다). 내가 나갈 때는 leave()가 리스너를 먼저
     // 치우므로 여기로 오지 않는다.
     final p = e.participant;
-    _notices.add('${p.name.isEmpty ? p.identity : p.name}님이 나갔습니다');
+    _notices.add(
+      tr('{p0}님이 나갔습니다', {'p0': p.name.isEmpty ? p.identity : p.name}),
+    );
     notifyListeners();
   }
 
@@ -606,7 +609,7 @@ class CallController extends ChangeNotifier {
   Stream<String> get notices => _notices.stream;
 
   /// 포그라운드 서비스 알림에 쓸 방 이름 — join()에서 받아둔 값을 화면 공유 전환 때도 쓴다.
-  String _screenShareLabel = '화상회의';
+  String _screenShareLabel = tr('화상회의');
 
   @override
   void dispose() {

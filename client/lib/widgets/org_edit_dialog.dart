@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/app_user.dart';
 import '../services/api_client.dart' show PositionOption;
 import '../services/session.dart';
+import '../l10n/tr.dart';
 
 /// "직책 수정" 다이얼로그. 팀 설정의 멤버 목록과 프로필 카드의 "직책 수정" 연필 버튼이 같이
 /// 쓴다. 소유자·관리자만 열 수 있다(호출부에서 버튼 자체를 가리고, 서버도 다시 검사한다).
@@ -75,7 +76,9 @@ class _OrgEditDialogState extends State<_OrgEditDialog> {
     final hint = Theme.of(context).hintColor;
     final options = _options;
     return AlertDialog(
-      title: Text('${widget.user.name} 님의 직책'),
+      title: Text(
+        tr('{widget.user.name} 님의 직책', {'widget.user.name': widget.user.name}),
+      ),
       content: SizedBox(
         width: 340,
         child: options == null
@@ -84,19 +87,23 @@ class _OrgEditDialogState extends State<_OrgEditDialog> {
                 child: Center(child: CircularProgressIndicator()),
               )
             : (_available.isEmpty && !_hasLegacyValue)
-            ? Text('선택할 수 있는 직책이 없습니다.', style: TextStyle(color: hint))
+            ? Text(tr('선택할 수 있는 직책이 없습니다.'), style: TextStyle(color: hint))
             : Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
                   ChoiceChip(
-                    label: const Text('(없음)'),
+                    label: Text(tr('(없음)')),
                     selected: _selected == null,
                     onSelected: (_) => setState(() => _selected = null),
                   ),
                   if (_hasLegacyValue)
                     ChoiceChip(
-                      label: Text('$_selected(목록에 없는 기존 값)'),
+                      label: Text(
+                        tr('{_selected}(목록에 없는 기존 값)', {
+                          '_selected': _selected,
+                        }),
+                      ),
                       selected: true,
                       onSelected: (_) {},
                     ),
@@ -116,9 +123,9 @@ class _OrgEditDialogState extends State<_OrgEditDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
-        FilledButton(onPressed: _submit, child: const Text('저장')),
+        FilledButton(onPressed: _submit, child: Text(tr('저장'))),
       ],
     );
   }

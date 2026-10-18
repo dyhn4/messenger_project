@@ -1,6 +1,8 @@
 // 알림 센터의 서버 알림(멘션·보드) — 범용 notifications 표의 한 줄. 프로젝트 알림
 // (ProjectNotification)과 안 읽은 대화는 기존 모델·Room을 그대로 쓴다. 규약: CONTRACT_NOTIF.md.
 
+import '../l10n/tr.dart';
+
 /// 서버 알림 종류(kind 문자열). 문자열이라 서버가 새 종류를 더해도 깨지지 않는다 — 모르는 종류는
 /// [other]로 읽고 그냥 보여 준다.
 enum NotificationKind {
@@ -196,15 +198,15 @@ extension BoardNotifyLevelInfo on BoardNotifyLevel {
   };
 
   String get label => switch (this) {
-    BoardNotifyLevel.all => '전체',
-    BoardNotifyLevel.important => '중요 알림',
-    BoardNotifyLevel.newPosts => '새 글 알림',
+    BoardNotifyLevel.all => tr('전체'),
+    BoardNotifyLevel.important => tr('중요 알림'),
+    BoardNotifyLevel.newPosts => tr('새 글 알림'),
   };
 
   String get description => switch (this) {
-    BoardNotifyLevel.all => '새 글, 글 수정, 댓글 알림을 모두 받습니다.',
-    BoardNotifyLevel.important => '새 글과 내가 쓴 글에 달린 댓글 알림을 받습니다.',
-    BoardNotifyLevel.newPosts => '새 글 알림만 받습니다.',
+    BoardNotifyLevel.all => tr('새 글, 글 수정, 댓글 알림을 모두 받습니다.'),
+    BoardNotifyLevel.important => tr('새 글과 내가 쓴 글에 달린 댓글 알림을 받습니다.'),
+    BoardNotifyLevel.newPosts => tr('새 글 알림만 받습니다.'),
   };
 }
 

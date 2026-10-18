@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import '../l10n/tr.dart';
 
 /// 비밀 대화(E2EE)의 순수 암호화 로직 — 상태를 들고 있지 않고 항상 입력을 받아 출력만 낸다.
 /// 상태는 SecretKeyStore가, 핸드셰이크 흐름과 규약 고르기는 SecretSessionManager가, 새 규약(v3)의 래칫 한 걸음은
@@ -245,7 +246,7 @@ const secretContextPrefix = 'tangotalk-secret-v2';
 /// 실제 id(uuid)·base64 키·epoch에는 '|'가 없다. 서명 확인 쪽은 이 예외를 "검증 실패"로 다룬다.
 String _contextField(String value) {
   if (value.contains('|')) {
-    throw ArgumentError.value(value, 'value', "맥락 서명 칸에는 '|'를 쓸 수 없습니다");
+    throw ArgumentError.value(value, 'value', tr('맥락 서명 칸에는 \'|\'를 쓸 수 없습니다'));
   }
   return value;
 }

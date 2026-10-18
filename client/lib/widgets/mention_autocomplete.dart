@@ -6,6 +6,7 @@ import '../models/room.dart';
 import '../services/mention_logic.dart';
 import 'rich_text_format.dart';
 import 'user_avatar.dart';
+import '../l10n/tr.dart';
 
 /// 입력칸 위에 떠서 "@이름"을 자동완성하는 멘션 패널 — 입력칸([child], 보통 TextField)을 감싼다.
 ///
@@ -339,7 +340,7 @@ class _MentionRow extends StatelessWidget {
     final user = candidate.user;
     final title = candidate.isAll ? '@all' : user!.name;
     final sub = candidate.isAll
-        ? '이 대화의 모든 멤버에게 알림'
+        ? tr('이 대화의 모든 멤버에게 알림')
         : [user!.username, if (user.orgLine != null) user.orgLine!].join(' · ');
     return Material(
       color: selected
@@ -405,7 +406,7 @@ class MentionButton extends StatelessWidget {
       // 투표 단추처럼 촘촘한 폭(40) — 입력칸 아래 단추 줄이 좁은 화면에서 넘치지 않게.
       visualDensity: VisualDensity.compact,
       icon: const Icon(Icons.alternate_email),
-      tooltip: '멘션',
+      tooltip: tr('멘션'),
       onPressed: onPressed,
     );
   }

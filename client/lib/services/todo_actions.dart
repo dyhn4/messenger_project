@@ -2,6 +2,7 @@ import '../models/room.dart';
 import 'api_client.dart';
 import 'session.dart';
 import 'todo_api.dart';
+import '../l10n/tr.dart';
 
 /// 할 일의 Session 쪽 얇은 조각 — 서버 호출 손잡이와, 소켓 todo:changed / todo:reminder를 앱이 켜져 있는 동안 토스트로
 /// 알리는 문구. Session 본체가 이미 커서 새 코드는 확장으로 따로 두고(session.dart가 같이 내보낸다), 목록 상태는
@@ -10,7 +11,7 @@ extension SessionTodos on Session {
   /// 이 로그인의 할 일 API — 연결이 없으면(로그아웃 직후 등) [ApiException].
   TodoApi get todoApi {
     final client = api;
-    if (client == null) throw const ApiException('연결되어 있지 않습니다.');
+    if (client == null) throw ApiException(tr('연결되어 있지 않습니다.'));
     return RemoteTodoApi(client);
   }
 
@@ -28,12 +29,12 @@ String? todoAssignedToast(Map<String, dynamic> event, {String? myUserId}) {
   if (!added.contains(myUserId) || event['actorId'] == myUserId) return null;
   final title = (event['title'] as String?)?.trim();
   return title == null || title.isEmpty
-      ? '할 일이 나에게 지정되었습니다.'
-      : '할 일이 지정되었습니다: $title';
+      ? tr('할 일이 나에게 지정되었습니다.')
+      : tr('할 일이 지정되었습니다: {title}', {'title': title});
 }
 
 /// 소켓 todo:reminder 토스트 문구 — `할 일 알림: 제목`.
 String todoReminderToast(Map<String, dynamic> event) {
   final title = (event['title'] as String?)?.trim() ?? '';
-  return title.isEmpty ? '할 일 알림' : '할 일 알림: $title';
+  return title.isEmpty ? tr('할 일 알림') : tr('할 일 알림: {title}', {'title': title});
 }

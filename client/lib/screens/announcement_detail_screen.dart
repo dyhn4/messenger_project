@@ -21,6 +21,7 @@ import '../widgets/rich_text_format.dart' show FormattedText;
 import '../widgets/room_options_menu.dart' show closeOwnRoute;
 import 'announcement_editor_dialog.dart';
 import 'home_screen.dart' show wideBreakpoint;
+import '../l10n/tr.dart';
 
 /// 공지 "상세보기" — 배너·공지 패널·알림 센터에서 연다. 잔디의 게시글 상세처럼 카드 하나에 작성자 아바타·이름·
 /// `2026/10/01 AM 3:44`, 오른쪽 위 ⋯(작성자만: 수정하기·공지 내리기·삭제하기 …), 본문, 사진(있으면), 구분선,
@@ -157,7 +158,7 @@ class AnnouncementMoreButton extends StatelessWidget {
     return PopupMenuButton<AnnouncementMoreAction>(
       key: buttonKey,
       icon: Icon(Icons.more_horiz, size: iconSize, color: iconColor),
-      tooltip: '더보기',
+      tooltip: tr('더보기'),
       padding: EdgeInsets.zero,
       iconSize: iconSize,
       style: size == null
@@ -178,14 +179,14 @@ class AnnouncementMoreButton extends StatelessWidget {
           CompactMenu.item(
             context,
             icon: Icons.edit_outlined,
-            label: '수정하기',
+            label: tr('수정하기'),
             value: AnnouncementMoreAction.edit,
           ),
         if (actions.contains(AnnouncementMoreAction.unpin))
           CompactMenu.item(
             context,
             icon: Icons.push_pin_outlined,
-            label: '공지 내리기',
+            label: tr('공지 내리기'),
             value: AnnouncementMoreAction.unpin,
           ),
         if (hasEditGroup && (hasShare || hasDelete)) CompactMenu.divider,
@@ -193,7 +194,7 @@ class AnnouncementMoreButton extends StatelessWidget {
           CompactMenu.item(
             context,
             icon: Icons.forward_outlined,
-            label: '현재 채팅방에 공유하기',
+            label: tr('현재 채팅방에 공유하기'),
             value: AnnouncementMoreAction.share,
           ),
         if (hasShare && hasDelete) CompactMenu.divider,
@@ -201,7 +202,7 @@ class AnnouncementMoreButton extends StatelessWidget {
           CompactMenu.item(
             context,
             icon: Icons.delete_outline,
-            label: '삭제하기',
+            label: tr('삭제하기'),
             color: Colors.redAccent,
             value: AnnouncementMoreAction.delete,
           ),
@@ -256,9 +257,9 @@ Future<void> _shareAnnouncementToRoom(
       quotedSenderName: announcement.authorName,
       quotedPreview: announcement.previewText,
     );
-    if (context.mounted) showAppToast(context, '현재 채팅방에 공유했습니다.');
+    if (context.mounted) showAppToast(context, tr('현재 채팅방에 공유했습니다.'));
   } catch (e) {
-    if (context.mounted) showAppToast(context, '공유하지 못했습니다: $e');
+    if (context.mounted) showAppToast(context, tr('공유하지 못했습니다: {e}', {'e': e}));
   }
 }
 
@@ -272,16 +273,16 @@ Future<bool> _unpinAnnouncement(
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('공지 내리기'),
-      content: const Text('이 공지를 채팅방 상단에서 내릴까요? 목록에는 그대로 남습니다.'),
+      title: Text(tr('공지 내리기')),
+      content: Text(tr('이 공지를 채팅방 상단에서 내릴까요? 목록에는 그대로 남습니다.')),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text('내리기'),
+          child: Text(tr('내리기')),
         ),
       ],
     ),
@@ -292,7 +293,9 @@ Future<bool> _unpinAnnouncement(
     announcement.pinned = false;
     return true;
   } catch (e) {
-    if (context.mounted) showAppToast(context, '공지를 내리지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('공지를 내리지 못했습니다: {e}', {'e': e}));
+    }
     return false;
   }
 }
@@ -336,16 +339,16 @@ Future<bool> _deleteAnnouncement(
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('공지 삭제'),
-      content: const Text('이 공지를 삭제할까요? 댓글도 함께 삭제되며 되돌릴 수 없습니다.'),
+      title: Text(tr('공지 삭제')),
+      content: Text(tr('이 공지를 삭제할까요? 댓글도 함께 삭제되며 되돌릴 수 없습니다.')),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+          child: Text(tr('삭제'), style: TextStyle(color: Colors.redAccent)),
         ),
       ],
     ),
@@ -355,7 +358,7 @@ Future<bool> _deleteAnnouncement(
     await session.api!.deleteAnnouncement(room.id, announcement.id);
     return true;
   } catch (e) {
-    if (context.mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+    if (context.mounted) showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
     return false;
   }
 }
@@ -522,7 +525,7 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
         _announcement.commentCount += 1;
       });
     } catch (e) {
-      if (mounted) showAppToast(context, '댓글을 등록하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('댓글을 등록하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -594,14 +597,14 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
             IconButton(
               key: const ValueKey('announcement-detail-back'),
               icon: const Icon(Icons.arrow_back),
-              tooltip: '뒤로',
+              tooltip: tr('뒤로'),
               onPressed: back,
             ),
             const SizedBox(width: 4),
           ],
           Expanded(
             child: Text(
-              '공지',
+              tr('공지'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.titleLarge,
@@ -611,7 +614,7 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
             IconButton(
               key: const ValueKey('announcement-detail-close'),
               icon: const Icon(Icons.close),
-              tooltip: '닫기',
+              tooltip: tr('닫기'),
               onPressed: close,
             ),
           // 머리 높이를 다른 패널과 같게(단추가 하나도 없어도).
@@ -725,7 +728,13 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
                           ),
                           icon: const Icon(Icons.done_all, size: 16),
                           label: Text(
-                            '읽음 ${readers.read.length} · 안 읽음 ${readers.unread.length}',
+                            tr(
+                              '읽음 {readers.read.length} · 안 읽음 {readers.unread.length}',
+                              {
+                                'readers.read.length': readers.read.length,
+                                'readers.unread.length': readers.unread.length,
+                              },
+                            ),
                           ),
                           onPressed: () {
                             unawaited(_loadReaders());
@@ -819,7 +828,7 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
               ),
               Text(
                 edited
-                    ? '${formatPostDateTime(time)} (수정됨)'
+                    ? tr('{p0} (수정됨)', {'p0': formatPostDateTime(time)})
                     : formatPostDateTime(time),
                 style: TextStyle(fontSize: 12, color: hint),
               ),
@@ -918,7 +927,7 @@ Future<void> showAnnouncementReadersDialog(
       ),
     );
     return AlertDialog(
-      title: Text(title),
+      title: Text(tr(title)),
       contentPadding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
       content: SizedBox(
         width: 360,
@@ -931,11 +940,15 @@ Future<void> showAnnouncementReadersDialog(
                 tabs: [
                   Tab(
                     key: const ValueKey('announcement-readers-read-tab'),
-                    text: '읽음 ${readers.read.length}',
+                    text: tr('읽음 {readers.read.length}', {
+                      'readers.read.length': readers.read.length,
+                    }),
                   ),
                   Tab(
                     key: const ValueKey('announcement-readers-unread-tab'),
-                    text: '안 읽음 ${readers.unread.length}',
+                    text: tr('안 읽음 {readers.unread.length}', {
+                      'readers.unread.length': readers.unread.length,
+                    }),
                   ),
                 ],
               ),
@@ -943,7 +956,7 @@ Future<void> showAnnouncementReadersDialog(
                 child: TabBarView(
                   children: [
                     readers.read.isEmpty
-                        ? empty('아직 읽은 사람이 없습니다.')
+                        ? empty(tr('아직 읽은 사람이 없습니다.'))
                         : ListView(
                             children: [
                               for (final r in readers.read)
@@ -959,7 +972,7 @@ Future<void> showAnnouncementReadersDialog(
                             ],
                           ),
                     readers.unread.isEmpty
-                        ? empty('모두 읽었습니다.')
+                        ? empty(tr('모두 읽었습니다.'))
                         : ListView(
                             children: [
                               for (final r in readers.unread)
@@ -984,7 +997,7 @@ Future<void> showAnnouncementReadersDialog(
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );

@@ -15,6 +15,7 @@ import 'call/call_participants_panel.dart';
 import 'call/call_snapshot.dart';
 import 'call/call_stage.dart';
 import 'call/call_whiteboard_view.dart';
+import '../l10n/tr.dart';
 
 /// 화상회의 화면 — PC(Windows)와 폰 모두 이 한 화면을 그대로 쓴다. 줌처럼 어두운 화면에 영상
 /// 타일(갤러리 보기/스피커 보기), 아래 가운데에 둥근 컨트롤바(마이크·카메라·화면 공유·참가자·채팅·
@@ -78,7 +79,7 @@ class _CallScreenState extends State<CallScreen> {
   void initState() {
     super.initState();
     _handSub = widget.session.callController.handRaisedNames.listen(
-      (name) => _showToast('$name님이 손을 들었습니다', hand: true),
+      (name) => _showToast(tr('{name}님이 손을 들었습니다', {'name': name}), hand: true),
     );
     _noticeSub = widget.session.callController.notices.listen(_showToast);
     _chat = widget.session.controllerFor(widget.room);
@@ -163,13 +164,13 @@ class _CallScreenState extends State<CallScreen> {
     final controller = widget.session.callController;
     if (AppPlatform.isWebOnIOS) {
       // 아이폰·아이패드 브라우저에는 화면을 찍어 보내는 기능(getDisplayMedia)이 아예 없다.
-      _showToast('아이폰·아이패드 브라우저에서는 화면 공유를 할 수 없습니다.');
+      _showToast(tr('아이폰·아이패드 브라우저에서는 화면 공유를 할 수 없습니다.'));
       return;
     }
     if (AppPlatform.isIOS) {
       // 아이폰 앱이 화면 전체를 보내려면 방송 확장(Broadcast Upload Extension)이 따로 있어야 하는데, 그건 Apple 개발자
       // 등록(앱 그룹·서명) 뒤에 넣는다 — 그 전에는 이 앱 화면밖에 못 보내서 막아 둔다.
-      _showToast('아이폰 앱에서는 아직 화면 공유를 할 수 없습니다.');
+      _showToast(tr('아이폰 앱에서는 아직 화면 공유를 할 수 없습니다.'));
       return;
     }
     try {
@@ -183,7 +184,9 @@ class _CallScreenState extends State<CallScreen> {
       }
       await controller.toggleScreenShare();
     } catch (e) {
-      if (mounted) showAppToast(context, '화면 공유를 시작하지 못했습니다: $e');
+      if (mounted) {
+        showAppToast(context, tr('화면 공유를 시작하지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 
@@ -207,8 +210,10 @@ class _CallScreenState extends State<CallScreen> {
     widget.session.controlCallMic(person.id, !person.micOn);
     _showToast(
       person.micOn
-          ? '${person.name}님의 마이크를 껐습니다'
-          : '${person.name}님에게 마이크를 켜 달라고 요청했습니다',
+          ? tr('{person.name}님의 마이크를 껐습니다', {'person.name': person.name})
+          : tr('{person.name}님에게 마이크를 켜 달라고 요청했습니다', {
+              'person.name': person.name,
+            }),
     );
   }
 
@@ -251,7 +256,7 @@ class _CallScreenState extends State<CallScreen> {
         color: Theme.of(context).colorScheme.surface,
         child: Column(
           children: [
-            CallPanelHeader(title: '채팅', onClose: onClose),
+            CallPanelHeader(title: tr('채팅'), onClose: onClose),
             Expanded(
               child: ChatPanel(
                 key: ValueKey('call-chat-${widget.room.id}'),
@@ -325,7 +330,7 @@ class _CallScreenState extends State<CallScreen> {
             actions: [
               PopupMenuButton<CallViewMode>(
                 key: const ValueKey('call-view-menu'),
-                tooltip: '보기',
+                tooltip: tr('보기'),
                 icon: Icon(
                   mode == CallViewMode.speaker
                       ? Icons.person_pin
@@ -336,12 +341,12 @@ class _CallScreenState extends State<CallScreen> {
                   CheckedPopupMenuItem(
                     value: CallViewMode.speaker,
                     checked: mode == CallViewMode.speaker,
-                    child: const Text('스피커 보기'),
+                    child: Text(tr('스피커 보기')),
                   ),
                   CheckedPopupMenuItem(
                     value: CallViewMode.gallery,
                     checked: mode == CallViewMode.gallery,
-                    child: const Text('갤러리 보기'),
+                    child: Text(tr('갤러리 보기')),
                   ),
                 ],
               ),
@@ -357,14 +362,14 @@ class _CallScreenState extends State<CallScreen> {
                         children: [
                           Positioned.fill(
                             child: !ready
-                                ? const Center(
+                                ? Center(
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         CircularProgressIndicator(),
                                         SizedBox(height: 12),
                                         Text(
-                                          '연결 중...',
+                                          tr('연결 중...'),
                                           style: TextStyle(
                                             color: Colors.white70,
                                           ),

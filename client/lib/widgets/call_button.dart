@@ -5,6 +5,7 @@ import '../screens/call_screen.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'compact_menu_anchor.dart';
+import '../l10n/tr.dart';
 
 /// 채팅방 헤더의 화상회의 버튼. 서버에 LiveKit이 없으면(session.callsEnabled) 아예 안 보이고,
 /// 비밀 대화에서도 숨긴다(SFU가 미디어를 복호화해 중계하므로 "서버가 내용을 모른다"는 약속과
@@ -33,10 +34,10 @@ class CallButton extends StatelessWidget {
         Widget button(VoidCallback onPressed) => IconButton(
           key: const ValueKey('call-button'),
           tooltip: joined
-              ? '통화 화면 열기'
+              ? tr('통화 화면 열기')
               : ongoing
-              ? '진행 중인 화상회의 참여 ($count명)'
-              : '화상회의 시작',
+              ? tr('진행 중인 화상회의 참여 ({count}명)', {'count': count})
+              : tr('화상회의 시작'),
           icon: Badge(
             isLabelVisible: ongoing && !joined,
             label: Text('$count'),
@@ -56,13 +57,13 @@ class CallButton extends StatelessWidget {
               key: const ValueKey('call-with-video'),
               value: true,
               icon: Icons.videocam_outlined,
-              label: ongoing ? '화상으로 참여' : '화상으로 시작',
+              label: ongoing ? tr('화상으로 참여') : tr('화상으로 시작'),
             ),
             CompactMenuOption(
               key: const ValueKey('call-with-voice'),
               value: false,
               icon: Icons.mic_none,
-              label: ongoing ? '음성으로 참여(카메라 끔)' : '음성으로 시작(카메라 끔)',
+              label: ongoing ? tr('음성으로 참여(카메라 끔)') : tr('음성으로 시작(카메라 끔)'),
             ),
           ],
           builder: (context, open, toggle) => button(toggle),
@@ -78,7 +79,9 @@ class CallButton extends StatelessWidget {
       try {
         await session.joinCall(room.id, camera: camera);
       } catch (e) {
-        if (context.mounted) showAppToast(context, '통화를 시작하지 못했습니다: $e');
+        if (context.mounted) {
+          showAppToast(context, tr('통화를 시작하지 못했습니다: {e}', {'e': e}));
+        }
         return;
       }
     }

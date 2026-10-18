@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../services/session.dart';
+import '../l10n/tr.dart';
 
 /// 팀·그룹채팅 아이콘의 선택 상태 — 사진이 있으면 사진, 없으면 이모지, 둘 다 없으면 이름 앞
 /// 2글자 이니셜. [color]는 이니셜·이모지의 배경색이다.
@@ -127,7 +128,7 @@ class _IconEditDialogState extends State<_IconEditDialog> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('업로드 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('업로드 실패: {e}', {'e': e}))));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -166,7 +167,7 @@ class _IconEditDialogState extends State<_IconEditDialog> {
               ),
               const SizedBox(height: 8),
               Text(
-                '사진은 정사각형 이미지를 권장합니다.',
+                tr('사진은 정사각형 이미지를 권장합니다.'),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).hintColor,
@@ -182,14 +183,14 @@ class _IconEditDialogState extends State<_IconEditDialog> {
                 Wrap(
                   alignment: WrapAlignment.center,
                   children: [
-                    TextButton(onPressed: _reset, child: const Text('초기화')),
+                    TextButton(onPressed: _reset, child: Text(tr('초기화'))),
                     TextButton(
                       onPressed: _pickIcon,
-                      child: const Text('아이콘 선택하기'),
+                      child: Text(tr('아이콘 선택하기')),
                     ),
                     TextButton(
                       onPressed: _uploadPhoto,
-                      child: const Text('사진 올리기'),
+                      child: Text(tr('사진 올리기')),
                     ),
                   ],
                 ),
@@ -201,7 +202,7 @@ class _IconEditDialogState extends State<_IconEditDialog> {
                       onPressed: _busy
                           ? null
                           : () => Navigator.of(context).pop(),
-                      child: const Text('취소'),
+                      child: Text(tr('취소')),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -210,7 +211,7 @@ class _IconEditDialogState extends State<_IconEditDialog> {
                       onPressed: _busy
                           ? null
                           : () => Navigator.of(context).pop(_choice),
-                      child: const Text('확인'),
+                      child: Text(tr('확인')),
                     ),
                   ),
                 ],

@@ -12,6 +12,7 @@ import 'chat_screen.dart';
 import 'create_topic_screen.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'topic_members_dialog.dart' show TopicSearchField;
+import '../l10n/tr.dart';
 
 /// 참여 가능한 토픽 보기 — 넓은 화면(PC)은 떠 있는 창, 좁은 화면(모바일)은 전체 화면.
 /// 참여하거나 이미 참여 중인 토픽을 열면 이 창을 닫고 [onOpenRoom]으로 그 토픽을 연다.
@@ -91,7 +92,7 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen>
     setState(() => _error = null);
     try {
       final team = session.currentTeam;
-      if (team == null) throw const ApiException('팀을 먼저 선택하세요.');
+      if (team == null) throw ApiException(tr('팀을 먼저 선택하세요.'));
       final topics = await session.api!.browseTopics(team.id);
       if (!mounted) return;
       setState(() => _topics = topics);
@@ -156,14 +157,14 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen>
     } catch (e) {
       if (!mounted) return;
       setState(() => _joiningId = null);
-      showAppToast(context, '참여하지 못했습니다: $e');
+      showAppToast(context, tr('참여하지 못했습니다: {e}', {'e': e}));
     }
   }
 
   void _open(TopicBrowseEntry topic) {
     final room = session.roomById(topic.id);
     if (room == null) {
-      showAppToast(context, '토픽을 열 수 없습니다. 잠시 후 다시 시도하세요.');
+      showAppToast(context, tr('토픽을 열 수 없습니다. 잠시 후 다시 시도하세요.'));
       return;
     }
     _closeAndOpen(room);
@@ -191,28 +192,36 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen>
     final search = TopicSearchField(
       fieldKey: const ValueKey('topic-browse-search'),
       controller: _search,
-      hintText: '토픽 이름이나 설명으로 검색',
+      hintText: tr('토픽 이름이나 설명으로 검색'),
       onChanged: (_) => setState(() {}),
     );
     final tabBar = TabBar(
       controller: _tabs,
       tabs: [
-        Tab(text: '참여 가능한 토픽 ${joinable.length}'),
-        Tab(text: '참여 중인 토픽 ${joined.length}'),
+        Tab(
+          text: tr('참여 가능한 토픽 {joinable.length}', {
+            'joinable.length': joinable.length,
+          }),
+        ),
+        Tab(
+          text: tr('참여 중인 토픽 {joined.length}', {
+            'joined.length': joined.length,
+          }),
+        ),
       ],
     );
     final Widget content;
     if (_error != null) {
       content = _Message(
         icon: Icons.cloud_off_outlined,
-        text: '토픽 목록을 불러오지 못했습니다.\n$_error',
+        text: tr('토픽 목록을 불러오지 못했습니다.\n{_error}', {'_error': _error}),
         action: OutlinedButton.icon(
           onPressed: () {
             setState(() => _topics = null);
             _load();
           },
           icon: const Icon(Icons.refresh, size: 18),
-          label: const Text('다시 시도'),
+          label: Text(tr('다시 시도')),
         ),
       );
     } else if (_topics == null) {
@@ -229,7 +238,7 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen>
 
     if (widget.asDialog) {
       return FloatingDialog(
-        title: '참여 가능한 토픽 보기',
+        title: tr('참여 가능한 토픽 보기'),
         maxWidth: 640,
         maxHeight: 680,
         child: Column(
@@ -243,7 +252,7 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen>
                   OutlinedButton.icon(
                     onPressed: _createTopic,
                     icon: const Icon(Icons.add, size: 18),
-                    label: const Text('새로운 토픽 생성하기'),
+                    label: Text(tr('새로운 토픽 생성하기')),
                   ),
                 ],
               ],
@@ -256,12 +265,12 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen>
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('참여 가능한 토픽 보기')),
+      appBar: AppBar(title: Text(tr('참여 가능한 토픽 보기'))),
       // 새 토픽 만들기는 팀 설정(토픽 생성 권한)에 따라 막혀 있을 수 있다 — 찾아서 참여하기는
       // 그 설정과 무관하게 항상 쓸 수 있다.
       floatingActionButton: canCreate
           ? FloatingActionButton(
-              tooltip: '새로운 토픽 생성하기',
+              tooltip: tr('새로운 토픽 생성하기'),
               onPressed: _createTopic,
               child: const Icon(Icons.add),
             )
@@ -292,20 +301,20 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen>
       if (_search.text.trim().isNotEmpty) {
         return _Message(
           icon: Icons.search_off,
-          text: "'${_search.text.trim()}'에 맞는 토픽이 없습니다.",
+          text: tr('\'{p0}\'에 맞는 토픽이 없습니다.', {'p0': _search.text.trim()}),
         );
       }
       if (joinedTab) {
-        return const _Message(icon: Icons.tag, text: '참여 중인 토픽이 없습니다.');
+        return _Message(icon: Icons.tag, text: tr('참여 중인 토픽이 없습니다.'));
       }
       return _Message(
         icon: Icons.travel_explore,
-        text: '참여할 수 있는 공개 토픽이 없습니다.\n공개 토픽이 새로 생기면 여기에 보입니다.',
+        text: tr('참여할 수 있는 공개 토픽이 없습니다.\n공개 토픽이 새로 생기면 여기에 보입니다.'),
         action: canCreate && widget.asDialog
             ? FilledButton.tonalIcon(
                 onPressed: _createTopic,
                 icon: const Icon(Icons.add, size: 18),
-                label: const Text('새로운 토픽 생성하기'),
+                label: Text(tr('새로운 토픽 생성하기')),
               )
             : null,
       );
@@ -366,11 +375,16 @@ class _TopicRow extends StatelessWidget {
     final scheme = theme.colorScheme;
     final description = topic.description?.trim();
     final meta = topic.adminNames.isEmpty
-        ? '멤버 ${topic.memberCount}명'
-        : '멤버 ${topic.memberCount}명 · 관리자 ${topic.adminNames.join(', ')}';
+        ? tr('멤버 {topic.memberCount}명', {
+            'topic.memberCount': topic.memberCount,
+          })
+        : tr('멤버 {topic.memberCount}명 · 관리자 {p0}', {
+            'topic.memberCount': topic.memberCount,
+            'p0': topic.adminNames.join(', '),
+          });
     final Widget button;
     if (topic.joined) {
-      button = OutlinedButton(onPressed: onOpen, child: const Text('열기'));
+      button = OutlinedButton(onPressed: onOpen, child: Text(tr('열기')));
     } else if (busy) {
       button = const FilledButton(
         onPressed: null,
@@ -383,7 +397,7 @@ class _TopicRow extends StatelessWidget {
     } else {
       button = FilledButton(
         onPressed: guest || locked ? null : onJoin,
-        child: const Text('참여하기'),
+        child: Text(tr('참여하기')),
       );
     }
     return Padding(
@@ -430,9 +444,9 @@ class _TopicRow extends StatelessWidget {
                       ),
                     ),
                     if (!topic.isPublic) const PrivateTopicLock(),
-                    if (topic.isBoard) const TopicBadge.board(),
-                    if (topic.readOnly) const TopicBadge.readOnly(),
-                    if (topic.archived) const TopicBadge.archived(),
+                    if (topic.isBoard) TopicBadge.board(),
+                    if (topic.readOnly) TopicBadge.readOnly(),
+                    if (topic.archived) TopicBadge.archived(),
                   ],
                 ),
                 if (description != null && description.isNotEmpty) ...[
@@ -461,7 +475,7 @@ class _TopicRow extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: !topic.joined && guest
-                ? Tooltip(message: '준회원은 토픽에 직접 참여할 수 없습니다', child: button)
+                ? Tooltip(message: tr('준회원은 토픽에 직접 참여할 수 없습니다'), child: button)
                 : button,
           ),
         ],

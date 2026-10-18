@@ -29,6 +29,7 @@ import 'notification_settings_dialog.dart';
 import 'room_avatar.dart';
 import 'team_avatar.dart';
 import 'unread_badge.dart';
+import '../l10n/tr.dart';
 
 /// 알림 센터에서 안 읽은 "공지"가 있는 방을 눌러 열었을 때, 그 방의 공지 패널을 함께 연다(PC는 오른쪽 패널, 모바일은
 /// 전체 화면 — 안 읽은 공지에는 "안 읽음" 표시가 붙고, 하나를 눌러 상세를 본 뒤 ←로 이 목록으로 돌아온다).
@@ -87,7 +88,7 @@ class NotificationBellButton extends StatelessWidget {
           offset: const Offset(4, -4),
           child: const Icon(Icons.notifications_outlined),
         ),
-        tooltip: '알림 센터',
+        tooltip: tr('알림 센터'),
         onPressed: onPressed,
       ),
     );
@@ -112,7 +113,7 @@ void openProjectFromNotification(
       ? null
       : AppLinks.task(
           id: taskId,
-          title: n.title.isNotEmpty ? n.title : (n.projectName ?? '업무'),
+          title: n.title.isNotEmpty ? n.title : (n.projectName ?? tr('업무')),
           project: n.projectName,
           color: n.projectColor,
         );
@@ -262,7 +263,7 @@ class _NotificationsPanelState extends State<NotificationsPanel>
     unawaited(_center.markRead(n));
     final room = n.roomId == null ? null : widget.session.roomById(n.roomId!);
     if (room == null) {
-      showAppToast(context, '더 이상 볼 수 없는 대화입니다.');
+      showAppToast(context, tr('더 이상 볼 수 없는 대화입니다.'));
       return;
     }
     widget.onSelectRoom(room, messageId: n.messageId, announcementPopup: false);
@@ -314,16 +315,20 @@ class _NotificationsPanelState extends State<NotificationsPanel>
       final ok = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('모두 읽음'),
-          content: Text('안 읽은 대화 ${chatRooms.length}개를 읽음으로 표시할까요?'),
+          title: Text(tr('모두 읽음')),
+          content: Text(
+            tr('안 읽은 대화 {chatRooms.length}개를 읽음으로 표시할까요?', {
+              'chatRooms.length': chatRooms.length,
+            }),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('취소'),
+              child: Text(tr('취소')),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('읽음으로 표시'),
+              child: Text(tr('읽음으로 표시')),
             ),
           ],
         ),
@@ -345,7 +350,7 @@ class _NotificationsPanelState extends State<NotificationsPanel>
         await _center.markApprovalRead();
       }
     } catch (e) {
-      if (mounted) showAppToast(context, '읽음 처리하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('읽음 처리하지 못했습니다: {e}', {'e': e}));
     }
     // 방 쪽 — 안 읽은 공지(보드·공지·전체 탭)와 안 읽은 대화.
     if (tab == NotificationTab.board || tab == NotificationTab.all) {
@@ -395,14 +400,14 @@ class _NotificationsPanelState extends State<NotificationsPanel>
                   children: [
                     Expanded(
                       child: Text(
-                        '알림 센터',
+                        tr('알림 센터'),
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
                     IconButton(
                       key: const ValueKey('notif-settings'),
                       icon: const Icon(Icons.settings_outlined),
-                      tooltip: '알림 설정',
+                      tooltip: tr('알림 설정'),
                       onPressed: () =>
                           showNotificationSettingsDialog(context, session),
                     ),
@@ -470,7 +475,7 @@ class _NotificationsPanelState extends State<NotificationsPanel>
           TextButton(
             key: const ValueKey('notif-read-all'),
             onPressed: hasUnread ? _markAllRead : null,
-            child: const Text('모두 읽음'),
+            child: Text(tr('모두 읽음')),
           ),
         ],
       ),
@@ -478,18 +483,18 @@ class _NotificationsPanelState extends State<NotificationsPanel>
   }
 
   String _emptyText(NotificationTab tab) {
-    if (_center.unreadOnly(tab)) return '안 읽은 알림이 없습니다.';
+    if (_center.unreadOnly(tab)) return tr('안 읽은 알림이 없습니다.');
     return switch (tab) {
-      NotificationTab.all => '새 알림이 없습니다.',
+      NotificationTab.all => tr('새 알림이 없습니다.'),
       NotificationTab.mention => switch (_center.mentionFilter) {
-        MentionFilter.all => '멘션 알림이 없습니다.',
-        MentionFilter.personal => '나를 멘션한 알림이 없습니다.',
-        MentionFilter.everyone => '@all 멘션 알림이 없습니다.',
+        MentionFilter.all => tr('멘션 알림이 없습니다.'),
+        MentionFilter.personal => tr('나를 멘션한 알림이 없습니다.'),
+        MentionFilter.everyone => tr('@all 멘션 알림이 없습니다.'),
       },
-      NotificationTab.unreadChats => '안 읽은 메시지가 없습니다.',
-      NotificationTab.board => '보드·공지 알림이 없습니다.',
-      NotificationTab.project => '프로젝트 알림이 없습니다.',
-      NotificationTab.approval => '결재 알림이 없습니다.',
+      NotificationTab.unreadChats => tr('안 읽은 메시지가 없습니다.'),
+      NotificationTab.board => tr('보드·공지 알림이 없습니다.'),
+      NotificationTab.project => tr('프로젝트 알림이 없습니다.'),
+      NotificationTab.approval => tr('결재 알림이 없습니다.'),
     };
   }
 
@@ -521,7 +526,7 @@ class _NotificationsPanelState extends State<NotificationsPanel>
                 Text(error, textAlign: TextAlign.center),
                 TextButton(
                   onPressed: () => _center.refresh(tab),
-                  child: const Text('다시 시도'),
+                  child: Text(tr('다시 시도')),
                 ),
               ],
             ),
@@ -652,7 +657,7 @@ class _MentionFilterButton extends StatelessWidget {
       builder: (context, open, toggle) => Semantics(
         expanded: open,
         child: Tooltip(
-          message: '멘션 종류',
+          message: tr('멘션 종류'),
           child: InkWell(
             key: const ValueKey('notif-mention-filter'),
             onTap: () => open ? toggle() : _open(context, toggle),
@@ -872,7 +877,7 @@ class _ServerNotificationRow extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        n.roomName ?? '(볼 수 없는 대화)',
+                        n.roomName ?? tr('(볼 수 없는 대화)'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -986,7 +991,9 @@ class _AnnouncementRow extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          '공지 · ${announcement?.previewText ?? '새 공지가 있습니다'}',
+                          tr('공지 · {p0}', {
+                            'p0': announcement?.previewText ?? tr('새 공지가 있습니다'),
+                          }),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(

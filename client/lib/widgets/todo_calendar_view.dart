@@ -10,8 +10,17 @@ import 'filter_dropdown.dart' show iconForRoomType;
 import 'todo_menu.dart' show TodoCardActions;
 import 'todo_widgets.dart' show TodoPageHeader, TodoViewMode;
 import 'todos_panel.dart' show TodoCard, todoCardColor, todoListBackgroundColor;
+import '../l10n/tr.dart';
 
-const _weekdayHeaders = ['일', '월', '화', '수', '목', '금', '토'];
+final _weekdayHeaders = [
+  tr('일'),
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+];
 
 /// 달력 한 칸의 높이 — 날짜 원(30)과 그 아래 할 일 점(4)에 위아래 여백.
 const _cellHeight = 44.0;
@@ -55,7 +64,7 @@ class TodoCalendarPage extends StatelessWidget {
     );
     if (mode != TodoViewMode.panel) {
       return Scaffold(
-        appBar: AppBar(title: const Text('할 일 일정')),
+        appBar: AppBar(title: Text(tr('할 일 일정'))),
         body: SafeArea(top: false, child: view),
       );
     }
@@ -292,11 +301,17 @@ class _TodoCalendarViewState extends State<TodoCalendarView> {
                 context,
                 'todo-cal-prev-year',
                 Icons.keyboard_double_arrow_left,
-                '이전 해',
+                tr('이전 해'),
                 -12,
               ),
               _bar(context),
-              _arrow(context, 'todo-cal-prev', Icons.chevron_left, '이전 달', -1),
+              _arrow(
+                context,
+                'todo-cal-prev',
+                Icons.chevron_left,
+                tr('이전 달'),
+                -1,
+              ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 2),
                 child: Text(
@@ -308,13 +323,19 @@ class _TodoCalendarViewState extends State<TodoCalendarView> {
                   ),
                 ),
               ),
-              _arrow(context, 'todo-cal-next', Icons.chevron_right, '다음 달', 1),
+              _arrow(
+                context,
+                'todo-cal-next',
+                Icons.chevron_right,
+                tr('다음 달'),
+                1,
+              ),
               _bar(context),
               _arrow(
                 context,
                 'todo-cal-next-year',
                 Icons.keyboard_double_arrow_right,
-                '다음 해',
+                tr('다음 해'),
                 12,
               ),
               const Spacer(),
@@ -333,7 +354,7 @@ class _TodoCalendarViewState extends State<TodoCalendarView> {
                   textStyle: theme.textTheme.labelLarge?.copyWith(fontSize: 12),
                 ),
                 onPressed: _goToday,
-                child: const Text('오늘'),
+                child: Text(tr('오늘')),
               ),
               const SizedBox(width: 4),
             ],
@@ -423,7 +444,11 @@ class _TodoCalendarViewState extends State<TodoCalendarView> {
         container: true,
         button: true,
         selected: selected,
-        label: '${day.month}월 ${day.day}일, 할 일 $count개',
+        label: tr('{day.month}월 {day.day}일, 할 일 {count}개', {
+          'day.month': day.month,
+          'day.day': day.day,
+          'count': count,
+        }),
         onTap: select,
         excludeSemantics: true,
         child: InkWell(
@@ -502,7 +527,9 @@ class _TodoCalendarViewState extends State<TodoCalendarView> {
       child: count == null
           ? null
           : Text(
-              count == 0 ? '할 일이 없습니다.' : '$count개의 할 일이 있습니다.',
+              count == 0
+                  ? tr('할 일이 없습니다.')
+                  : tr('{count}개의 할 일이 있습니다.', {'count': count}),
               key: const ValueKey('todo-cal-day-count'),
               style: TextStyle(
                 fontSize: 13,
@@ -537,7 +564,7 @@ class _TodoCalendarViewState extends State<TodoCalendarView> {
           OutlinedButton(
             key: const ValueKey('todo-cal-retry'),
             onPressed: () => _c.loadCalendar(_month),
-            child: const Text('다시 시도'),
+            child: Text(tr('다시 시도')),
           ),
         ],
       ),

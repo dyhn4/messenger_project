@@ -12,6 +12,7 @@ import '../screens/project/project_window.dart' show openProjectWindow;
 import '../services/app_platform.dart';
 import '../services/session.dart';
 import 'side_panels.dart';
+import '../l10n/tr.dart';
 
 // ──────────────────────────────────────────────────────────────────────────
 // "메뉴"(상단 격자 아이콘) 항목 등록 구조 — 새 항목을 달 때 읽을 것
@@ -47,8 +48,11 @@ enum MenuSection {
   list('리스트'),
   tools('툴');
 
-  final String label;
-  const MenuSection(this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const MenuSection(this._labelKo);
 }
 
 class MenuEntry {
@@ -117,7 +121,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'schedule',
     section: MenuSection.create,
-    label: '메시지 예약',
+    label: tr('메시지 예약'),
     icon: const Icon(Icons.schedule_send_rounded),
     color: const Color(0xFF7048E8),
     background: const Color(0xFFEDE3FF),
@@ -128,7 +132,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'todos',
     section: MenuSection.create,
-    label: '할 일',
+    label: tr('할 일'),
     icon: const Icon(Icons.checklist_rounded),
     color: const Color(0xFF2B8A3E),
     background: const Color(0xFFDDF3E1),
@@ -139,7 +143,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'poll',
     section: MenuSection.create,
-    label: '투표',
+    label: tr('투표'),
     icon: const Icon(Icons.poll_rounded),
     color: const Color(0xFFD6336C),
     background: const Color(0xFFFFE0EC),
@@ -150,7 +154,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'reminder',
     section: MenuSection.create,
-    label: '리마인더',
+    label: tr('리마인더'),
     icon: const Icon(Icons.alarm_rounded),
     color: const Color(0xFFE8590C),
     background: const Color(0xFFFFE8D6),
@@ -163,7 +167,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'files',
     section: MenuSection.list,
-    label: '파일',
+    label: tr('파일'),
     icon: const Icon(Icons.description_rounded),
     color: const Color(0xFF1FAE85),
     background: const Color(0xFFDCF5EB),
@@ -173,7 +177,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'favorites',
     section: MenuSection.list,
-    label: '즐겨찾기',
+    label: tr('즐겨찾기'),
     icon: const Icon(Icons.star_rounded),
     color: const Color(0xFFE0A100),
     background: const Color(0xFFFFF1C2),
@@ -183,7 +187,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'bookmarks',
     section: MenuSection.list,
-    label: '북마크',
+    label: tr('북마크'),
     icon: const Icon(Icons.bookmark_rounded),
     color: const Color(0xFFD9480F),
     background: const Color(0xFFFFE8D6),
@@ -193,7 +197,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'links',
     section: MenuSection.list,
-    label: '링크',
+    label: tr('링크'),
     // 비스듬히 세운 사슬(잔디 메뉴의 링크 아이콘과 같은 방향).
     icon: Transform.rotate(angle: -math.pi / 4, child: const Icon(Icons.link)),
     color: const Color(0xFF2F6FDB),
@@ -204,7 +208,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'myposts',
     section: MenuSection.list,
-    label: '내가 쓴 글',
+    label: tr('내가 쓴 글'),
     icon: const Icon(Icons.edit_note_rounded),
     color: const Color(0xFF4263EB),
     background: const Color(0xFFDBE4FF),
@@ -214,7 +218,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'albums',
     section: MenuSection.list,
-    label: '앨범',
+    label: tr('앨범'),
     icon: const Icon(Icons.photo_library_rounded),
     color: const Color(0xFF9C36B5),
     background: const Color(0xFFF3DCFA),
@@ -224,7 +228,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'inquiries',
     section: MenuSection.list,
-    label: '문의함',
+    label: tr('문의함'),
     icon: const Icon(Icons.contact_support_rounded),
     color: const Color(0xFFB86A00),
     background: const Color(0xFFFFE7C2),
@@ -237,7 +241,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'calendar',
     section: MenuSection.tools,
-    label: '캘린더',
+    label: tr('캘린더'),
     icon: const Icon(Icons.calendar_month_rounded),
     color: const Color(0xFFE03131),
     background: const Color(0xFFFFE3E3),
@@ -255,7 +259,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'groupware',
     section: MenuSection.tools,
-    label: '그룹웨어',
+    label: tr('그룹웨어'),
     icon: const Icon(Icons.approval_rounded),
     color: const Color(0xFF5F3DC4),
     background: const Color(0xFFE5DBFF),
@@ -267,7 +271,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'drive',
     section: MenuSection.tools,
-    label: '드라이브',
+    label: tr('드라이브'),
     icon: const Icon(Icons.folder_shared_rounded),
     color: const Color(0xFFE8590C),
     background: const Color(0xFFFFE8CC),
@@ -278,7 +282,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'wiki',
     section: MenuSection.tools,
-    label: '위키',
+    label: tr('위키'),
     icon: const Icon(Icons.menu_book_rounded),
     color: const Color(0xFF2B8A3E),
     background: const Color(0xFFD3F9D8),
@@ -289,7 +293,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'mail',
     section: MenuSection.tools,
-    label: '메일',
+    label: tr('메일'),
     icon: const Icon(Icons.mail_rounded),
     color: const Color(0xFF1971C2),
     background: const Color(0xFFD0EBFF),
@@ -301,7 +305,7 @@ final menuEntries = <MenuEntry>[
   MenuEntry(
     key: 'project',
     section: MenuSection.tools,
-    label: '프로젝트',
+    label: tr('프로젝트'),
     icon: const Icon(Icons.track_changes),
     color: const Color(0xFF0C8599),
     background: const Color(0xFFD3F3F8),

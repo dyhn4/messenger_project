@@ -22,6 +22,8 @@ import '../widgets/muted_scrollbar.dart';
 import '../widgets/update_dialog.dart';
 import '../widgets/web_push_prompt.dart';
 import 'project/project_window.dart';
+import '../l10n/tr.dart';
+import '../widgets/language_picker.dart';
 
 const _appName = 'TangoTalk';
 
@@ -31,9 +33,9 @@ const _accentGreen = Color(0xFF2BB673);
 enum _Section { messenger, display, system }
 
 String _sectionLabel(_Section s) => switch (s) {
-  _Section.messenger => '메신저 설정',
-  _Section.display => '화면 설정',
-  _Section.system => '시스템 설정',
+  _Section.messenger => tr('메신저 설정'),
+  _Section.display => tr('화면 설정'),
+  _Section.system => tr('시스템 설정'),
 };
 
 IconData _sectionIcon(_Section s) => switch (s) {
@@ -151,7 +153,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       } catch (e) {
         if (!mounted) return;
         setState(() => _saving = false);
-        showAppToast(context, '휴대폰 알림 설정을 저장하지 못했습니다: $e');
+        showAppToast(context, tr('휴대폰 알림 설정을 저장하지 못했습니다: {e}', {'e': e}));
         return;
       }
     }
@@ -188,7 +190,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // 저장해도 창은 닫지 않는다 — 알약으로만 알린다(닫기는 [닫기]).
     if (!mounted) return;
     setState(() => _saving = false);
-    showAppToast(context, '저장했습니다.');
+    showAppToast(context, tr('저장했습니다.'));
   }
 
   void _select(_Section s) {
@@ -200,7 +202,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return FloatingDialog(
-      title: '환경설정',
+      title: tr('환경설정'),
       maxWidth: 820,
       maxHeight: 640,
       child: LayoutBuilder(
@@ -237,7 +239,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onPressed: _saving
                           ? null
                           : () => Navigator.of(context).pop(),
-                      child: const Text('닫기'),
+                      child: Text(tr('닫기')),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -250,7 +252,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               height: 18,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text('저장하기'),
+                          : Text(tr('저장하기')),
                     ),
                   ),
                 ],
@@ -373,19 +375,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   List<Widget> _messengerItems(BuildContext context) => [
     _Item(
-      label: '팀 전환 방식',
+      label: tr('팀 전환 방식'),
       child: Row(
         children: [
           _PillOption(
             selected: _teamSwitchStyle == TeamSwitchStyle.dropdown,
-            label: '드롭다운',
+            label: tr('드롭다운'),
             onTap: () =>
                 setState(() => _teamSwitchStyle = TeamSwitchStyle.dropdown),
           ),
           const SizedBox(width: 8),
           _PillOption(
             selected: _teamSwitchStyle == TeamSwitchStyle.tabs,
-            label: '탭(전체 보기)',
+            label: tr('탭(전체 보기)'),
             onTap: () =>
                 setState(() => _teamSwitchStyle = TeamSwitchStyle.tabs),
           ),
@@ -395,55 +397,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // 여러 팀에 속해 있으면 팀마다 들어가야 그 팀의 방이 보인다 — 종류별로 골라 지금 팀의 방 목록에 함께 모아 본다
     // (Session.showsInRoomList). 다른 팀의 방에는 팀 이름이 붙고, 누르면 그 팀으로 바뀌며 열린다.
     _Item(
-      label: '여러 팀 방 모아보기',
-      caption:
-          '켠 종류는 내가 속한 다른 팀의 방도 지금 팀의 방 목록에 함께 보입니다. 다른 팀의 방에는 팀 이름이 붙고, '
-          '누르면 그 팀으로 바뀌며 열립니다.',
+      label: tr('여러 팀 방 모아보기'),
+      caption: tr(
+        '켠 종류는 내가 속한 다른 팀의 방도 지금 팀의 방 목록에 함께 보입니다. 다른 팀의 방에는 팀 이름이 붙고, 누르면 그 팀으로 바뀌며 열립니다.',
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _CheckRow(
             key: const ValueKey('settings-gather-topics'),
             value: _gatherTopics,
-            label: '내가 속한 팀의 토픽방 모아보기',
+            label: tr('내가 속한 팀의 토픽방 모아보기'),
             onChanged: (v) => setState(() => _gatherTopics = v),
           ),
           _CheckRow(
             key: const ValueKey('settings-gather-groups'),
             value: _gatherGroupChats,
-            label: '내가 속한 팀의 그룹채팅방 모아보기',
+            label: tr('내가 속한 팀의 그룹채팅방 모아보기'),
             onChanged: (v) => setState(() => _gatherGroupChats = v),
           ),
           _CheckRow(
             key: const ValueKey('settings-gather-dms'),
             value: _gatherDms,
-            label: '내가 속한 팀의 채팅방 모아보기',
+            label: tr('내가 속한 팀의 채팅방 모아보기'),
             onChanged: (v) => setState(() => _gatherDms = v),
           ),
         ],
       ),
     ),
     _Item(
-      label: '휴대폰 알림',
-      caption:
-          '켜 두면 PC 앱이 켜져 있어도, 접속해 있지 않은 휴대폰으로 푸시 알림이 갑니다. 끄면 어느 기기로든 접속해 있는 '
-          '동안은 휴대폰 푸시를 보내지 않습니다. 이 설정은 계정에 저장돼 내 모든 기기에 같이 적용됩니다.',
+      label: tr('휴대폰 알림'),
+      caption: tr(
+        '켜 두면 PC 앱이 켜져 있어도, 접속해 있지 않은 휴대폰으로 푸시 알림이 갑니다. 끄면 어느 기기로든 접속해 있는 동안은 휴대폰 푸시를 보내지 않습니다. 이 설정은 계정에 저장돼 내 모든 기기에 같이 적용됩니다.',
+      ),
       child: _pushWhileOnline == null
           ? Text(
               widget.session.notificationCenter.settingsError != null
-                  ? '알림 설정을 불러오지 못했습니다. 잠시 후 다시 열어 주세요.'
-                  : '알림 설정을 불러오는 중…',
+                  ? tr('알림 설정을 불러오지 못했습니다. 잠시 후 다시 열어 주세요.')
+                  : tr('알림 설정을 불러오는 중…'),
               style: TextStyle(color: Theme.of(context).hintColor),
             )
           : _CheckRow(
               key: const ValueKey('settings-push-while-online'),
               value: _pushWhileOnline!,
-              label: '다른 기기 접속 중에도 휴대폰 알림 받기',
+              label: tr('다른 기기 접속 중에도 휴대폰 알림 받기'),
               onChanged: (v) => setState(() => _pushWhileOnline = v),
             ),
     ),
     _Item(
-      label: '메시지 내용 미리보기',
+      label: tr('메시지 내용 미리보기'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -451,7 +453,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               _PillOption(
                 selected: _messagePreviewMode == MessagePreviewMode.all,
-                label: '모든 메시지',
+                label: tr('모든 메시지'),
                 onTap: () => setState(
                   () => _messagePreviewMode = MessagePreviewMode.all,
                 ),
@@ -460,7 +462,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _PillOption(
                 selected:
                     _messagePreviewMode == MessagePreviewMode.publicTopicOnly,
-                label: '공개 토픽만',
+                label: tr('공개 토픽만'),
                 onTap: () => setState(
                   () =>
                       _messagePreviewMode = MessagePreviewMode.publicTopicOnly,
@@ -469,7 +471,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(width: 8),
               _PillOption(
                 selected: _messagePreviewMode == MessagePreviewMode.none,
-                label: '미리보기 안함',
+                label: tr('미리보기 안함'),
                 onTap: () => setState(
                   () => _messagePreviewMode = MessagePreviewMode.none,
                 ),
@@ -488,13 +490,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // 키보드로 보내는 방식이라 PC 전용 — 모바일은 키보드의 "전송" 버튼으로 보낸다.
     if (AppPlatform.isWindows)
       _Item(
-        label: '메시지 전송 옵션 설정',
+        label: tr('메시지 전송 옵션 설정'),
         child: Row(
           children: [
             Expanded(
               child: _SendOptionCard(
-                title: 'Enter로 전송',
-                subtitle: 'Shift + Enter로 줄바꿈',
+                title: tr('Enter로 전송'),
+                subtitle: tr('Shift + Enter로 줄바꿈'),
                 selected: !_sendWithShiftEnter,
                 onTap: () => setState(() => _sendWithShiftEnter = false),
               ),
@@ -502,8 +504,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(width: 12),
             Expanded(
               child: _SendOptionCard(
-                title: 'Shift + Enter로 전송',
-                subtitle: 'Enter로 줄바꿈',
+                title: tr('Shift + Enter로 전송'),
+                subtitle: tr('Enter로 줄바꿈'),
                 selected: _sendWithShiftEnter,
                 onTap: () => setState(() => _sendWithShiftEnter = true),
               ),
@@ -521,20 +523,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'PC 알림 창',
+          tr('PC 알림 창'),
           style: theme.textTheme.bodyMedium?.copyWith(
             fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 4),
         Text(
-          '새 메시지가 오면 화면 오른쪽 아래에 뜨는 알림 창의 크기와, 한꺼번에 쌓여 보이는 최대 개수입니다.',
+          tr('새 메시지가 오면 화면 오른쪽 아래에 뜨는 알림 창의 크기와, 한꺼번에 쌓여 보이는 최대 개수입니다.'),
           style: TextStyle(fontSize: 12, color: theme.hintColor),
         ),
         const SizedBox(height: 10),
         _NumberStepper(
           key: const ValueKey('settings-notify-popup-width'),
-          label: '가로',
+          label: tr('가로'),
           value: _popupWidth,
           min: NotificationPopupStyle.minWidth,
           max: NotificationPopupStyle.maxWidth,
@@ -546,7 +548,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 8),
         _NumberStepper(
           key: const ValueKey('settings-notify-popup-height'),
-          label: '세로',
+          label: tr('세로'),
           value: _popupHeight,
           min: NotificationPopupStyle.minHeight,
           max: NotificationPopupStyle.maxHeight,
@@ -558,13 +560,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 8),
         _NumberStepper(
           key: const ValueKey('settings-notify-popup-count'),
-          label: '최대 개수',
+          label: tr('최대 개수'),
           value: _popupMaxCards,
           min: NotificationPopupStyle.minCards,
           max: NotificationPopupStyle.maxCardsLimit,
           step: 1,
           defaultValue: NotificationPopupStyle.defaultMaxCards,
-          unit: '개',
+          unit: tr('개'),
           onChanged: (v) => setState(() => _popupMaxCards = v),
         ),
         const SizedBox(height: 12),
@@ -572,7 +574,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           key: const ValueKey('settings-notify-popup-preview'),
           onPressed: _previewPopup,
           icon: const Icon(Icons.visibility_outlined, size: 18),
-          label: const Text('알림 창 미리 보기'),
+          label: Text(tr('알림 창 미리 보기')),
         ),
       ],
     );
@@ -591,16 +593,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final last = i == _popupMaxCards;
       final shown = await showNotificationPopup(
         key: 'settings-preview-$i',
-        title: last ? '알림 창 미리 보기' : '미리 보기 $i',
-        body:
-            '가로 ${_popupWidth}px · 세로 ${_popupHeight}px · 최대 $_popupMaxCards개 — 새 메시지가 오면 이렇게 보입니다.',
+        title: last ? tr('알림 창 미리 보기') : tr('미리 보기 {i}', {'i': i}),
+        body: tr(
+          '가로 {_popupWidth}px · 세로 {_popupHeight}px · 최대 {_popupMaxCards}개 — 새 메시지가 오면 이렇게 보입니다.',
+          {
+            '_popupWidth': _popupWidth,
+            '_popupHeight': _popupHeight,
+            '_popupMaxCards': _popupMaxCards,
+          },
+        ),
         payload: '',
         style: style,
         force: true,
         sound: last,
       );
       if (!shown) {
-        if (mounted) showAppToast(context, '알림 창을 띄우지 못했습니다.');
+        if (mounted) showAppToast(context, tr('알림 창을 띄우지 못했습니다.'));
         return;
       }
     }
@@ -610,8 +618,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   List<Widget> _displayItems(BuildContext context) => [
     _Item(
-      label: '텍스트 크기',
-      caption: '채팅 내용(메시지·댓글)과 방 이름의 글자 크기를 조절합니다.',
+      label: tr('텍스트 크기'),
+      caption: tr('채팅 내용(메시지·댓글)과 방 이름의 글자 크기를 조절합니다.'),
       child: _TextSizeStepper(
         scale: _textScale,
         onChanged: (v) => setState(() => _textScale = v),
@@ -621,8 +629,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // 이 이름들이 없어서(그려도 기본 글꼴로만 보여 설정한 보람이 없다) 아예 숨긴다.
     if (AppPlatform.isWindows)
       _Item(
-        label: '글꼴',
-        caption: '새로 고른 글꼴은 저장한 뒤 적용됩니다.',
+        label: tr('글꼴'),
+        caption: tr('새로 고른 글꼴은 저장한 뒤 적용됩니다.'),
         child: _FontFilterButton(
           value: _fontFamily,
           options: _systemFonts,
@@ -630,13 +638,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     _Item(
-      label: '화면 테마',
-      caption: '본인이 선호하는 컬러 테마를 설정할 수 있습니다.',
+      label: tr('화면 테마'),
+      caption: tr('본인이 선호하는 컬러 테마를 설정할 수 있습니다.'),
       child: Row(
         children: [
           Expanded(
             child: _ThemeCard(
-              label: '화이트 (기본)',
+              label: tr('화이트 (기본)'),
               selected: _themeMode != ThemeMode.dark,
               onTap: () => setState(() => _themeMode = ThemeMode.light),
             ),
@@ -644,7 +652,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(width: 12),
           Expanded(
             child: _ThemeCard(
-              label: '다크',
+              label: tr('다크'),
               selected: _themeMode == ThemeMode.dark,
               onTap: () => setState(() => _themeMode = ThemeMode.dark),
             ),
@@ -654,7 +662,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
     if (AppPlatform.isWindows)
       _Item(
-        label: '반투명',
+        label: tr('반투명'),
         child: Row(
           children: [
             Expanded(
@@ -686,24 +694,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     if (AppPlatform.isWindows)
       _Item(
-        label: '창 깜빡임',
-        caption: '알림이 왔을 때 작업표시줄 버튼과 함께 메신저 창의 테두리도 깜빡일지 정합니다.',
+        label: tr('창 깜빡임'),
+        caption: tr('알림이 왔을 때 작업표시줄 버튼과 함께 메신저 창의 테두리도 깜빡일지 정합니다.'),
         child: RadioGroup<bool>(
           groupValue: _flashWindowFrame,
           onChanged: (v) => setState(() => _flashWindowFrame = v ?? true),
-          child: const Column(
+          child: Column(
             children: [
               RadioListTile<bool>(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 value: false,
-                title: Text('깜빡이지 않음'),
+                title: Text(tr('깜빡이지 않음')),
               ),
               RadioListTile<bool>(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 value: true,
-                title: Text('깜빡임 (기본값)'),
+                title: Text(tr('깜빡임 (기본값)')),
               ),
             ],
           ),
@@ -711,32 +719,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     if (AppPlatform.isWindows)
       _Item(
-        label: '작업표시줄 깜빡임',
-        caption:
-            '메신저 창을 보고 있는 중에, 지금 보고 있는 방이 아닌 다른 방에 메시지가 오면 '
-            '작업표시줄의 $_appName 버튼을 깜빡일지 정합니다.',
+        label: tr('작업표시줄 깜빡임'),
+        caption: tr(
+          '메신저 창을 보고 있는 중에, 지금 보고 있는 방이 아닌 다른 방에 메시지가 오면 작업표시줄의 {_appName} 버튼을 깜빡일지 정합니다.',
+          {'_appName': _appName},
+        ),
         child: RadioGroup<bool>(
           groupValue: _flashTaskbarWhenFocused,
           onChanged: (v) =>
               setState(() => _flashTaskbarWhenFocused = v ?? false),
-          child: const Column(
+          child: Column(
             children: [
               RadioListTile<bool>(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 value: false,
-                title: Text('깜빡이지 않음 (기본값)'),
+                title: Text(tr('깜빡이지 않음 (기본값)')),
               ),
               RadioListTile<bool>(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 value: true,
-                title: Text('해당 채팅방을 열 때까지 계속 깜빡임'),
+                title: Text(tr('해당 채팅방을 열 때까지 계속 깜빡임')),
               ),
             ],
           ),
         ),
       ),
+    // 화면 언어 — 고르는 즉시 바뀐다(저장 단추와 상관없이). 이름은 두 언어로 적어 지금 언어를 못 읽어도 찾게 한다.
+    // 맨 아래에 둬서 원래 있던 항목 자리는 그대로다(로그인 화면 오른쪽 위 지구본에서도 고른다).
+    _Item(
+      label: AppLocale.isKorean ? '언어 (Language)' : 'Language (언어)',
+      caption: tr('고르는 즉시 바뀝니다. 일부 글은 앱을 다시 시작하면 바뀝니다.'),
+      child: const Align(
+        alignment: Alignment.centerLeft,
+        child: LanguagePicker(),
+      ),
+    ),
   ];
 
   // ── 시스템 설정 ──
@@ -746,31 +765,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return [
       if (AppPlatform.isWindows) ...[
         _Item(
-          label: '시작 시 자동 실행',
+          label: tr('시작 시 자동 실행'),
           child: _CheckRow(
             value: _launchAtStartup,
-            label: '시스템 시작 시 $_appName 자동 실행',
+            label: tr('시스템 시작 시 {_appName} 자동 실행', {'_appName': _appName}),
             onChanged: (v) => setState(() => _launchAtStartup = v),
           ),
         ),
         _Item(
-          label: '항상 위로',
+          label: tr('항상 위로'),
           child: _CheckRow(
             value: _alwaysOnTop,
-            label: '다른 창 위에 항상 띄워두기',
+            label: tr('다른 창 위에 항상 띄워두기'),
             onChanged: (v) => setState(() => _alwaysOnTop = v),
           ),
         ),
       ],
       if (kIsWeb)
         _Item(
-          label: '알림',
+          label: tr('알림'),
           child: WebNotificationSetting(session: widget.session),
         ),
       // 웹은 저장 위치를 브라우저가 정한다(받은 파일은 브라우저 다운로드로 내려간다).
       if (!kIsWeb)
         _Item(
-          label: '파일 다운로드',
+          label: tr('파일 다운로드'),
           // 안드로이드는 폴더를 고르지 않는다 — 폴더 선택 창에서 Download 자체를 고를 수
           // 없어서(안드로이드 11+ OS 제한) 늘 Download/TangoTalk에 바로 저장한다.
           child: AppPlatform.isAndroid
@@ -781,24 +800,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       if (AppPlatform.isWindows)
         _Item(
-          label: '자동 잠금',
-          caption:
-              'PC가 절전 모드에 들어가거나 화면이 꺼지면 메신저를 잠급니다. 다시 열 때 로그인 '
-              '비밀번호를 입력해야 잠금이 풀립니다.',
+          label: tr('자동 잠금'),
+          caption: tr(
+            'PC가 절전 모드에 들어가거나 화면이 꺼지면 메신저를 잠급니다. 다시 열 때 로그인 비밀번호를 입력해야 잠금이 풀립니다.',
+          ),
           child: _CheckRow(
             value: _autoLockOnSleep,
-            label: '절전모드 시 $_appName 자동 잠금',
+            label: tr('절전모드 시 {_appName} 자동 잠금', {'_appName': _appName}),
             onChanged: (v) => setState(() => _autoLockOnSleep = v),
           ),
         ),
       _Item(
-        label: '버전 정보',
+        label: tr('버전 정보'),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               _packageInfo == null
-                  ? '확인 중...'
+                  ? tr('확인 중...')
                   : '$_appName ${_packageInfo!.version}',
               style: TextStyle(color: hint),
             ),
@@ -811,7 +830,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      '새 버전 ${widget.session.updateAvailableVersion} 사용 가능',
+                      tr('새 버전 {widget.session.updateAvailableVersion} 사용 가능', {
+                        'widget.session.updateAvailableVersion':
+                            widget.session.updateAvailableVersion,
+                      }),
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.primary,
                         fontWeight: FontWeight.w600,
@@ -827,7 +849,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                       icon: const Icon(Icons.system_update_outlined, size: 18),
-                      label: const Text('업데이트'),
+                      label: Text(tr('업데이트')),
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                         minimumSize: const Size(0, 32),
@@ -849,7 +871,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         _CheckRow(
           value: _downloadWithoutAsking,
-          label: '다운로드 시 저장 위치 물어보지 않고 아래 경로로 즉시 다운로드',
+          label: tr('다운로드 시 저장 위치 물어보지 않고 아래 경로로 즉시 다운로드'),
           onChanged: (v) => setState(() => _downloadWithoutAsking = v),
         ),
         const SizedBox(height: 8),
@@ -868,7 +890,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    _downloadFolder.isEmpty ? '다운로드 폴더 선택' : _downloadFolder,
+                    _downloadFolder.isEmpty
+                        ? tr('다운로드 폴더 선택')
+                        : _downloadFolder,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -879,24 +903,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        Text('다운로드 완료 시', style: Theme.of(context).textTheme.labelLarge),
+        Text(tr('다운로드 완료 시'), style: Theme.of(context).textTheme.labelLarge),
         RadioGroup<bool>(
           groupValue: _openFolderAfterDownload,
           onChanged: (v) =>
               setState(() => _openFolderAfterDownload = v ?? true),
-          child: const Column(
+          child: Column(
             children: [
               RadioListTile<bool>(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 value: true,
-                title: Text('다운로드가 완료된 폴더 열기'),
+                title: Text(tr('다운로드가 완료된 폴더 열기')),
               ),
               RadioListTile<bool>(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 value: false,
-                title: Text('아무것도 하지 않기'),
+                title: Text(tr('아무것도 하지 않기')),
               ),
             ],
           ),
@@ -1146,7 +1170,7 @@ class _TextSizeStepper extends StatelessWidget {
     final canIncrease = scale < maxTextScale - 0.001;
     return Row(
       children: [
-        Text('작게', style: TextStyle(color: theme.hintColor, fontSize: 12)),
+        Text(tr('작게'), style: TextStyle(color: theme.hintColor, fontSize: 12)),
         const SizedBox(width: 8),
         _StepButton(
           icon: Icons.remove,
@@ -1170,7 +1194,7 @@ class _TextSizeStepper extends StatelessWidget {
               ),
               child: Center(
                 child: Text(
-                  '$percent% 기본 크기',
+                  tr('{percent}% 기본 크기', {'percent': percent}),
                   style: TextStyle(
                     fontWeight: percent == 100 ? FontWeight.w600 : null,
                     color: percent == 100 ? _accentGreen : null,
@@ -1188,7 +1212,7 @@ class _TextSizeStepper extends StatelessWidget {
               : null,
         ),
         const SizedBox(width: 8),
-        Text('크게', style: TextStyle(color: theme.hintColor, fontSize: 12)),
+        Text(tr('크게'), style: TextStyle(color: theme.hintColor, fontSize: 12)),
       ],
     );
   }
@@ -1231,7 +1255,10 @@ class _NumberStepper extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Tooltip(
-          message: '기본값($defaultValue$unit)으로',
+          message: tr('기본값({defaultValue}{unit})으로', {
+            'defaultValue': defaultValue,
+            'unit': unit,
+          }),
           child: InkWell(
             borderRadius: BorderRadius.circular(20),
             onTap: () => onChanged(defaultValue),
@@ -1247,7 +1274,7 @@ class _NumberStepper extends StatelessWidget {
               ),
               child: Center(
                 child: Text(
-                  '$value$unit${isDefault ? ' (기본)' : ''}',
+                  '$value$unit${isDefault ? tr(' (기본)') : ''}',
                   style: TextStyle(
                     fontWeight: isDefault ? FontWeight.w600 : null,
                     color: isDefault ? _accentGreen : null,
@@ -1385,7 +1412,7 @@ class _FontFilterPanelState extends State<_FontFilterPanel> {
               if (_filter.isEmpty)
                 ListTile(
                   dense: true,
-                  title: const Text('시스템 기본'),
+                  title: Text(tr('시스템 기본')),
                   trailing: widget.value.isEmpty
                       ? const Icon(Icons.check, size: 18)
                       : null,
@@ -1496,18 +1523,19 @@ class _IosDownloadFolder extends StatelessWidget {
             border: Border.all(color: Theme.of(context).dividerColor),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: const Row(
+          child: Row(
             children: [
               Icon(Icons.folder_outlined, size: 18),
               SizedBox(width: 8),
-              Expanded(child: Text('파일 앱 > 나의 iPhone > TangoTalk')),
+              Expanded(child: Text(tr('파일 앱 > 나의 iPhone > TangoTalk'))),
             ],
           ),
         ),
         const SizedBox(height: 6),
         Text(
-          '다운로드한 파일은 "파일" 앱의 이 폴더에 바로 저장됩니다. 같은 이름의 파일이 있으면 '
-          '"이름 (1)"처럼 번호가 붙습니다.',
+          tr(
+            '다운로드한 파일은 "파일" 앱의 이 폴더에 바로 저장됩니다. 같은 이름의 파일이 있으면 "이름 (1)"처럼 번호가 붙습니다.',
+          ),
           style: TextStyle(fontSize: 12, color: hint),
         ),
       ],
@@ -1540,8 +1568,9 @@ class _AndroidDownloadFolder extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          '다운로드한 파일은 휴대폰의 이 폴더에 바로 저장됩니다. 같은 이름의 파일이 있으면 '
-          '"이름 (1)"처럼 번호가 붙습니다.',
+          tr(
+            '다운로드한 파일은 휴대폰의 이 폴더에 바로 저장됩니다. 같은 이름의 파일이 있으면 "이름 (1)"처럼 번호가 붙습니다.',
+          ),
           style: TextStyle(fontSize: 12, color: hint),
         ),
       ],

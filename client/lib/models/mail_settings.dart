@@ -1,3 +1,5 @@
+import '../l10n/tr.dart';
+
 /// 관리자 콘솔 "메일" 탭 — 서버의 메일(SMTP) 설정과 멘션 요약 메일 설정(server/src/admin.js GET /api/admin/mail). 비밀번호는
 /// 서버가 다시 내려주지 않아 설정 여부([passwordConfigured])만 있다.
 class MailSettings {
@@ -154,28 +156,30 @@ class SmtpPreset {
   });
 }
 
-const smtpPresets = [
+final smtpPresets = [
   SmtpPreset(
-    label: '네이버',
+    label: tr('네이버'),
     host: 'smtp.naver.com',
     port: 465,
     security: 'ssl',
-    note:
-        '네이버 메일 → 환경설정 → POP3/IMAP 설정에서 SMTP 사용을 켜고, 2단계 인증을 쓰면 네이버 보안 설정에서 만든 앱 비밀번호를 넣으세요. 계정은 전체 주소(아이디@naver.com).',
+    note: tr(
+      '네이버 메일 → 환경설정 → POP3/IMAP 설정에서 SMTP 사용을 켜고, 2단계 인증을 쓰면 네이버 보안 설정에서 만든 앱 비밀번호를 넣으세요. 계정은 전체 주소(아이디@naver.com).',
+    ),
   ),
   SmtpPreset(
     label: 'Gmail',
     host: 'smtp.gmail.com',
     port: 465,
     security: 'ssl',
-    note:
-        'Google 계정에서 2단계 인증을 켠 뒤 "앱 비밀번호"를 만들어 넣으세요(계정 비밀번호로는 안 됩니다). 계정은 전체 주소(아이디@gmail.com).',
+    note: tr(
+      'Google 계정에서 2단계 인증을 켠 뒤 "앱 비밀번호"를 만들어 넣으세요(계정 비밀번호로는 안 됩니다). 계정은 전체 주소(아이디@gmail.com).',
+    ),
   ),
   SmtpPreset(
-    label: '다음/카카오',
+    label: tr('다음/카카오'),
     host: 'smtp.daum.net',
     port: 465,
     security: 'ssl',
-    note: '다음 메일 → 환경설정 → IMAP/SMTP에서 사용을 켜고, 2단계 인증을 쓰면 앱 비밀번호를 넣으세요.',
+    note: tr('다음 메일 → 환경설정 → IMAP/SMTP에서 사용을 켜고, 2단계 인증을 쓰면 앱 비밀번호를 넣으세요.'),
   ),
 ];

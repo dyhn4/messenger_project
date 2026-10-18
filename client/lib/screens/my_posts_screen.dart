@@ -14,6 +14,7 @@ import '../widgets/muted_scrollbar.dart';
 import '../widgets/panel_filters.dart';
 import '../widgets/search_result_parts.dart';
 import '../widgets/side_panel_header.dart';
+import '../l10n/tr.dart';
 
 /// 탭 줄에 범위 단추(현재 팀 ⌄)까지 한 줄로 두려면 필요한 최소 폭 — 이보다 좁으면 단추를 `"N"개가 로딩되었습니다.` 줄
 /// 오른쪽으로 옮긴다(검색 패널과 같은 방식). 3개 탭 + 범위 단추 + 정렬 단추가 가로 스크롤 없이 들어가는 폭.
@@ -265,7 +266,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
   void _open(MyPost post) {
     final room = _session.roomById(post.roomId);
     if (room == null) {
-      showAppToast(context, '대화방을 찾을 수 없습니다.');
+      showAppToast(context, tr('대화방을 찾을 수 없습니다.'));
       return;
     }
     final open = widget.onOpenRoom;
@@ -295,14 +296,14 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
           key: const ValueKey('my-posts-search-field'),
           controller: _query,
           decoration: InputDecoration(
-            hintText: '내가 쓴 글 검색',
+            hintText: tr('내가 쓴 글 검색'),
             isDense: true,
             prefixIcon: const Icon(Icons.search, size: 20),
             suffixIcon: _query.text.isEmpty
                 ? null
                 : IconButton(
                     icon: const Icon(Icons.close, size: 18),
-                    tooltip: '지우기',
+                    tooltip: tr('지우기'),
                     onPressed: () {
                       _query.clear();
                       setState(() {});
@@ -381,7 +382,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
 
   Widget _countLine(BuildContext context, Widget? scope) => PanelResultLine(
     summary: Text(
-      '"${_items.length}"개가 로딩되었습니다.',
+      tr('"{_items.length}"개가 로딩되었습니다.', {'_items.length': _items.length}),
       key: const ValueKey('panel-loaded-count'),
       style: Theme.of(context).textTheme.labelLarge,
     ),
@@ -396,7 +397,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(_error!, key: const ValueKey('my-posts-error')),
-            TextButton(onPressed: _reload, child: const Text('다시 시도')),
+            TextButton(onPressed: _reload, child: Text(tr('다시 시도'))),
           ],
         ),
       );
@@ -407,7 +408,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            _sentQuery.isEmpty ? '작성한 글이 없습니다.' : '검색 결과가 없습니다.',
+            _sentQuery.isEmpty ? tr('작성한 글이 없습니다.') : tr('검색 결과가 없습니다.'),
             key: const ValueKey('my-posts-empty'),
             textAlign: TextAlign.center,
             style: TextStyle(color: Theme.of(context).hintColor),
@@ -450,7 +451,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
                         : TextButton(
                             key: const ValueKey('my-posts-more'),
                             onPressed: _loadMore,
-                            child: const Text('더 보기'),
+                            child: Text(tr('더 보기')),
                           ),
                   ),
                 );
@@ -513,7 +514,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SidePanelHeader(title: '내가 쓴 글', onClose: widget.onClose),
+          SidePanelHeader(title: tr('내가 쓴 글'), onClose: widget.onClose),
           const Divider(height: 1),
           Expanded(child: body),
         ],
@@ -612,7 +613,7 @@ class _MyPostRow extends StatelessWidget {
                           if (post.editedAt != null)
                             Flexible(
                               child: Text(
-                                ' · 편집됨',
+                                tr(' · 편집됨'),
                                 key: ValueKey('my-post-edited-${post.key}'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -625,7 +626,7 @@ class _MyPostRow extends StatelessWidget {
                       if (post.isPost)
                         _headline(
                           context,
-                          const ResultKindBadge('게시글'),
+                          ResultKindBadge(tr('게시글')),
                           highlightedText(
                             context,
                             post.title!,
@@ -637,11 +638,13 @@ class _MyPostRow extends StatelessWidget {
                       else if (post.isComment)
                         _headline(
                           context,
-                          const ResultKindBadge('댓글'),
+                          ResultKindBadge(tr('댓글')),
                           Text(
                             (post.parent ?? '').isEmpty
-                                ? '원본 메시지'
-                                : '원본: ${post.parent}',
+                                ? tr('원본 메시지')
+                                : tr('원본: {post.parent}', {
+                                    'post.parent': post.parent,
+                                  }),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: 12, color: hint),

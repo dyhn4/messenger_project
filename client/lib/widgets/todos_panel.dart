@@ -19,6 +19,7 @@ import 'panel_filters.dart';
 import 'todo_calendar_view.dart';
 import 'todo_menu.dart';
 import 'todo_widgets.dart';
+import '../l10n/tr.dart';
 
 /// 할 일 목록·일정 화면 아래쪽의 옅은 회색 바탕 — 그 위에 [todoCardColor] 카드가 떠 보인다(잔디). 어두운 테마는 위쪽
 /// (surface)보다 바탕을 한 단계, 카드를 두 단계 밝게 둬 층이 구분되게 한다.
@@ -268,7 +269,7 @@ class _TodosPanelState extends State<TodosPanel> {
       mode: _inPanel ? TodoViewMode.dialog : TodoViewMode.page,
     );
     if (saved == null || !mounted) return;
-    showAppToast(context, '할 일을 만들었습니다.');
+    showAppToast(context, tr('할 일을 만들었습니다.'));
     _refresh();
   }
 
@@ -330,7 +331,7 @@ class _TodosPanelState extends State<TodosPanel> {
     try {
       await _controller.toggleFavorite(todo);
     } catch (e) {
-      if (mounted) showAppToast(context, '즐겨찾기를 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('즐겨찾기를 바꾸지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -345,7 +346,7 @@ class _TodosPanelState extends State<TodosPanel> {
       onClosePanel: _closePanel,
     );
     if (updated == null || !mounted) return;
-    showAppToast(context, '할 일을 수정했습니다.');
+    showAppToast(context, tr('할 일을 수정했습니다.'));
     _refresh();
   }
 
@@ -361,12 +362,15 @@ class _TodosPanelState extends State<TodosPanel> {
         todo,
         onProgress: (done, total) {
           if (done == 0 && mounted) {
-            showAppToast(context, '파일 $total개를 다운로드하는 중입니다.');
+            showAppToast(
+              context,
+              tr('파일 {total}개를 다운로드하는 중입니다.', {'total': total}),
+            );
           }
         },
       );
     } catch (e) {
-      if (mounted) showAppToast(context, '다운로드하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('다운로드하지 못했습니다: {e}', {'e': e}));
     } finally {
       _downloading.remove(todo.id);
     }
@@ -385,9 +389,9 @@ class _TodosPanelState extends State<TodosPanel> {
     if (!ok || !mounted || !identical(controller, _controller)) return;
     try {
       await controller.remove(todo);
-      if (mounted) showAppToast(context, '할 일을 삭제했습니다.');
+      if (mounted) showAppToast(context, tr('할 일을 삭제했습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '할 일을 삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('할 일을 삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -489,7 +493,7 @@ class _TodosPanelState extends State<TodosPanel> {
       padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
       child: Row(
         children: [
-          Text('할 일', style: Theme.of(context).textTheme.titleLarge),
+          Text(tr('할 일'), style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(width: 10),
           Expanded(
             child: Align(
@@ -500,7 +504,7 @@ class _TodosPanelState extends State<TodosPanel> {
           IconButton(
             key: const ValueKey('todo-panel-close'),
             icon: const Icon(Icons.close),
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             onPressed: widget.onClose,
           ),
         ],
@@ -531,7 +535,7 @@ class _TodosPanelState extends State<TodosPanel> {
                 const SizedBox(width: 4),
                 Flexible(
                   child: Text(
-                    '할 일 일정',
+                    tr('할 일 일정'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12.5, color: color),
@@ -566,17 +570,13 @@ class _TodosPanelState extends State<TodosPanel> {
           ),
         ),
         icon: const Icon(Icons.add, size: 20),
-        label: const Text(
-          '할 일 생성',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        label: Text(tr('할 일 생성'), maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
   }
 
   /// 대화방 필터에서 방을 고르지 않았을 때의 글자(잔디).
-  static const _allRoomsLabel = '참여한 대화방';
+  static final _allRoomsLabel = tr('참여한 대화방');
 
   /// 필터 단추에서 글자 말고 차지하는 폭 — 앞 여백(10)·▾(18)·틈(8)에, 둥근 오른쪽 끝에 글자가 붙지 않게 둘 여유(12).
   static const _filterChrome = 48.0;
@@ -630,7 +630,8 @@ class _TodosPanelState extends State<TodosPanel> {
             ?.displayName(session.userId ?? '') ??
         _allRoomsLabel;
     final memberLabel =
-        users.where((u) => u.id == c.assigneeId).firstOrNull?.name ?? '모든 멤버';
+        users.where((u) => u.id == c.assigneeId).firstOrNull?.name ??
+        tr('모든 멤버');
     // 세 칸은 사이를 조금 좁혀 대화방 글자를 한 자라도 더 보인다.
     const narrowGap = SizedBox(width: 6);
     return Padding(
@@ -759,7 +760,7 @@ class _TodosPanelState extends State<TodosPanel> {
                             vertical: 6,
                           ),
                           child: Text(
-                            '완료된 할 일 제외',
+                            tr('완료된 할 일 제외'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodyMedium?.copyWith(
@@ -807,7 +808,7 @@ class _TodosPanelState extends State<TodosPanel> {
       builder: (context, open, toggle) => Semantics(
         expanded: open,
         child: Tooltip(
-          message: '정렬',
+          message: tr('정렬'),
           child: InkWell(
             key: const ValueKey('todo-sort'),
             onTap: toggle,
@@ -847,7 +848,7 @@ class _TodosPanelState extends State<TodosPanel> {
         TextSpan(
           children: [
             TextSpan(text: '${_controller.total}', style: bold),
-            const TextSpan(text: '개의 할 일'),
+            TextSpan(text: tr('개의 할 일')),
           ],
         ),
         style: style,
@@ -886,7 +887,7 @@ class _TodosPanelState extends State<TodosPanel> {
                 child: Text(c.error!, textAlign: TextAlign.center),
               ),
               const SizedBox(height: 8),
-              OutlinedButton(onPressed: c.load, child: const Text('다시 시도')),
+              OutlinedButton(onPressed: c.load, child: Text(tr('다시 시도'))),
             ],
           ),
         );
@@ -936,9 +937,9 @@ class _TodosPanelState extends State<TodosPanel> {
   Widget _empty(BuildContext context) {
     final theme = Theme.of(context);
     final text = switch (_controller.scope) {
-      TodoScope.mine => '나에게 지정된 할 일이 없어요.',
-      TodoScope.assignedByMe => '다른 멤버에게 부여한 할 일이 없어요.',
-      TodoScope.team => '참여한 대화방에 등록된 할 일이 없어요.',
+      TodoScope.mine => tr('나에게 지정된 할 일이 없어요.'),
+      TodoScope.assignedByMe => tr('다른 멤버에게 부여한 할 일이 없어요.'),
+      TodoScope.team => tr('참여한 대화방에 등록된 할 일이 없어요.'),
     };
     return Center(
       child: Padding(
@@ -956,7 +957,7 @@ class _TodosPanelState extends State<TodosPanel> {
             ),
             const SizedBox(height: 4),
             Text(
-              '"할 일 생성"으로 대화방에 할 일을 만들어 보세요.',
+              tr('"할 일 생성"으로 대화방에 할 일을 만들어 보세요.'),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
@@ -1083,7 +1084,7 @@ class TodoCard extends StatelessWidget {
             textBaseline: TextBaseline.alphabetic,
             children: [
               Text(
-                '진행률 : ',
+                tr('진행률 : '),
                 style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
               ),
               Text(
@@ -1098,7 +1099,7 @@ class TodoCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '생성일: ${formatTodoDate(todo.createdAt)}',
+                  tr('생성일: {p0}', {'p0': formatTodoDate(todo.createdAt)}),
                   key: ValueKey('todo-created-${todo.id}'),
                   textAlign: TextAlign.right,
                   maxLines: 1,
@@ -1154,7 +1155,7 @@ class TodoCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Text(
-              '일정: ${todo.periodText ?? '없음'}',
+              tr('일정: {p0}', {'p0': todo.periodText ?? tr('없음')}),
               key: ValueKey('todo-period-${todo.id}'),
               // 시간까지 있으면 좁은 폭(휴대폰 360)에서는 종료 시각이 잘리지 않게 두 줄까지.
               maxLines: 2,
@@ -1204,7 +1205,9 @@ class TodoCard extends StatelessWidget {
       if (parts.isNotEmpty) separator();
       parts.add(
         Text(
-          '담당자 ${todo.assignees.length}명',
+          tr('담당자 {todo.assignees.length}명', {
+            'todo.assignees.length': todo.assignees.length,
+          }),
           key: ValueKey('todo-assignees-${todo.id}'),
           style: style,
         ),

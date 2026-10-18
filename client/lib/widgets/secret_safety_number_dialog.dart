@@ -6,6 +6,7 @@ import '../services/session.dart';
 import '../services/time_format.dart';
 import 'app_toast.dart';
 import 'room_options_menu.dart' show CloseWhenRoomRemoved;
+import '../l10n/tr.dart';
 
 /// 비밀 대화의 "보안 코드 확인" 창을 연다(더보기 메뉴·방 안내의 버튼).
 Future<void> showSecretSafetyNumberDialog(
@@ -36,26 +37,23 @@ Future<bool> confirmSecretPeerKeyReset(
       return AlertDialog(
         key: const ValueKey('secret-key-reset-confirm'),
         scrollable: true,
-        title: Text(codeMismatch ? '보안 코드가 다릅니다' : '상대 기기 키 다시 받기'),
+        title: Text(codeMismatch ? tr('보안 코드가 다릅니다') : tr('상대 기기 키 다시 받기')),
         content: SizedBox(
           width: 360,
           child: Text(
             codeMismatch
-                ? '보안 코드가 다르면 서버(또는 중간의 누군가)가 이 대화를 가로채고 있을 수 있습니다.\n\n'
-                      '이 기기에 고정해 둔 상대 기기의 키를 지우고, 이 상대 기기와의 비밀 대화를 모두 멈춥니다. '
-                      '그다음 이 대화를 끝내고 새 비밀 대화를 시작해 보안 코드를 다시 비교해 주세요. '
-                      '상대도 자기 화면에서 "코드가 다릅니다"를 눌러야 합니다.'
-                : '이 기기에 고정해 둔 상대 기기의 키를 지웁니다. 다음 비밀 대화에서는 서버가 알려 주는 키를 새로 '
-                      '믿게 되므로, 상대가 앱을 다시 설치하는 등으로 기기 키가 바뀐 것을 상대에게 직접(만나서·전화로) '
-                      '확인한 경우에만 진행하세요.\n\n'
-                      '이 상대 기기와의 다른 비밀 대화도 모두 멈춥니다. 진행한 뒤 이 대화를 끝내고 새 비밀 대화를 '
-                      '시작해, 상대와 보안 코드를 꼭 비교해 주세요.',
+                ? tr(
+                    '보안 코드가 다르면 서버(또는 중간의 누군가)가 이 대화를 가로채고 있을 수 있습니다.\n\n이 기기에 고정해 둔 상대 기기의 키를 지우고, 이 상대 기기와의 비밀 대화를 모두 멈춥니다. 그다음 이 대화를 끝내고 새 비밀 대화를 시작해 보안 코드를 다시 비교해 주세요. 상대도 자기 화면에서 "코드가 다릅니다"를 눌러야 합니다.',
+                  )
+                : tr(
+                    '이 기기에 고정해 둔 상대 기기의 키를 지웁니다. 다음 비밀 대화에서는 서버가 알려 주는 키를 새로 믿게 되므로, 상대가 앱을 다시 설치하는 등으로 기기 키가 바뀐 것을 상대에게 직접(만나서·전화로) 확인한 경우에만 진행하세요.\n\n이 상대 기기와의 다른 비밀 대화도 모두 멈춥니다. 진행한 뒤 이 대화를 끝내고 새 비밀 대화를 시작해, 상대와 보안 코드를 꼭 비교해 주세요.',
+                  ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('secret-key-reset-confirm-button'),
@@ -64,7 +62,7 @@ Future<bool> confirmSecretPeerKeyReset(
               foregroundColor: scheme.onError,
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(codeMismatch ? '대화 멈추고 키 지우기' : '키 지우기'),
+            child: Text(codeMismatch ? tr('대화 멈추고 키 지우기') : tr('키 지우기')),
           ),
         ],
       );
@@ -76,12 +74,12 @@ Future<bool> confirmSecretPeerKeyReset(
     showAppToastOnOverlay(
       overlay,
       done
-          ? '상대 기기 키를 지웠습니다. 이 대화를 끝내고 새 비밀 대화를 시작한 뒤 보안 코드를 비교해 주세요.'
-          : '지울 상대 기기 키가 없습니다.',
+          ? tr('상대 기기 키를 지웠습니다. 이 대화를 끝내고 새 비밀 대화를 시작한 뒤 보안 코드를 비교해 주세요.')
+          : tr('지울 상대 기기 키가 없습니다.'),
     );
     return done;
   } catch (e) {
-    showAppToastOnOverlay(overlay, '상대 기기 키를 지우지 못했습니다: $e');
+    showAppToastOnOverlay(overlay, tr('상대 기기 키를 지우지 못했습니다: {e}', {'e': e}));
     return false;
   }
 }
@@ -132,7 +130,7 @@ class _SecretSafetyNumberDialogState extends State<SecretSafetyNumberDialog>
       if (!mounted) return;
       setState(() => _info = _load());
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -149,11 +147,11 @@ class _SecretSafetyNumberDialogState extends State<SecretSafetyNumberDialog>
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Row(
+      title: Row(
         children: [
           Icon(Icons.shield_outlined, color: Colors.green),
           SizedBox(width: 8),
-          Text('보안 코드 확인'),
+          Text(tr('보안 코드 확인')),
         ],
       ),
       content: SizedBox(
@@ -169,8 +167,10 @@ class _SecretSafetyNumberDialogState extends State<SecretSafetyNumberDialog>
             }
             final info = snapshot.data;
             if (info == null) {
-              return const Text(
-                '아직 상대 기기를 확인하지 못했습니다. 상대가 비밀 대화를 수락한 뒤(또는 서버에 연결된 뒤) 다시 열어 주세요.',
+              return Text(
+                tr(
+                  '아직 상대 기기를 확인하지 못했습니다. 상대가 비밀 대화를 수락한 뒤(또는 서버에 연결된 뒤) 다시 열어 주세요.',
+                ),
                 key: ValueKey('secret-safety-unavailable'),
               );
             }
@@ -181,7 +181,7 @@ class _SecretSafetyNumberDialogState extends State<SecretSafetyNumberDialog>
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );
@@ -205,7 +205,7 @@ class _SecretSafetyNumberDialogState extends State<SecretSafetyNumberDialog>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '${_peerName(info)} 님과의 보안 코드',
+            tr('{p0} 님과의 보안 코드', {'p0': _peerName(info)}),
             style: theme.textTheme.titleSmall,
           ),
           const SizedBox(height: 12),
@@ -239,22 +239,24 @@ class _SecretSafetyNumberDialogState extends State<SecretSafetyNumberDialog>
           ),
           const SizedBox(height: 12),
           Text(
-            '상대와 직접 만나거나 전화로 이 60자리 숫자를 비교해 보세요. 양쪽 화면의 숫자가 모두 같으면, '
-            '서버를 포함해 그 누구도 이 대화를 몰래 볼 수 없습니다. '
-            // 다르면 이 대화만 끝내서는 안 된다 — 새 대화도 같은(틀린) 고정 키를 쓴다. 키를 지우는 길로 안내한다.
-            '${blocked ? '' : '하나라도 다르면 아래 "코드가 다릅니다"를 눌러 주세요.'}',
+            tr(
+              '상대와 직접 만나거나 전화로 이 60자리 숫자를 비교해 보세요. 양쪽 화면의 숫자가 모두 같으면, 서버를 포함해 그 누구도 이 대화를 몰래 볼 수 없습니다. {p0}',
+              {'p0': blocked ? '' : tr('하나라도 다르면 아래 "코드가 다릅니다"를 눌러 주세요.')},
+            ),
           ),
           if (blocked) ...[
             const SizedBox(height: 8),
             Text(
-              '이 비밀 대화는 상대 기기의 보안 확인에 실패해 멈춰 있습니다. 대화방 위의 안내를 따라 주세요.',
+              tr('이 비밀 대화는 상대 기기의 보안 확인에 실패해 멈춰 있습니다. 대화방 위의 안내를 따라 주세요.'),
               style: TextStyle(color: theme.colorScheme.error),
             ),
           ],
           const SizedBox(height: 16),
           if (info.myKeyChanged)
             Text(
-              '이 대화를 시작한 뒤 이 기기의 보안 키가 바뀌어, 상대 화면의 코드와 맞지 않습니다. 이 비밀 대화를 끝내고 새로 시작해 주세요.',
+              tr(
+                '이 대화를 시작한 뒤 이 기기의 보안 키가 바뀌어, 상대 화면의 코드와 맞지 않습니다. 이 비밀 대화를 끝내고 새로 시작해 주세요.',
+              ),
               style: TextStyle(color: theme.colorScheme.error),
             )
           else if (info.verified)
@@ -265,7 +267,9 @@ class _SecretSafetyNumberDialogState extends State<SecretSafetyNumberDialog>
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    '보안 코드 확인함 (${formatPostDateTime(info.verifiedAt!)})',
+                    tr('보안 코드 확인함 ({p0})', {
+                      'p0': formatPostDateTime(info.verifiedAt!),
+                    }),
                     style: const TextStyle(
                       color: Colors.green,
                       fontWeight: FontWeight.w600,
@@ -274,7 +278,7 @@ class _SecretSafetyNumberDialogState extends State<SecretSafetyNumberDialog>
                 ),
                 TextButton(
                   onPressed: _saving ? null : () => _setVerified(false),
-                  child: const Text('확인 표시 지우기'),
+                  child: Text(tr('확인 표시 지우기')),
                 ),
               ],
             )
@@ -285,7 +289,7 @@ class _SecretSafetyNumberDialogState extends State<SecretSafetyNumberDialog>
                 key: const ValueKey('secret-safety-mark-verified'),
                 onPressed: _saving ? null : () => _setVerified(true),
                 icon: const Icon(Icons.verified_user_outlined),
-                label: const Text('비교했고 같습니다 — 확인함으로 표시'),
+                label: Text(tr('비교했고 같습니다 — 확인함으로 표시')),
               ),
             ),
           // 이 기기의 키가 바뀐 경우는 다른 게 당연해서(상대 화면은 예전 키로 계산) 상대 키를 지우는 길을 내지 않는다.
@@ -302,7 +306,7 @@ class _SecretSafetyNumberDialogState extends State<SecretSafetyNumberDialog>
                 ),
                 onPressed: _saving ? null : _reportMismatch,
                 icon: const Icon(Icons.report_outlined, size: 18),
-                label: const Text('코드가 다릅니다'),
+                label: Text(tr('코드가 다릅니다')),
               ),
             ),
           ],

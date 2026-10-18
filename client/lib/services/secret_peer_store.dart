@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../l10n/tr.dart';
 
 /// 비밀 대화 상대 기기를 이 기기에 "고정"해 두는 값들(S5)의 모양과 저장 형식. 실제 읽고 쓰기는 같은 저장소 줄을
 /// 쓰는 SecretKeyStore가 한다(flutter_secure_storage의 Windows 구현은 파일 하나를 통째로 다시 써서, 저장소 접근이
@@ -235,11 +236,17 @@ enum SecretBlockReason {
 
   /// 새 규약(v3)으로 말하는 것을 확인한 상대 기기와 예전 규약으로 맺게 됐다 — 서버가 초대·수락에서 새 규약 표시나 서명을
   /// 빼 보호가 약한 예전 방식으로 내리려 한 것이다(상대가 앱을 예전 버전으로 되돌렸을 수도 있다).
-  downgrade('downgrade', '새 방식으로 대화하던 상대 기기와 예전 방식으로 맺게 하려 했습니다(서버가 바꿨을 수 있습니다).');
+  downgrade(
+    'downgrade',
+    '새 방식으로 대화하던 상대 기기와 예전 방식으로 맺게 하려 했습니다(서버가 바꿨을 수 있습니다).',
+  );
 
-  const SecretBlockReason(this.code, this.description);
+  const SecretBlockReason(this.code, this._descriptionKo);
   final String code;
-  final String description;
+  final String _descriptionKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get description => tr(_descriptionKo);
 
   /// 이 이유로 멈춘 방에서 "상대 기기 키 다시 받기"를 권할 수 있는지 — 고정해 둔 키로 확인이 안 됐을 때만이다(상대가
   /// 앱을 다시 설치하는 등으로 같은 기기 id의 키가 바뀌었을 수 있다). 다른 이유는 키를 다시 받아도 풀리지 않는다.

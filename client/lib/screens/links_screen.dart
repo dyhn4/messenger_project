@@ -12,6 +12,7 @@ import '../widgets/hover_toolbar.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
 import '../widgets/panel_filters.dart';
+import '../l10n/tr.dart';
 
 /// "메뉴 > 링크" — 대화에서 주고받은 링크를 한 곳에 모아 보는 패널(잔디의 "링크 모아보기"와 같은
 /// 기능). 파일 패널과 같은 틀(헤더+검색칸+필터 줄(참여 대화방 / 모든 멤버 / 기간)+정렬+목록+페이지
@@ -108,7 +109,7 @@ class _LinksScreenState extends State<LinksScreen> {
 
   Future<void> _copyLink(SharedLink link) async {
     await Clipboard.setData(ClipboardData(text: link.url));
-    if (mounted) showAppToast(context, '링크를 복사했습니다.');
+    if (mounted) showAppToast(context, tr('링크를 복사했습니다.'));
   }
 
   /// 길게 누르면(모바일 — 마우스 호버가 없다) 호버 도구와 같은 두 가지를 아래에서 올려 보여준다.
@@ -121,7 +122,7 @@ class _LinksScreenState extends State<LinksScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.chat_bubble_outline),
-              title: const Text('대화방에서 보기'),
+              title: Text(tr('대화방에서 보기')),
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 _openInRoom(link);
@@ -129,7 +130,7 @@ class _LinksScreenState extends State<LinksScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.content_copy),
-              title: const Text('링크 복사'),
+              title: Text(tr('링크 복사')),
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 _copyLink(link);
@@ -144,7 +145,7 @@ class _LinksScreenState extends State<LinksScreen> {
   void _openInRoom(SharedLink link) {
     final room = _roomOf(link);
     if (room == null) {
-      showAppToast(context, '대화방을 찾을 수 없습니다.');
+      showAppToast(context, tr('대화방을 찾을 수 없습니다.'));
       return;
     }
     widget.onOpenMessage(room, link.messageId);
@@ -163,7 +164,7 @@ class _LinksScreenState extends State<LinksScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    '링크',
+                    tr('링크'),
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
@@ -176,7 +177,7 @@ class _LinksScreenState extends State<LinksScreen> {
           ),
           const Divider(height: 1),
           PanelFilterBar(
-            searchHint: '링크 검색',
+            searchHint: tr('링크 검색'),
             initialQuery: _query,
             onQueryChanged: (q) {
               _query = q;
@@ -222,7 +223,7 @@ class _LinksScreenState extends State<LinksScreen> {
     final results = _results ?? const <SharedLink>[];
     final countLine = PanelResultLine(
       summary: Text(
-        '"${results.length}"개가 로딩되었습니다.',
+        tr('"{results.length}"개가 로딩되었습니다.', {'results.length': results.length}),
         key: const ValueKey('panel-loaded-count'),
         style: Theme.of(context).textTheme.labelLarge,
       ),
@@ -234,11 +235,11 @@ class _LinksScreenState extends State<LinksScreen> {
         children: [
           countLine,
           const Divider(height: 1),
-          const Expanded(
+          Expanded(
             child: Center(
               child: Padding(
                 padding: EdgeInsets.all(16),
-                child: Text('주고받은 링크가 없습니다.'),
+                child: Text(tr('주고받은 링크가 없습니다.')),
               ),
             ),
           ),
@@ -386,7 +387,7 @@ class _LinkRowState extends State<_LinkRow> {
                   _clickable(
                     widget.onOpenInRoom,
                     Text(
-                      widget.roomName.isEmpty ? '대화방' : widget.roomName,
+                      widget.roomName.isEmpty ? tr('대화방') : widget.roomName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -457,12 +458,12 @@ class _LinkRowState extends State<_LinkRow> {
                 children: [
                   HoverToolbarButton(
                     icon: Icons.chat_outlined,
-                    tooltip: '대화방에서 보기',
+                    tooltip: tr('대화방에서 보기'),
                     onPressed: widget.onOpenInRoom,
                   ),
                   HoverToolbarButton(
                     icon: Icons.content_copy,
-                    tooltip: '링크 복사',
+                    tooltip: tr('링크 복사'),
                     onPressed: widget.onCopy,
                   ),
                 ],

@@ -4,6 +4,7 @@ import '../models/my_device.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
+import '../l10n/tr.dart';
 
 /// "로그인한 기기" — 내 계정으로 로그인한 기기(PC 앱·안드로이드·웹 브라우저)를 보여 주고, 기기마다 로그아웃시키거나 이 기기
 /// 말고 전부 로그아웃시킨다(server/src/devices.js). 공용 PC에서 로그아웃을 잊었거나 휴대폰을 잃어버렸을 때 쓴다.
@@ -38,7 +39,9 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
       final devices = await widget.session.fetchMyDevices();
       if (mounted) setState(() => _devices = devices);
     } catch (e) {
-      if (mounted) setState(() => _error = '기기 목록을 불러오지 못했습니다: $e');
+      if (mounted) {
+        setState(() => _error = tr('기기 목록을 불러오지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 
@@ -51,7 +54,7 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('my-devices-confirm'),
@@ -66,11 +69,14 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
 
   Future<void> _logout(MyDevice device) async {
     final ok = await _confirm(
-      device.current ? '이 기기에서 로그아웃' : '기기 로그아웃',
+      device.current ? tr('이 기기에서 로그아웃') : tr('기기 로그아웃'),
       device.current
-          ? '이 기기에서 로그아웃합니다.'
-          : '${device.label}에서 로그아웃시킬까요? 그 기기는 다시 로그인해야 쓸 수 있고, 알림도 더 가지 않습니다.',
-      '로그아웃',
+          ? tr('이 기기에서 로그아웃합니다.')
+          : tr(
+              '{device.label}에서 로그아웃시킬까요? 그 기기는 다시 로그인해야 쓸 수 있고, 알림도 더 가지 않습니다.',
+              {'device.label': device.label},
+            ),
+      tr('로그아웃'),
     );
     if (!ok || !mounted) return;
     setState(() => _busy = true);
@@ -81,10 +87,13 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
         Navigator.of(context).pop();
         return;
       }
-      showAppToast(context, '${device.label}에서 로그아웃시켰습니다.');
+      showAppToast(
+        context,
+        tr('{device.label}에서 로그아웃시켰습니다.', {'device.label': device.label}),
+      );
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '로그아웃시키지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('로그아웃시키지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -92,10 +101,11 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
 
   Future<void> _logoutOthers() async {
     final ok = await _confirm(
-      '다른 모든 기기에서 로그아웃',
-      '이 기기 말고 내 계정으로 로그인한 모든 기기(PC·휴대폰·웹 브라우저)에서 로그아웃합니다. 앱을 업데이트하지 않아 목록에 '
-          '보이지 않는 기기도 함께 로그아웃됩니다.',
-      '모두 로그아웃',
+      tr('다른 모든 기기에서 로그아웃'),
+      tr(
+        '이 기기 말고 내 계정으로 로그인한 모든 기기(PC·휴대폰·웹 브라우저)에서 로그아웃합니다. 앱을 업데이트하지 않아 목록에 보이지 않는 기기도 함께 로그아웃됩니다.',
+      ),
+      tr('모두 로그아웃'),
     );
     if (!ok || !mounted) return;
     setState(() => _busy = true);
@@ -104,11 +114,13 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
       if (!mounted) return;
       showAppToast(
         context,
-        count > 0 ? '다른 기기 $count대에서 로그아웃시켰습니다.' : '다른 기기에서 로그아웃시켰습니다.',
+        count > 0
+            ? tr('다른 기기 {count}대에서 로그아웃시켰습니다.', {'count': count})
+            : tr('다른 기기에서 로그아웃시켰습니다.'),
       );
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '로그아웃시키지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('로그아웃시키지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -124,12 +136,12 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
   };
 
   String _subtitle(MyDevice d) {
-    if (d.online) return d.current ? '이 기기 · 사용 중' : '지금 사용 중';
+    if (d.online) return d.current ? tr('이 기기 · 사용 중') : tr('지금 사용 중');
     final seen = d.lastSeenAt;
     final when = seen == null
-        ? '처음 로그인 ${formatPostDateTime(d.createdAt)}'
-        : '마지막 사용 ${formatPostDateTime(seen)}';
-    return d.current ? '이 기기 · $when' : when;
+        ? tr('처음 로그인 {p0}', {'p0': formatPostDateTime(d.createdAt)})
+        : tr('마지막 사용 {p0}', {'p0': formatPostDateTime(seen)});
+    return d.current ? tr('이 기기 · {when}', {'when': when}) : when;
   }
 
   @override
@@ -138,7 +150,7 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
     final hint = Theme.of(context).hintColor;
     final others = devices?.where((d) => !d.current).length ?? 0;
     return AlertDialog(
-      title: const Text('로그인한 기기'),
+      title: Text(tr('로그인한 기기')),
       contentPadding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
       content: SizedBox(
         width: 420,
@@ -149,7 +161,7 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(_error!, textAlign: TextAlign.center),
-                    TextButton(onPressed: _load, child: const Text('다시 시도')),
+                    TextButton(onPressed: _load, child: Text(tr('다시 시도'))),
                   ],
                 ),
               )
@@ -170,7 +182,7 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                     child: Text(
-                      '공용 PC에서 로그아웃을 잊었거나 휴대폰을 잃어버렸으면 여기서 그 기기를 로그아웃시키세요.',
+                      tr('공용 PC에서 로그아웃을 잊었거나 휴대폰을 잃어버렸으면 여기서 그 기기를 로그아웃시키세요.'),
                       style: TextStyle(fontSize: 12, color: hint),
                     ),
                   ),
@@ -204,7 +216,7 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
                       trailing: TextButton(
                         key: ValueKey('my-device-logout-${d.id}'),
                         onPressed: _busy ? null : () => _logout(d),
-                        child: const Text('로그아웃'),
+                        child: Text(tr('로그아웃')),
                       ),
                     ),
                 ],
@@ -216,12 +228,14 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
           onPressed: _busy || devices == null ? null : _logoutOthers,
           style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
           child: Text(
-            others > 0 ? '다른 모든 기기에서 로그아웃 ($others대)' : '다른 모든 기기에서 로그아웃',
+            others > 0
+                ? tr('다른 모든 기기에서 로그아웃 ({others}대)', {'others': others})
+                : tr('다른 모든 기기에서 로그아웃'),
           ),
         ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );

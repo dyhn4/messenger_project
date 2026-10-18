@@ -5,6 +5,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_android/shared_preferences_android.dart';
 import 'package:tray_manager/tray_manager.dart';
@@ -50,6 +51,7 @@ import 'widgets/update_banner.dart';
 import 'widgets/web_push_prompt.dart';
 import 'services/app_links.dart';
 import 'widgets/grab_cursors.dart';
+import 'l10n/tr.dart';
 
 /// 앱이 완전히 종료된 상태에서 FCM이 도착하면 별도의(=Session이 없는) 격리된 isolate에서
 /// 이 함수가 새로 불린다 — 로그인 상태/소켓 등 앱의 나머지 상태에 전혀 접근할 수 없어서,
@@ -60,6 +62,8 @@ import 'widgets/grab_cursors.dart';
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 알림에 넣는 앱의 글(새 메시지 등)도 고른 언어로.
+  await AppLocale.load();
 
   // SharedPreferences(레거시 싱글턴)는 같은 isolate 안에서 값을 캐싱해두고 재사용한다 —
   // Firebase는 이 백그라운드 isolate를 메시지마다 새로 만들지 않고 재사용할 수 있어서,
@@ -122,7 +126,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     await notifications.showIncomingCall(
       roomId: roomId,
       callerName:
-          data['senderName'] as String? ?? data['title'] as String? ?? '알 수 없음',
+          data['senderName'] as String? ??
+          data['title'] as String? ??
+          tr('알 수 없음'),
       conversationTitle: data['conversationTitle'] as String?,
     );
     return;
@@ -159,6 +165,8 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 화면 언어(l10n/tr.dart) — 첫 화면을 그리기 전에, 서브 창(프로젝트·알림 창)도 같은 언어로.
+  await AppLocale.load();
   // Windows엔 손(끌기) 모양 시스템 커서가 없어서 직접 만든다 — 메인 창·프로젝트 창 모두
   // 이 main()을 타므로 여기서 한 번.
   await GrabCursors.init();
@@ -314,6 +322,7 @@ class _MyAppState extends State<MyApp>
       if (AppPlatform.isWindows) openProjectWindow(session, openLink: href);
     };
     WidgetsBinding.instance.addObserver(this);
+    AppLocale.changes.addListener(_onLanguageChanged);
     appSettings.init();
     notifications
         .init(onTap: _openRoomFromNotification)
@@ -355,8 +364,20 @@ class _MyAppState extends State<MyApp>
     session.setPendingPairRequest(request);
   }
 
+  /// 화면 언어가 바뀌었다 — tr()로 쓴 글은 위젯을 다시 그려야 바뀌므로 화면 전체를 다시 그린다(열린 화면·입력은 그대로).
+  /// 한 번만 계산해 두는 글(일부 목록 이름 등)은 앱을 다시 시작해야 바뀐다.
+  void _onLanguageChanged() {
+    void rebuild(Element element) {
+      element.markNeedsBuild();
+      element.visitChildren(rebuild);
+    }
+
+    WidgetsBinding.instance.rootElement?.visitChildren(rebuild);
+  }
+
   @override
   void dispose() {
+    AppLocale.changes.removeListener(_onLanguageChanged);
     WidgetsBinding.instance.removeObserver(this);
     session.removeListener(_tryOpenPendingLaunchRoom);
     _pairRequestSub?.cancel();
@@ -378,9 +399,9 @@ class _MyAppState extends State<MyApp>
     await trayManager.setContextMenu(
       Menu(
         items: [
-          MenuItem(key: 'show_window', label: '창 열기'),
+          MenuItem(key: 'show_window', label: tr('창 열기')),
           MenuItem.separator(),
-          MenuItem(key: 'exit_app', label: '완전히 종료'),
+          MenuItem(key: 'exit_app', label: tr('완전히 종료')),
         ],
       ),
     );
@@ -614,7 +635,7 @@ class _MyAppState extends State<MyApp>
       brightness: Brightness.dark,
     );
     return ListenableBuilder(
-      listenable: appSettings,
+      listenable: Listenable.merge([appSettings, AppLocale.changes]),
       builder: (context, _) {
         return MaterialApp(
           navigatorKey: navigatorKey,
@@ -639,6 +660,14 @@ class _MyAppState extends State<MyApp>
             ),
           ),
           themeMode: appSettings.themeMode,
+          // 화면 언어 — Material 기본 글(날짜 고르기·복사/붙여넣기 메뉴 등)도 같은 언어로.
+          locale: AppLocale.current.locale,
+          supportedLocales: [for (final l in AppLanguage.values) l.locale],
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
           // 예약 메시지 발송 결과(보냈음/못 보냄) 토스트 — 첫 화면(루트 라우트) 안에서 들어야 토스트가
           // 다른 화면·대화상자 위에 뜬다(Navigator 바깥 context로는 Overlay를 못 찾는다).
           home: ScheduledMessageToasts(

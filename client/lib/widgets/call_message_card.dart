@@ -9,6 +9,7 @@ import '../models/room.dart';
 import '../screens/call_screen.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
+import '../l10n/tr.dart';
 
 final _timeFormat = DateFormat('a h:mm');
 
@@ -73,7 +74,7 @@ class _CallMessageCardState extends State<CallMessageCard> {
       try {
         await session.joinCall(widget.room.id, camera: camera);
       } catch (e) {
-        if (mounted) showAppToast(context, '통화에 참여하지 못했습니다: $e');
+        if (mounted) showAppToast(context, tr('통화에 참여하지 못했습니다: {e}', {'e': e}));
         return;
       }
     }
@@ -89,18 +90,28 @@ class _CallMessageCardState extends State<CallMessageCard> {
     final missed = !card.active && !card.answered;
 
     final (IconData icon, Color color, String title) = card.active
-        ? (Icons.videocam, Colors.green, '화상회의 진행 중 · ${_elapsedText(card)}')
+        ? (
+            Icons.videocam,
+            Colors.green,
+            tr('화상회의 진행 중 · {p0}', {'p0': _elapsedText(card)}),
+          )
         : missed
-        ? (Icons.missed_video_call, scheme.error, '부재중 화상회의')
+        ? (Icons.missed_video_call, scheme.error, tr('부재중 화상회의'))
         : (
             Icons.videocam_off_outlined,
             scheme.onSurfaceVariant,
-            '화상회의 종료 · ${formatCallDuration(card.duration ?? Duration.zero)}',
+            tr('화상회의 종료 · {p0}', {
+              'p0': formatCallDuration(card.duration ?? Duration.zero),
+            }),
           );
     final parts = <String>[
-      '${card.starterName} 시작',
-      if (card.joinedCount > 1) '참여 ${card.joinedCount}명',
-      if (card.declinedCount > 0) '거절 ${card.declinedCount}명',
+      tr('{card.starterName} 시작', {'card.starterName': card.starterName}),
+      if (card.joinedCount > 1)
+        tr('참여 {card.joinedCount}명', {'card.joinedCount': card.joinedCount}),
+      if (card.declinedCount > 0)
+        tr('거절 {card.declinedCount}명', {
+          'card.declinedCount': card.declinedCount,
+        }),
     ];
 
     return Padding(
@@ -172,7 +183,7 @@ class _CallMessageCardState extends State<CallMessageCard> {
                         _TimelineRow(
                           time: card.endedAt!,
                           name: '',
-                          label: '통화 종료',
+                          label: tr('통화 종료'),
                         ),
                     ],
                   ],
@@ -201,7 +212,7 @@ class _CallMessageCardState extends State<CallMessageCard> {
               if (!joined)
                 IconButton(
                   key: const ValueKey('call-card-join-voice'),
-                  tooltip: '음성으로 참여(카메라 끔)',
+                  tooltip: tr('음성으로 참여(카메라 끔)'),
                   visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.mic_none, color: Colors.green),
                   onPressed: () => _join(camera: false),
@@ -214,7 +225,7 @@ class _CallMessageCardState extends State<CallMessageCard> {
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                 ),
                 onPressed: _join,
-                child: Text(joined ? '통화 화면' : '참여'),
+                child: Text(joined ? tr('통화 화면') : tr('참여')),
               ),
             ],
           ),
@@ -225,7 +236,7 @@ class _CallMessageCardState extends State<CallMessageCard> {
 
   static String _elapsedText(CallCard card) {
     final elapsed = DateTime.now().difference(card.startedAt);
-    return elapsed.inMinutes < 1 ? '방금 시작' : formatCallDuration(elapsed);
+    return elapsed.inMinutes < 1 ? tr('방금 시작') : formatCallDuration(elapsed);
   }
 }
 

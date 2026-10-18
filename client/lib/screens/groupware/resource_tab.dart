@@ -8,6 +8,7 @@ import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import 'groupware_screen.dart' show GroupwareChanges, GroupwareSectionHeader;
+import '../../l10n/tr.dart';
 
 /// 그룹웨어 "예약" 탭 — 회의실·장비·차량을 날마다 시간표로 보고 빈 시간을 눌러 잡는다(서버 groupwareResources.js). 캘린더 일정에 붙인
 /// 예약도 같은 시간표에 보인다(일정 편집 창의 "회의실·자원"). 겹치는 예약은 서버가 막는다(409 — 누구 예약인지 알려 줌).
@@ -33,7 +34,15 @@ String bookingRangeText(ResourceBooking b) {
   return '${s.month}/${s.day} ${clockText(s)}~$endText';
 }
 
-const _weekdays = ['월', '화', '수', '목', '금', '토', '일'];
+final _weekdays = [
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+  tr('일'),
+];
 
 class ResourceTab extends StatefulWidget {
   final GroupwareApi api;
@@ -104,7 +113,7 @@ class _ResourceTabState extends State<ResourceTab> {
       });
     } catch (e) {
       if (mounted) {
-        setState(() => _error = e is ApiException ? e.message : '$e');
+        setState(() => _error = e is ApiException ? trServer(e.message) : '$e');
       }
     }
   }
@@ -137,7 +146,12 @@ class _ResourceTabState extends State<ResourceTab> {
       start: start ?? _defaultStart(),
     );
     if (made == null || !mounted) return;
-    showAppToast(context, '${made.resourceName}을(를) 예약했습니다.');
+    showAppToast(
+      context,
+      tr('{made.resourceName}을(를) 예약했습니다.', {
+        'made.resourceName': made.resourceName,
+      }),
+    );
     _load();
   }
 
@@ -165,12 +179,14 @@ class _ResourceTabState extends State<ResourceTab> {
           children: [
             Text('${b.resourceName} · ${bookingRangeText(b)}'),
             const SizedBox(height: 4),
-            Text('잡은 사람: ${b.userName}'),
+            Text(tr('잡은 사람: {b.userName}', {'b.userName': b.userName})),
             if (b.fromEvent)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  '캘린더 일정에 붙은 예약입니다 — 시간을 바꾸려면 그 일정을 고치세요. 취소하면 일정은 남고 회의실만 빠집니다.',
+                  tr(
+                    '캘린더 일정에 붙은 예약입니다 — 시간을 바꾸려면 그 일정을 고치세요. 취소하면 일정은 남고 회의실만 빠집니다.',
+                  ),
                   style: TextStyle(
                     fontSize: 12,
                     color: Theme.of(dialogContext).hintColor,
@@ -184,11 +200,11 @@ class _ResourceTabState extends State<ResourceTab> {
             TextButton(
               key: const ValueKey('booking-cancel'),
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: Text(b.mine ? '예약 취소' : '관리자 취소'),
+              child: Text(b.mine ? tr('예약 취소') : tr('관리자 취소')),
             ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('닫기'),
+            child: Text(tr('닫기')),
           ),
         ],
       ),
@@ -196,11 +212,14 @@ class _ResourceTabState extends State<ResourceTab> {
     if (cancel != true || !mounted) return;
     try {
       await widget.api.cancelBooking(b.id);
-      if (mounted) showAppToast(context, '예약을 취소했습니다.');
+      if (mounted) showAppToast(context, tr('예약을 취소했습니다.'));
       _load();
     } catch (e) {
       if (mounted) {
-        showAppToast(context, e is ApiException ? e.message : '취소하지 못했습니다.');
+        showAppToast(
+          context,
+          e is ApiException ? trServer(e.message) : tr('취소하지 못했습니다.'),
+        );
       }
     }
   }
@@ -228,7 +247,7 @@ class _ResourceTabState extends State<ResourceTab> {
             child: Row(
               children: [
                 IconButton(
-                  tooltip: '전날',
+                  tooltip: tr('전날'),
                   icon: const Icon(Icons.chevron_left),
                   onPressed: () => _shift(-1),
                 ),
@@ -236,12 +255,16 @@ class _ResourceTabState extends State<ResourceTab> {
                   key: const ValueKey('resource-day'),
                   onPressed: _pickDay,
                   child: Text(
-                    '${_day.month}월 ${_day.day}일 (${_weekdays[_day.weekday - 1]})',
+                    tr('{_day.month}월 {_day.day}일 ({p0})', {
+                      '_day.month': _day.month,
+                      '_day.day': _day.day,
+                      'p0': _weekdays[_day.weekday - 1],
+                    }),
                     style: theme.textTheme.titleMedium,
                   ),
                 ),
                 IconButton(
-                  tooltip: '다음 날',
+                  tooltip: tr('다음 날'),
                   icon: const Icon(Icons.chevron_right),
                   onPressed: () => _shift(1),
                 ),
@@ -251,7 +274,7 @@ class _ResourceTabState extends State<ResourceTab> {
                       setState(() => _day = _today());
                       _load();
                     },
-                    child: const Text('오늘'),
+                    child: Text(tr('오늘')),
                   ),
                 const Spacer(),
                 if (!_isGuest && resources.isNotEmpty)
@@ -259,7 +282,7 @@ class _ResourceTabState extends State<ResourceTab> {
                     key: const ValueKey('resource-book'),
                     onPressed: () => _book(),
                     icon: const Icon(Icons.add, size: 18),
-                    label: const Text('예약하기'),
+                    label: Text(tr('예약하기')),
                   ),
               ],
             ),
@@ -269,8 +292,8 @@ class _ResourceTabState extends State<ResourceTab> {
               padding: const EdgeInsets.all(24),
               child: Text(
                 widget.ctx.isManager
-                    ? '아직 자원이 없습니다. 관리 탭 → 회의실·자원에서 회의실·장비·차량을 더하세요.'
-                    : '아직 예약할 수 있는 회의실·자원이 없습니다.',
+                    ? tr('아직 자원이 없습니다. 관리 탭 → 회의실·자원에서 회의실·장비·차량을 더하세요.')
+                    : tr('아직 예약할 수 있는 회의실·자원이 없습니다.'),
                 style: TextStyle(color: hint),
                 textAlign: TextAlign.center,
               ),
@@ -292,15 +315,18 @@ class _ResourceTabState extends State<ResourceTab> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Text(
-                '준회원은 현황만 볼 수 있습니다.',
+                tr('준회원은 현황만 볼 수 있습니다.'),
                 style: TextStyle(fontSize: 12, color: hint),
               ),
             ),
-          const GroupwareSectionHeader('내 예약'),
+          GroupwareSectionHeader(tr('내 예약')),
           if (_mine.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text('앞으로 잡아 둔 예약이 없습니다.', style: TextStyle(color: hint)),
+              child: Text(
+                tr('앞으로 잡아 둔 예약이 없습니다.'),
+                style: TextStyle(color: hint),
+              ),
             ),
           for (final b in _mine)
             ListTile(
@@ -309,7 +335,7 @@ class _ResourceTabState extends State<ResourceTab> {
               leading: Icon(_kindIcon(b.resourceKind)),
               title: Text('${b.resourceName} · ${b.title}'),
               subtitle: Text(
-                '${bookingRangeText(b)}${b.fromEvent ? ' · 캘린더 일정' : ''}',
+                '${bookingRangeText(b)}${b.fromEvent ? tr(' · 캘린더 일정') : ''}',
               ),
               onTap: () => _showBooking(b),
             ),
@@ -474,7 +500,10 @@ class _ResourceRow extends StatelessWidget {
               children: [
                 for (var h = _dayStartHour; h <= _dayEndHour; h += 3) ...[
                   if (h != _dayStartHour) const Spacer(),
-                  Text('$h시', style: TextStyle(fontSize: 10, color: hint)),
+                  Text(
+                    tr('{h}시', {'h': h}),
+                    style: TextStyle(fontSize: 10, color: hint),
+                  ),
                 ],
               ],
             ),
@@ -568,7 +597,7 @@ class _BookingDialogState extends State<_BookingDialog> {
 
   Future<void> _save() async {
     if (!_end.isAfter(_start)) {
-      setState(() => _error = '끝 시각은 시작 시각보다 뒤여야 합니다.');
+      setState(() => _error = tr('끝 시각은 시작 시각보다 뒤여야 합니다.'));
       return;
     }
     setState(() {
@@ -587,7 +616,7 @@ class _BookingDialogState extends State<_BookingDialog> {
       if (mounted) {
         setState(() {
           _saving = false;
-          _error = e is ApiException ? e.message : '예약하지 못했습니다.';
+          _error = e is ApiException ? trServer(e.message) : tr('예약하지 못했습니다.');
         });
       }
     }
@@ -620,7 +649,7 @@ class _BookingDialogState extends State<_BookingDialog> {
     );
     final multiDay = _endDay.isAfter(_startDay);
     return AlertDialog(
-      title: const Text('회의실·자원 예약'),
+      title: Text(tr('회의실·자원 예약')),
       content: SizedBox(
         width: 380,
         child: Column(
@@ -630,7 +659,7 @@ class _BookingDialogState extends State<_BookingDialog> {
             DropdownButtonFormField<String>(
               key: const ValueKey('booking-resource'),
               initialValue: _resourceId,
-              decoration: const InputDecoration(labelText: '자원'),
+              decoration: InputDecoration(labelText: tr('자원')),
               items: [
                 for (final r in widget.resources)
                   DropdownMenuItem(
@@ -682,16 +711,14 @@ class _BookingDialogState extends State<_BookingDialog> {
                 child: TextButton(
                   key: const ValueKey('booking-multi-day'),
                   onPressed: () => _pick(false),
-                  child: const Text('여러 날 (차량·장비 대여)'),
+                  child: Text(tr('여러 날 (차량·장비 대여)')),
                 ),
               ),
             TextField(
               key: const ValueKey('booking-title'),
               controller: _title,
               maxLength: 50,
-              decoration: const InputDecoration(
-                labelText: '제목 (비우면 "자원 이름 예약")',
-              ),
+              decoration: InputDecoration(labelText: tr('제목 (비우면 "자원 이름 예약")')),
             ),
             if (_error != null)
               Text(
@@ -705,12 +732,12 @@ class _BookingDialogState extends State<_BookingDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('booking-save'),
           onPressed: _saving ? null : _save,
-          child: const Text('예약'),
+          child: Text(tr('예약')),
         ),
       ],
     );
@@ -759,13 +786,18 @@ class _ResourcesAdminSectionState extends State<ResourcesAdminSection> {
       if (mounted) {
         showAppToast(
           context,
-          r == null ? '${fields['name']}을(를) 더했습니다.' : '저장했습니다.',
+          r == null
+              ? tr('{p0}을(를) 더했습니다.', {'p0': fields['name']})
+              : tr('저장했습니다.'),
         );
       }
       await _load();
     } catch (e) {
       if (mounted) {
-        showAppToast(context, e is ApiException ? e.message : '저장하지 못했습니다.');
+        showAppToast(
+          context,
+          e is ApiException ? trServer(e.message) : tr('저장하지 못했습니다.'),
+        );
       }
     }
   }
@@ -774,19 +806,21 @@ class _ResourcesAdminSectionState extends State<ResourcesAdminSection> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('${r.name}을(를) 지울까요?'),
-        content: const Text(
-          '잡혀 있던 예약도 모두 지워지고, 앞으로의 예약을 잡은 사람에게 알립니다. 잠시 못 쓰게 하려면 지우지 말고 끄세요.',
+        title: Text(tr('{r.name}을(를) 지울까요?', {'r.name': r.name})),
+        content: Text(
+          tr(
+            '잡혀 있던 예약도 모두 지워지고, 앞으로의 예약을 잡은 사람에게 알립니다. 잠시 못 쓰게 하려면 지우지 말고 끄세요.',
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('resource-delete-confirm'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('지우기'),
+            child: Text(tr('지우기')),
           ),
         ],
       ),
@@ -797,7 +831,7 @@ class _ResourcesAdminSectionState extends State<ResourcesAdminSection> {
       await _load();
     } catch (e) {
       if (mounted) {
-        showAppToast(context, e is ApiException ? e.message : '지우지 못했습니다.');
+        showAppToast(context, e is ApiException ? trServer(e.message) : tr('지우지 못했습니다.'));
       }
     }
   }
@@ -808,7 +842,10 @@ class _ResourcesAdminSectionState extends State<ResourcesAdminSection> {
       await _load();
     } catch (e) {
       if (mounted) {
-        showAppToast(context, e is ApiException ? e.message : '저장하지 못했습니다.');
+        showAppToast(
+          context,
+          e is ApiException ? trServer(e.message) : tr('저장하지 못했습니다.'),
+        );
       }
     }
   }
@@ -822,19 +859,19 @@ class _ResourcesAdminSectionState extends State<ResourcesAdminSection> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         GroupwareSectionHeader(
-          '회의실·자원',
+          tr('회의실·자원'),
           trailing: TextButton.icon(
             key: const ValueKey('resource-add'),
             onPressed: () => _edit(),
             icon: const Icon(Icons.add, size: 18),
-            label: const Text('더하기'),
+            label: Text(tr('더하기')),
           ),
         ),
         if (resources.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Text(
-              '회의실·장비·차량을 더하면 "예약" 탭과 캘린더 일정에서 잡을 수 있습니다.',
+              tr('회의실·장비·차량을 더하면 "예약" 탭과 캘린더 일정에서 잡을 수 있습니다.'),
               style: TextStyle(fontSize: 12, color: hint),
             ),
           ),
@@ -848,7 +885,7 @@ class _ResourcesAdminSectionState extends State<ResourcesAdminSection> {
               [
                 r.kindLabel,
                 if (r.detail.isNotEmpty) r.detail,
-                if (!r.enabled) '꺼짐',
+                if (!r.enabled) tr('꺼짐'),
               ].join(' · '),
             ),
             onTap: () => _edit(r),
@@ -862,7 +899,7 @@ class _ResourcesAdminSectionState extends State<ResourcesAdminSection> {
                 ),
                 IconButton(
                   key: ValueKey('resource-delete-${r.id}'),
-                  tooltip: '지우기',
+                  tooltip: tr('지우기'),
                   icon: const Icon(Icons.delete_outline),
                   onPressed: () => _delete(r),
                 ),
@@ -907,13 +944,13 @@ class _ResourceDialogState extends State<_ResourceDialog> {
   void _save() {
     final name = _name.text.trim();
     if (name.isEmpty) {
-      setState(() => _error = '이름을 넣으세요.');
+      setState(() => _error = tr('이름을 넣으세요.'));
       return;
     }
     final capacityText = _capacity.text.trim();
     final capacity = capacityText.isEmpty ? null : int.tryParse(capacityText);
     if (capacityText.isNotEmpty && (capacity == null || capacity < 1)) {
-      setState(() => _error = '수용 인원은 1 이상의 숫자로 넣으세요.');
+      setState(() => _error = tr('수용 인원은 1 이상의 숫자로 넣으세요.'));
       return;
     }
     Navigator.of(context).pop({
@@ -928,7 +965,9 @@ class _ResourceDialogState extends State<_ResourceDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.resource == null ? '회의실·자원 더하기' : '회의실·자원 고치기'),
+      title: Text(
+        widget.resource == null ? tr('회의실·자원 더하기') : tr('회의실·자원 고치기'),
+      ),
       content: SizedBox(
         width: 380,
         child: SingleChildScrollView(
@@ -949,25 +988,25 @@ class _ResourceDialogState extends State<_ResourceDialog> {
                 key: const ValueKey('resource-name'),
                 controller: _name,
                 maxLength: 30,
-                decoration: const InputDecoration(labelText: '이름'),
+                decoration: InputDecoration(labelText: tr('이름')),
               ),
               TextField(
                 key: const ValueKey('resource-location'),
                 controller: _location,
                 maxLength: 50,
-                decoration: const InputDecoration(labelText: '위치 (예: 3층)'),
+                decoration: InputDecoration(labelText: tr('위치 (예: 3층)')),
               ),
               TextField(
                 key: const ValueKey('resource-capacity'),
                 controller: _capacity,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: '수용 인원'),
+                decoration: InputDecoration(labelText: tr('수용 인원')),
               ),
               TextField(
                 key: const ValueKey('resource-description'),
                 controller: _description,
                 maxLength: 200,
-                decoration: const InputDecoration(labelText: '설명 (장비 목록 등)'),
+                decoration: InputDecoration(labelText: tr('설명 (장비 목록 등)')),
               ),
               if (_error != null)
                 Text(
@@ -981,12 +1020,12 @@ class _ResourceDialogState extends State<_ResourceDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('resource-save'),
           onPressed: _save,
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ],
     );

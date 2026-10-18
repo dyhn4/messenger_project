@@ -1,7 +1,13 @@
 // 그룹웨어 회의실·자원 예약과 휴가 달력의 데이터 모양 — 서버 groupwareResources.js(자원·예약)·groupwareWork.js(GET /groupware/leave/month)를 옮긴 것.
 
+import '../l10n/tr.dart';
+
 /// 자원 종류 — 서버 resourceRules.js RESOURCE_KINDS.
-const resourceKindLabels = {'room': '회의실', 'equipment': '장비', 'vehicle': '차량'};
+final resourceKindLabels = {
+  'room': tr('회의실'),
+  'equipment': tr('장비'),
+  'vehicle': tr('차량'),
+};
 
 /// 회의실·장비·차량 하나. [busy]는 시간을 정해 받았을 때 그 시간에 잡힌 첫 예약(없으면 null).
 class GroupwareResource {
@@ -43,12 +49,12 @@ class GroupwareResource {
             : null,
       );
 
-  String get kindLabel => resourceKindLabels[kind] ?? '자원';
+  String get kindLabel => resourceKindLabels[kind] ?? tr('자원');
 
   /// "3층 · 12명" — 위치·수용 인원.
   String get detail => [
     if ((location ?? '').isNotEmpty) location!,
-    if (capacity != null) '$capacity명',
+    if (capacity != null) tr('{capacity}명', {'capacity': capacity}),
   ].join(' · ');
 }
 
@@ -132,7 +138,7 @@ class MonthLeave {
     userId: json['userId'] as String? ?? '',
     name: json['name'] as String? ?? '',
     leaveType: json['leaveType'] as String?,
-    label: json['label'] as String? ?? '휴가',
+    label: json['label'] as String? ?? tr('휴가'),
     startDate: json['startDate'] as String,
     endDate: json['endDate'] as String,
     halfDays: (json['halfDays'] as num?)?.toInt(),
@@ -192,7 +198,7 @@ class LeaveMonth {
     month: json['month'] as String? ?? '',
     holidays: {
       for (final h in json['holidays'] as List? ?? const [])
-        if (h is Map) h['date'] as String: h['name'] as String? ?? '공휴일',
+        if (h is Map) h['date'] as String: h['name'] as String? ?? tr('공휴일'),
     },
     leaves: [
       for (final l in json['leaves'] as List? ?? const [])

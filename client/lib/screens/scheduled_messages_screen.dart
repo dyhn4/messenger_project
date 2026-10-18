@@ -15,6 +15,7 @@ import '../widgets/muted_scrollbar.dart';
 import '../widgets/room_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'schedule_message_dialog.dart';
+import '../l10n/tr.dart';
 
 /// "메시지 예약" 목록을 연다 — 입력칸·보드 위의 "예약된 메시지 N개 · 보기"에서([room]을 주면 '이 대화방만'이
 /// 켜진 채로). 넓은 창(PC)은 대화상자, 좁은 창(모바일)은 전체 화면. [메뉴]의 "메시지 예약"은 오른쪽 패널
@@ -109,7 +110,7 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
       if (!mounted) return;
       // 이미 받아 둔 목록이 있으면 그대로 보여주고 알리기만 한다.
       if (_session.scheduledMessagesLoaded) {
-        showAppToast(context, '예약 목록을 새로 받지 못했습니다: $e');
+        showAppToast(context, tr('예약 목록을 새로 받지 못했습니다: {e}', {'e': e}));
       } else {
         setState(() => _loadError = e);
       }
@@ -151,7 +152,7 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('닫기'),
+            child: Text(tr('닫기')),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -177,9 +178,9 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
   Future<void> _sendNow(ScheduledMessage m) async {
     final room = _session.scheduledRoomName(m);
     final ok = await _confirm(
-      title: '지금 보내기',
-      content: "예약 시간을 기다리지 않고 '$room'에 지금 바로 보낼까요?",
-      action: '보내기',
+      title: tr('지금 보내기'),
+      content: tr('예약 시간을 기다리지 않고 \'{room}\'에 지금 바로 보낼까요?', {'room': room}),
+      action: tr('보내기'),
     );
     if (!ok || !mounted || _gone(m)) return;
     try {
@@ -189,7 +190,7 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
       if (mounted) {
         showAppToast(
           context,
-          e is ApiException ? e.message : '보내지 못했습니다: $e',
+          e is ApiException ? trServer(e.message) : tr('보내지 못했습니다: {e}', {'e': e}),
           duration: const Duration(seconds: 3),
         );
       }
@@ -198,22 +199,30 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
 
   Future<void> _cancel(ScheduledMessage m, {required bool failed}) async {
     final ok = await _confirm(
-      title: failed ? '예약 메시지 삭제' : '예약 취소',
+      title: failed ? tr('예약 메시지 삭제') : tr('예약 취소'),
       content: failed
-          ? '보내지 못한 예약 메시지를 삭제할까요?'
-          : '${formatScheduleTime(m.sendAt)}에 보낼 예약을 취소할까요? 취소한 예약은 되돌릴 수 없습니다.',
-      action: failed ? '삭제' : '예약 취소',
+          ? tr('보내지 못한 예약 메시지를 삭제할까요?')
+          : tr('{p0}에 보낼 예약을 취소할까요? 취소한 예약은 되돌릴 수 없습니다.', {
+              'p0': formatScheduleTime(m.sendAt),
+            }),
+      action: failed ? tr('삭제') : tr('예약 취소'),
       destructive: true,
     );
     if (!ok || !mounted || _gone(m)) return;
     try {
       await _session.cancelScheduledMessage(m.id);
       if (mounted) {
-        showAppToast(context, failed ? '예약 메시지를 삭제했습니다.' : '예약을 취소했습니다.');
+        showAppToast(
+          context,
+          failed ? tr('예약 메시지를 삭제했습니다.') : tr('예약을 취소했습니다.'),
+        );
       }
     } catch (e) {
       if (mounted) {
-        showAppToast(context, e is ApiException ? e.message : '취소하지 못했습니다: $e');
+        showAppToast(
+          context,
+          e is ApiException ? trServer(e.message) : tr('취소하지 못했습니다: {e}', {'e': e}),
+        );
       }
     }
   }
@@ -233,7 +242,7 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
     );
     if (!widget.asDialog) {
       return Scaffold(
-        appBar: AppBar(title: const Text('메시지 예약')),
+        appBar: AppBar(title: Text(tr('메시지 예약'))),
         body: SafeArea(child: body),
       );
     }
@@ -246,13 +255,13 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
             children: [
               Expanded(
                 child: Text(
-                  '메시지 예약',
+                  tr('메시지 예약'),
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
               IconButton(
                 icon: const Icon(Icons.close),
-                tooltip: '닫기',
+                tooltip: tr('닫기'),
                 onPressed: () => Navigator.of(context).pop(),
               ),
             ],
@@ -273,7 +282,7 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
       key: const ValueKey('scheduled-create'),
       onPressed: _atLimit ? null : _create,
       icon: const Icon(Icons.add, size: 18),
-      label: const Text('메시지 예약 생성'),
+      label: Text(tr('메시지 예약 생성')),
     );
     return Padding(
       padding: EdgeInsets.fromLTRB(widget.asDialog ? 20 : 16, 8, 16, 10),
@@ -285,7 +294,7 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
               Text.rich(
                 TextSpan(
                   children: [
-                    const TextSpan(text: '예약 '),
+                    TextSpan(text: tr('예약 ')),
                     TextSpan(
                       text: '$count',
                       style: TextStyle(
@@ -310,7 +319,10 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
               const Spacer(),
               if (_atLimit)
                 Tooltip(
-                  message: '예약 메시지는 최대 $scheduledMessageMaxCount건까지 만들 수 있습니다.',
+                  message: tr(
+                    '예약 메시지는 최대 {scheduledMessageMaxCount}건까지 만들 수 있습니다.',
+                    {'scheduledMessageMaxCount': scheduledMessageMaxCount},
+                  ),
                   child: createButton,
                 )
               else
@@ -323,7 +335,7 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
               children: [
                 FilterChip(
                   key: const ValueKey('scheduled-only-room'),
-                  label: const Text('이 대화방만'),
+                  label: Text(tr('이 대화방만')),
                   selected: _onlyRoom,
                   visualDensity: VisualDensity.compact,
                   onSelected: (v) => setState(() => _onlyRoom = v),
@@ -348,7 +360,7 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
   Widget _buildBody(BuildContext context) {
     if (!_session.scheduledMessagesLoaded) {
       if (_loadError != null && !_loading) {
-        return _ErrorState(message: '예약 목록을 불러오지 못했습니다.', onRetry: _retry);
+        return _ErrorState(message: tr('예약 목록을 불러오지 못했습니다.'), onRetry: _retry);
       }
       return const Center(child: CircularProgressIndicator());
     }
@@ -380,7 +392,7 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
           _SectionHeader(
             key: const ValueKey('scheduled-failed-header'),
             icon: Icons.error_outline,
-            label: '발송 실패',
+            label: tr('발송 실패'),
             count: failed.length,
             danger: true,
           ),
@@ -401,14 +413,14 @@ class _ScheduledMessagesScreenState extends State<ScheduledMessagesScreen> {
         _SectionHeader(
           key: const ValueKey('scheduled-header'),
           icon: Icons.schedule_send_outlined,
-          label: '예약됨',
+          label: tr('예약됨'),
           count: scheduled.length,
         ),
         if (scheduled.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Text(
-              '보낼 차례를 기다리는 예약이 없습니다.',
+              tr('보낼 차례를 기다리는 예약이 없습니다.'),
               style: TextStyle(
                 fontSize: 13,
                 color: Theme.of(context).hintColor,
@@ -565,7 +577,9 @@ class _ScheduledCard extends StatelessWidget {
                         if (attachments > 0)
                           _Meta(
                             icon: Icons.attach_file,
-                            text: '파일 $attachments개',
+                            text: tr('파일 {attachments}개', {
+                              'attachments': attachments,
+                            }),
                             color: hint,
                           ),
                       ],
@@ -586,7 +600,7 @@ class _ScheduledCard extends StatelessWidget {
                           const SizedBox(width: 5),
                           Expanded(
                             child: Text(
-                              m.failReason ?? '보내지 못했습니다.',
+                              m.failReason ?? tr('보내지 못했습니다.'),
                               key: ValueKey('scheduled-reason-${m.id}'),
                               style: TextStyle(
                                 fontSize: 12.5,
@@ -612,7 +626,7 @@ class _ScheduledCard extends StatelessWidget {
                               foregroundColor: hint,
                               visualDensity: VisualDensity.compact,
                             ),
-                            child: const Text('삭제'),
+                            child: Text(tr('삭제')),
                           ),
                           const SizedBox(width: 4),
                           FilledButton.tonalIcon(
@@ -622,7 +636,7 @@ class _ScheduledCard extends StatelessWidget {
                               visualDensity: VisualDensity.compact,
                             ),
                             icon: const Icon(Icons.edit_calendar, size: 16),
-                            label: const Text('수정'),
+                            label: Text(tr('수정')),
                           ),
                           const SizedBox(width: 8),
                         ],
@@ -645,7 +659,7 @@ class _ScheduledCard extends StatelessWidget {
                             ),
                             const SizedBox(width: 6),
                             Text(
-                              '보내는 중',
+                              tr('보내는 중'),
                               style: TextStyle(fontSize: 12, color: hint),
                             ),
                           ],
@@ -726,7 +740,7 @@ class _Preview extends StatelessWidget {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  '게시글',
+                  tr('게시글'),
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
@@ -770,18 +784,18 @@ class _MoreButton extends StatelessWidget {
       menuChildren: [
         hoverMenuItem(
           icon: Icons.edit_outlined,
-          label: '수정',
+          label: tr('수정'),
           onPressed: onEdit,
         ),
         hoverMenuItem(
           icon: Icons.send_outlined,
-          label: '지금 보내기',
+          label: tr('지금 보내기'),
           onPressed: onSendNow,
         ),
         hoverMenuDivider(),
         hoverMenuItem(
           icon: Icons.event_busy_outlined,
-          label: '예약 취소',
+          label: tr('예약 취소'),
           color: Colors.redAccent,
           onPressed: onCancel,
         ),
@@ -789,7 +803,7 @@ class _MoreButton extends StatelessWidget {
       builder: (context, controller, _) => IconButton(
         key: ValueKey('scheduled-more-$messageId'),
         icon: const Icon(Icons.more_horiz),
-        tooltip: '더보기',
+        tooltip: tr('더보기'),
         visualDensity: VisualDensity.compact,
         onPressed: () =>
             controller.isOpen ? controller.close() : controller.open(),
@@ -893,7 +907,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              filtered ? '이 대화방에 예약된 메시지가 없습니다.' : '예약된 메시지가 없습니다.',
+              filtered ? tr('이 대화방에 예약된 메시지가 없습니다.') : tr('예약된 메시지가 없습니다.'),
               textAlign: TextAlign.center,
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
@@ -901,7 +915,10 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              '원하는 시간에 보낼 메시지를 미리 써 두세요.\n15분 단위로 최대 $scheduledMaxDaysAhead일 뒤까지 예약할 수 있어요.',
+              tr(
+                '원하는 시간에 보낼 메시지를 미리 써 두세요.\n15분 단위로 최대 {scheduledMaxDaysAhead}일 뒤까지 예약할 수 있어요.',
+                {'scheduledMaxDaysAhead': scheduledMaxDaysAhead},
+              ),
               textAlign: TextAlign.center,
               style: TextStyle(color: theme.hintColor, height: 1.5),
             ),
@@ -937,7 +954,7 @@ class _ErrorState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              '연결 상태를 확인한 뒤 다시 시도해 주세요.',
+              tr('연결 상태를 확인한 뒤 다시 시도해 주세요.'),
               textAlign: TextAlign.center,
               style: TextStyle(color: theme.hintColor),
             ),
@@ -945,7 +962,7 @@ class _ErrorState extends StatelessWidget {
             FilledButton.tonalIcon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
-              label: const Text('다시 시도'),
+              label: Text(tr('다시 시도')),
             ),
           ],
         ),
@@ -1016,7 +1033,7 @@ class _ScheduledRoomBarState extends State<ScheduledRoomBar> {
     if (scheduled == 0 && failed == 0) return const SizedBox.shrink();
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final noun = widget.room.isBoard ? '게시글' : '메시지';
+    final noun = widget.room.isBoard ? tr('게시글') : tr('메시지');
     return Padding(
       padding: widget.padding,
       child: Material(
@@ -1042,12 +1059,17 @@ class _ScheduledRoomBarState extends State<ScheduledRoomBar> {
                     TextSpan(
                       children: [
                         if (scheduled > 0)
-                          TextSpan(text: '예약된 $noun $scheduled개'),
+                          TextSpan(
+                            text: tr('예약된 {noun} {scheduled}개', {
+                              'noun': noun,
+                              'scheduled': scheduled,
+                            }),
+                          ),
                         if (scheduled > 0 && failed > 0)
                           const TextSpan(text: ' · '),
                         if (failed > 0)
                           TextSpan(
-                            text: '발송 실패 $failed개',
+                            text: tr('발송 실패 {failed}개', {'failed': failed}),
                             style: TextStyle(
                               color: scheme.error,
                               fontWeight: FontWeight.w700,
@@ -1055,7 +1077,7 @@ class _ScheduledRoomBarState extends State<ScheduledRoomBar> {
                           ),
                         const TextSpan(text: ' · '),
                         TextSpan(
-                          text: '보기',
+                          text: tr('보기'),
                           style: TextStyle(
                             color: scheme.primary,
                             fontWeight: FontWeight.w700,

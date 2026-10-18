@@ -6,12 +6,13 @@ import '../../../services/calendar_controller.dart';
 import '../../../widgets/app_toast.dart';
 import '../../../widgets/floating_dialog.dart';
 import '../../home_screen.dart' show wideBreakpoint;
+import '../../../l10n/tr.dart';
 
 /// 캘린더 관리 화면들이 같이 쓰는 조각 — 반응형 창 틀, 확인 대화상자, 결과 토스트, 나에게만 삭제·삭제 흐름.
 
 /// 서버 에러(`{error}`)는 그대로, 그 밖의 예외는 [fallback] 문구로.
 String calendarErrorText(Object e, String fallback) =>
-    e is ApiException ? e.message : fallback;
+    e is ApiException ? trServer(e.message) : fallback;
 
 /// 관리 대화상자를 넓은 화면(PC)에서는 가운데 뜨는 창으로, 좁은 화면(모바일)에서는 전체 화면으로 연다.
 /// [child]는 스스로 스크롤되는 본문이고, 닫을 때 `Navigator.pop(값)`으로 결과를 돌려준다.
@@ -56,7 +57,7 @@ Future<bool> confirmCalendarAction(
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('cal-confirm-ok'),
@@ -102,19 +103,24 @@ Future<bool> leaveCalendarFlow(
   final subscriber = calendar.isSubscriber;
   final ok = await confirmCalendarAction(
     context,
-    title: subscriber ? '구독 취소' : '나에게만 삭제',
+    title: subscriber ? tr('구독 취소') : tr('나에게만 삭제'),
     message: subscriber
-        ? "'${calendar.name}' 캘린더 구독을 취소할까요?\n취소해도 언제든 다시 구독할 수 있어요."
-        : "'${calendar.name}' 캘린더를 내 목록에서만 삭제할까요?\n다른 멤버에게는 그대로 남아 있고, 캘린더 관리자가 다시 추가하면 볼 수 있어요.",
-    confirmLabel: subscriber ? '구독 취소' : '나에게만 삭제',
+        ? tr('\'{calendar.name}\' 캘린더 구독을 취소할까요?\n취소해도 언제든 다시 구독할 수 있어요.', {
+            'calendar.name': calendar.name,
+          })
+        : tr(
+            '\'{calendar.name}\' 캘린더를 내 목록에서만 삭제할까요?\n다른 멤버에게는 그대로 남아 있고, 캘린더 관리자가 다시 추가하면 볼 수 있어요.',
+            {'calendar.name': calendar.name},
+          ),
+    confirmLabel: subscriber ? tr('구독 취소') : tr('나에게만 삭제'),
   );
   if (!ok) return false;
   try {
     await controller.leaveCalendar(calendar.id);
-    notify(subscriber ? '구독을 취소했습니다.' : '캘린더를 내 목록에서 삭제했습니다.');
+    notify(subscriber ? tr('구독을 취소했습니다.') : tr('캘린더를 내 목록에서 삭제했습니다.'));
     return true;
   } catch (e) {
-    notify(calendarErrorText(e, '처리하지 못했습니다. 잠시 후 다시 시도하세요.'));
+    notify(calendarErrorText(e, tr('처리하지 못했습니다. 잠시 후 다시 시도하세요.')));
     return false;
   }
 }
@@ -128,18 +134,20 @@ Future<bool> deleteCalendarFlow(
   final notify = CalendarNotifier.of(context);
   final ok = await confirmCalendarAction(
     context,
-    title: '캘린더 삭제',
-    message:
-        "'${calendar.name}' 캘린더를 삭제할까요?\n캘린더에 등록된 모든 일정도 함께 삭제되고, 멤버와 구독자에게서도 사라져요. 삭제한 캘린더는 되돌릴 수 없어요.",
-    confirmLabel: '삭제',
+    title: tr('캘린더 삭제'),
+    message: tr(
+      '\'{calendar.name}\' 캘린더를 삭제할까요?\n캘린더에 등록된 모든 일정도 함께 삭제되고, 멤버와 구독자에게서도 사라져요. 삭제한 캘린더는 되돌릴 수 없어요.',
+      {'calendar.name': calendar.name},
+    ),
+    confirmLabel: tr('삭제'),
   );
   if (!ok) return false;
   try {
     await controller.deleteCalendar(calendar.id);
-    notify('캘린더를 삭제했습니다.');
+    notify(tr('캘린더를 삭제했습니다.'));
     return true;
   } catch (e) {
-    notify(calendarErrorText(e, '캘린더를 삭제하지 못했습니다. 잠시 후 다시 시도하세요.'));
+    notify(calendarErrorText(e, tr('캘린더를 삭제하지 못했습니다. 잠시 후 다시 시도하세요.')));
     return false;
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/api_client.dart' show EmailCodeSent;
+import '../l10n/tr.dart';
 
 /// 메일로 받은 6자리 확인 코드 입력 — "코드 보내기" 단추와 코드 칸, 보낸 주소·다시 보내기까지 남은 시간 안내를 한 덩어리로.
 /// 가입·비밀번호 찾기·이메일 확인·이메일 변경이 같이 쓴다(서버 규칙: server/src/emailCodeRules.js — 10분 동안 쓸 수 있고 1분
@@ -118,8 +119,8 @@ class _EmailCodeInputState extends State<EmailCodeInput> {
                 maxLength: 6,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 autofillHints: const [AutofillHints.oneTimeCode],
-                decoration: const InputDecoration(
-                  labelText: '인증 코드 6자리',
+                decoration: InputDecoration(
+                  labelText: tr('인증 코드 6자리'),
                   border: OutlineInputBorder(),
                   counterText: '',
                 ),
@@ -140,10 +141,10 @@ class _EmailCodeInputState extends State<EmailCodeInput> {
                       )
                     : Text(
                         sent == null
-                            ? widget.sendLabel
+                            ? tr(widget.sendLabel)
                             : wait > 0
-                            ? '다시 보내기 ($wait초)'
-                            : '다시 보내기',
+                            ? tr('다시 보내기 ({wait}초)', {'wait': wait})
+                            : tr('다시 보내기'),
                       ),
               ),
             ),
@@ -152,8 +153,15 @@ class _EmailCodeInputState extends State<EmailCodeInput> {
         if (sent != null) ...[
           const SizedBox(height: 4),
           Text(
-            '${sent.email?.isNotEmpty == true ? '${sent.email}(으)로' : '메일로'} 인증 코드를 보냈습니다. '
-            '${sent.expiresIn.inMinutes}분 안에 넣으세요. 메일이 안 보이면 스팸함도 확인하세요.',
+            tr(
+              '{p0} 인증 코드를 보냈습니다. {sent.expiresIn.inMinutes}분 안에 넣으세요. 메일이 안 보이면 스팸함도 확인하세요.',
+              {
+                'p0': sent.email?.isNotEmpty == true
+                    ? tr('{sent.email}(으)로', {'sent.email': sent.email})
+                    : tr('메일로'),
+                'sent.expiresIn.inMinutes': sent.expiresIn.inMinutes,
+              },
+            ),
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),
         ],

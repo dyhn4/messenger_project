@@ -2,6 +2,8 @@
 /// callCards.js). 시작·참여·거절·나감을 [events]에 쌓고, 진행 중에는 call:card로 그 자리에서 바뀐다.
 library;
 
+import '../l10n/tr.dart';
+
 enum CallCardEventKind { start, join, leave, decline }
 
 class CallCardEvent {
@@ -30,17 +32,17 @@ class CallCardEvent {
     return CallCardEvent(
       at: DateTime.fromMillisecondsSinceEpoch(at.toInt()),
       userId: raw['userId'] as String? ?? '',
-      name: raw['name'] as String? ?? '알 수 없음',
+      name: raw['name'] as String? ?? tr('알 수 없음'),
       kind: kind,
     );
   }
 
   /// 타임라인에 쓰는 말.
   String get label => switch (kind) {
-    CallCardEventKind.start => '시작',
-    CallCardEventKind.join => '참여',
-    CallCardEventKind.leave => '나감',
-    CallCardEventKind.decline => '거절',
+    CallCardEventKind.start => tr('시작'),
+    CallCardEventKind.join => tr('참여'),
+    CallCardEventKind.leave => tr('나감'),
+    CallCardEventKind.decline => tr('거절'),
   };
 }
 
@@ -94,7 +96,7 @@ class CallCard {
             ? CallCardEvent(
                 at: startedAt,
                 userId: '',
-                name: '알 수 없음',
+                name: tr('알 수 없음'),
                 kind: CallCardEventKind.start,
               )
             : events.first,
@@ -117,8 +119,14 @@ class CallCard {
 
 /// "12초" / "5분" / "1시간 3분" — 카드의 통화 길이 표시.
 String formatCallDuration(Duration d) {
-  if (d.inSeconds < 60) return '${d.inSeconds}초';
-  if (d.inMinutes < 60) return '${d.inMinutes}분';
+  if (d.inSeconds < 60) {
+    return tr('{d.inSeconds}초', {'d.inSeconds': d.inSeconds});
+  }
+  if (d.inMinutes < 60) {
+    return tr('{d.inMinutes}분', {'d.inMinutes': d.inMinutes});
+  }
   final m = d.inMinutes % 60;
-  return m == 0 ? '${d.inHours}시간' : '${d.inHours}시간 $m분';
+  return m == 0
+      ? tr('{d.inHours}시간', {'d.inHours': d.inHours})
+      : tr('{d.inHours}시간 {m}분', {'d.inHours': d.inHours, 'm': m});
 }

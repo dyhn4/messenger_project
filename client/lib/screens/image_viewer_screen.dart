@@ -13,6 +13,7 @@ import '../widgets/file_actions.dart';
 import '../widgets/hover_toolbar.dart' show hoverMenuStyle;
 import '../models/room.dart';
 import 'message_thread_screen.dart';
+import '../l10n/tr.dart';
 
 /// 뷰어에서 넘겨볼 이미지 한 장. 비밀 대화 이미지는 서버가 암호문만 갖고 있어서 복호화한
 /// 바이트가 필요하다 — 이미 받아 둔 게 있으면 [bytesFuture]로, 그 장을 볼 때 받으면 되면
@@ -566,7 +567,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             children: [
               IconButton(
                 icon: const Icon(Icons.arrow_back),
-                tooltip: '뒤로',
+                tooltip: tr('뒤로'),
                 onPressed: () => Navigator.of(context).pop(),
               ),
               if (message != null) ...[
@@ -629,13 +630,13 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                           ? Theme.of(context).colorScheme.primary
                           : null,
                     ),
-                    tooltip: '댓글',
+                    tooltip: tr('댓글'),
                     onPressed: () =>
                         setState(() => _commentsOpen = !_commentsOpen),
                   ),
                 IconButton(
                   icon: const Icon(Icons.download_outlined),
-                  tooltip: '다운로드',
+                  tooltip: tr('다운로드'),
                   onPressed: () => actions.download(context),
                 ),
                 // 채팅 썸네일의 도구모음과 같은 더보기(파일 전달·인쇄·즐겨찾기·복사·원본 파일 보기·삭제).
@@ -644,7 +645,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                   menuChildren: imageActionMenuItems(context, actions),
                   builder: (context, controller, _) => IconButton(
                     icon: const Icon(Icons.more_vert),
-                    tooltip: '더보기',
+                    tooltip: tr('더보기'),
                     onPressed: () => controller.isOpen
                         ? controller.close()
                         : controller.open(),
@@ -810,7 +811,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                       children: [
                         _toolButton(
                           Icons.zoom_out,
-                          '축소',
+                          tr('축소'),
                           () => _zoom(1 / 1.25),
                         ),
                         TextButton(
@@ -823,9 +824,9 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                             ),
                           ),
                         ),
-                        _toolButton(Icons.zoom_in, '확대', () => _zoom(1.25)),
-                        _toolButton(Icons.fit_screen, '화면에 맞춤', _fit),
-                        _toolButton(Icons.rotate_right, '회전', _rotate),
+                        _toolButton(Icons.zoom_in, tr('확대'), () => _zoom(1.25)),
+                        _toolButton(Icons.fit_screen, tr('화면에 맞춤'), _fit),
+                        _toolButton(Icons.rotate_right, tr('회전'), _rotate),
                       ],
                     ),
                   ),

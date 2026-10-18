@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/time_format.dart' show formatScheduleClock;
+import '../l10n/tr.dart';
 
 /// 시간 목록의 간격(분) — 오전 12:00 … 오후 11:45.
 const dateTimeRangeSlotMinutes = 15;
@@ -340,7 +341,7 @@ class DateTimeRangeFieldState extends State<DateTimeRangeField>
               Expanded(
                 child: v.isEmpty
                     ? Text(
-                        widget.placeholder,
+                        tr(widget.placeholder),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium?.copyWith(
@@ -363,7 +364,7 @@ class DateTimeRangeFieldState extends State<DateTimeRangeField>
                 IconButton(
                   key: _key('period-clear'),
                   icon: const Icon(Icons.close, size: 16),
-                  tooltip: '기간 지우기',
+                  tooltip: tr('기간 지우기'),
                   color: hint,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints.tightFor(
@@ -436,7 +437,7 @@ class DateTimeRangeFieldState extends State<DateTimeRangeField>
                   keyPrefix: widget.keyPrefix,
                   start: v.start,
                   end: v.end,
-                  caption: pickingStart ? '시작일을 선택하세요' : '종료일을 선택하세요',
+                  caption: pickingStart ? tr('시작일을 선택하세요') : tr('종료일을 선택하세요'),
                   onPicked: _pickDay,
                 ),
                 Divider(height: 1, color: theme.dividerColor),
@@ -573,7 +574,7 @@ class _DateTimePointPanelState extends State<DateTimePointPanel> {
                 endEnabled: true,
                 open: _timeOpen ? _TimeSide.end : null,
                 formatClock: widget.formatClock,
-                singleLabel: widget.timeLabel,
+                singleLabel: tr(widget.timeLabel),
                 onTap: (_) => setState(() => _timeOpen = !_timeOpen),
               ),
             ],
@@ -660,7 +661,15 @@ class _RangeText extends StatelessWidget {
   }
 }
 
-const _weekdayHeaders = ['일', '월', '화', '수', '목', '금', '토'];
+final _weekdayHeaders = [
+  tr('일'),
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+];
 
 /// 기간 달력 — 예약 메시지 달력과 같은 모양(`‹ 2026년 10월 ›`, 일~토 머리(일 빨강 · 토 파랑), 높이 36의 칸, 오늘은 옅은
 /// 테두리 원)에 위로 지금 고를 쪽 안내(`시작일을 선택하세요`/`종료일을 선택하세요`). 시작일·종료일은 채운 원, 그 사이는 옅은 띠.
@@ -823,7 +832,7 @@ class _RangeCalendarState extends State<_RangeCalendar> {
             child: Padding(
               padding: const EdgeInsets.only(left: 4),
               child: Text(
-                widget.caption,
+                tr(widget.caption),
                 key: ValueKey('${widget.keyPrefix}-period-caption'),
                 style: TextStyle(
                   fontSize: 12,
@@ -837,10 +846,13 @@ class _RangeCalendarState extends State<_RangeCalendar> {
             height: 40,
             child: Row(
               children: [
-                arrow('prev', Icons.chevron_left, '이전 달', -1),
+                arrow('prev', Icons.chevron_left, tr('이전 달'), -1),
                 Expanded(
                   child: Text(
-                    '${_month.year}년 ${_month.month}월',
+                    tr('{_month.year}년 {_month.month}월', {
+                      '_month.year': _month.year,
+                      '_month.month': _month.month,
+                    }),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontWeight: FontWeight.w600,
@@ -848,7 +860,7 @@ class _RangeCalendarState extends State<_RangeCalendar> {
                     ),
                   ),
                 ),
-                arrow('next', Icons.chevron_right, '다음 달', 1),
+                arrow('next', Icons.chevron_right, tr('다음 달'), 1),
               ],
             ),
           ),
@@ -1008,7 +1020,7 @@ class _TimeBoxes extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      m == null ? '시간 없음' : formatClock(m),
+                      m == null ? tr('시간 없음') : formatClock(m),
                       maxLines: 1,
                       softWrap: false,
                       overflow: TextOverflow.fade,
@@ -1048,12 +1060,18 @@ class _TimeBoxes extends StatelessWidget {
                   ...one(
                     _TimeSide.start,
                     'start',
-                    '시작 시간',
+                    tr('시작 시간'),
                     startMinutes,
                     startEnabled,
                   ),
                   const SizedBox(height: _rowGap),
-                  ...one(_TimeSide.end, 'end', '종료 시간', endMinutes, endEnabled),
+                  ...one(
+                    _TimeSide.end,
+                    'end',
+                    tr('종료 시간'),
+                    endMinutes,
+                    endEnabled,
+                  ),
                 ],
         ),
       ),
@@ -1147,7 +1165,7 @@ class _TimeListState extends State<_TimeList> {
                   children: [
                     Expanded(
                       child: Text(
-                        m == null ? '시간 없음' : widget.formatClock(m),
+                        m == null ? tr('시간 없음') : widget.formatClock(m),
                         maxLines: 1,
                         style: TextStyle(
                           fontSize: _TimeList.fontSize,

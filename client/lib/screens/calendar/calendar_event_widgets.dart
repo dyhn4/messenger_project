@@ -4,6 +4,7 @@ import '../../models/calendar.dart';
 import '../../services/calendar_layout.dart';
 import '../../widgets/muted_scrollbar.dart';
 import 'calendar_common.dart';
+import '../../l10n/tr.dart';
 
 /// 일정 한 줄 — 왼쪽 색 띠, 시간(종일/시작 시각), 제목, 장소·캘린더 이름. 목록 보기·모바일의 "선택한 날"
 /// 목록·"+N개" 대화상자가 같이 쓴다.
@@ -147,7 +148,7 @@ class CalendarDayHeader extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                '오늘',
+                tr('오늘'),
                 style: TextStyle(
                   fontSize: 10,
                   color: theme.colorScheme.onPrimary,
@@ -228,7 +229,7 @@ class CalendarDayEventList extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 32),
             child: Center(
               child: Text(
-                '일정이 없습니다.',
+                tr('일정이 없습니다.'),
                 style: TextStyle(color: theme.hintColor),
               ),
             ),
@@ -338,7 +339,7 @@ class _CalendarListViewState extends State<CalendarListView> {
     if (grouped.isEmpty) {
       return Center(
         child: Text(
-          '이 기간에 일정이 없습니다.',
+          tr('이 기간에 일정이 없습니다.'),
           style: TextStyle(color: theme.hintColor),
         ),
       );

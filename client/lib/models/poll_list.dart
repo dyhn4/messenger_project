@@ -1,4 +1,5 @@
 import 'message.dart';
+import '../l10n/tr.dart';
 
 /// 투표 목록 패널 필터 — 상태(진행 중/마감)와 참여 여부. 서버 `GET /api/polls`의 `status`·`participated` 값과 같은 이름이다.
 enum PollStatusFilter { all, open, closed }
@@ -11,24 +12,24 @@ enum PollSort { created, deadline }
 
 extension PollSortLabel on PollSort {
   String get label => switch (this) {
-    PollSort.created => '생성 순',
-    PollSort.deadline => '기한 순',
+    PollSort.created => tr('생성 순'),
+    PollSort.deadline => tr('기한 순'),
   };
 }
 
 extension PollStatusFilterLabel on PollStatusFilter {
   String get label => switch (this) {
-    PollStatusFilter.all => '전체',
-    PollStatusFilter.open => '진행 중',
-    PollStatusFilter.closed => '마감',
+    PollStatusFilter.all => tr('전체'),
+    PollStatusFilter.open => tr('진행 중'),
+    PollStatusFilter.closed => tr('마감'),
   };
 }
 
 extension PollParticipationFilterLabel on PollParticipationFilter {
   String get label => switch (this) {
-    PollParticipationFilter.all => '전체',
-    PollParticipationFilter.yes => '참여함',
-    PollParticipationFilter.no => '참여 안 함',
+    PollParticipationFilter.all => tr('전체'),
+    PollParticipationFilter.yes => tr('참여함'),
+    PollParticipationFilter.no => tr('참여 안 함'),
   };
 }
 

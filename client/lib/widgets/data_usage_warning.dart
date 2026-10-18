@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../services/network_type.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart' show formatFileSize;
+import '../l10n/tr.dart';
 
 /// 휴대폰 데이터로 받을 때 이 크기(합계) 이상이면 데이터 사용 경고를 띄운다.
 const kCellularDownloadWarnBytes = 10 * 1024 * 1024;
@@ -36,22 +37,27 @@ Future<bool> confirmCellularDownload(
     context: context,
     useRootNavigator: true,
     builder: (context) => AlertDialog(
-      title: const Text('데이터 사용 경고'),
+      title: Text(tr('데이터 사용 경고')),
       content: Text(
-        'Wi-Fi에 연결되어 있지 않습니다.\n'
-        '모바일 데이터(LTE/5G)로 ${formatFileSize(total)}'
-        '${items.length > 1 ? '(파일 ${items.length}개)' : ''}를 다운로드하면 '
-        '데이터 요금이 발생할 수 있습니다.\n\n다운로드할까요?',
+        tr(
+          'Wi-Fi에 연결되어 있지 않습니다.\n모바일 데이터(LTE/5G)로 {p0}{p1}를 다운로드하면 데이터 요금이 발생할 수 있습니다.\n\n다운로드할까요?',
+          {
+            'p0': formatFileSize(total),
+            'p1': items.length > 1
+                ? tr('(파일 {items.length}개)', {'items.length': items.length})
+                : '',
+          },
+        ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('confirm-cellular-download'),
           onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('확인'),
+          child: Text(tr('확인')),
         ),
       ],
     ),

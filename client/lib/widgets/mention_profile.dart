@@ -9,6 +9,7 @@ import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
+import '../l10n/tr.dart';
 
 /// 말풍선·댓글·게시글 안의 멘션 이름([mention])을 눌렀을 때 — 그 사람의 프로필을 연다. 말풍선의 아바타/이름을
 /// 눌렀을 때와 같다(나면 내 프로필, 남이면 멤버 프로필 카드 — 거기서 "1:1 메시지"를 고르면 그 방으로 간다).
@@ -36,7 +37,7 @@ Future<void> openMentionProfile(
     }
   }
   if (user == null) {
-    showAppToast(context, '이 대화에서 나간 멤버입니다.');
+    showAppToast(context, tr('이 대화에서 나간 멤버입니다.'));
     return;
   }
   final found = user;

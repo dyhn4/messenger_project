@@ -29,6 +29,7 @@ import 'muted_scrollbar.dart';
 import 'poll_card.dart';
 import 'rich_text_format.dart';
 import 'retrying_network_image.dart';
+import '../l10n/tr.dart';
 
 /// 보드 목록 한 줄(카드)의 최대 폭 — 넓은 창에서 카드가 한없이 늘어나지 않게 가운데에 모은다.
 const _boardMaxWidth = 820.0;
@@ -158,7 +159,7 @@ class BoardViewState extends State<BoardView> {
       post = _findPost(id);
     }
     if (post == null) {
-      showAppToast(context, '게시글을 찾을 수 없습니다.');
+      showAppToast(context, tr('게시글을 찾을 수 없습니다.'));
       unawaited(_c.loadUnreadMustRead());
       return;
     }
@@ -335,7 +336,7 @@ class BoardViewState extends State<BoardView> {
                         FloatingActionButton.small(
                           key: const ValueKey('board-poll'),
                           heroTag: null,
-                          tooltip: '투표 만들기',
+                          tooltip: tr('투표 만들기'),
                           onPressed: composePoll,
                           child: const Icon(Icons.poll_outlined),
                         ),
@@ -619,7 +620,7 @@ Future<void> togglePostMustRead(
     if (context.mounted) {
       showAppToast(
         context,
-        on ? '필독으로 지정했습니다. 멤버에게 알림이 갑니다.' : '필독 지정을 해제했습니다.',
+        on ? tr('필독으로 지정했습니다. 멤버에게 알림이 갑니다.') : tr('필독 지정을 해제했습니다.'),
       );
     }
   } catch (e) {
@@ -637,7 +638,7 @@ Future<void> togglePostPin(
   try {
     await session.setPostPinned(room, post.id, pin);
     if (context.mounted) {
-      showAppToast(context, pin ? '게시글을 고정했습니다.' : '게시글 고정을 해제했습니다.');
+      showAppToast(context, pin ? tr('게시글을 고정했습니다.') : tr('게시글 고정을 해제했습니다.'));
     }
   } catch (e) {
     if (context.mounted) showAppToast(context, '$e');
@@ -655,20 +656,23 @@ Future<bool> confirmAndDeletePost(
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('게시글 삭제'),
+      title: Text(tr('게시글 삭제')),
       content: Text(
         _isMine(session, post)
-            ? "'$title' 게시글을 삭제할까요?"
-            : "관리자 권한으로 ${_authorName(room, post)} 님의 게시글 '$title'을(를) 삭제합니다. 계속할까요?",
+            ? tr('\'{title}\' 게시글을 삭제할까요?', {'title': title})
+            : tr('관리자 권한으로 {p0} 님의 게시글 \'{title}\'을(를) 삭제합니다. 계속할까요?', {
+                'p0': _authorName(room, post),
+                'title': title,
+              }),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+          child: Text(tr('삭제'), style: TextStyle(color: Colors.redAccent)),
         ),
       ],
     ),
@@ -683,7 +687,7 @@ Future<bool> confirmAndDeletePost(
   // 서버 알림(message:deleted)을 기다리지 않고 바로 뺀다 — 같은 알림이 나중에 와도 결과는 같다.
   // 그 사이 방이 사라졌으면 치워진 컨트롤러를 다시 만들지 않는다.
   session.existingControllerFor(room.id)?.applyDelete(post.id);
-  if (context.mounted) showAppToast(context, '게시글을 삭제했습니다.');
+  if (context.mounted) showAppToast(context, tr('게시글을 삭제했습니다.'));
   return true;
 }
 
@@ -723,7 +727,7 @@ class PostMoreButton extends StatelessWidget {
         if (canFavorite)
           hoverMenuItem(
             icon: favoriteOn ? Icons.star : Icons.star_border,
-            label: favoriteOn ? '즐겨찾기 해제' : '즐겨찾기',
+            label: favoriteOn ? tr('즐겨찾기 해제') : tr('즐겨찾기'),
             onPressed: () => toggleEntryFavorite(
               context,
               session,
@@ -735,7 +739,7 @@ class PostMoreButton extends StatelessWidget {
         if (canPin)
           hoverMenuItem(
             icon: post.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-            label: post.isPinned ? '게시글 고정 해제' : '게시글 고정',
+            label: post.isPinned ? tr('게시글 고정 해제') : tr('게시글 고정'),
             onPressed: () => togglePostPin(context, session, room, post),
           ),
         if (canMustRead)
@@ -743,13 +747,13 @@ class PostMoreButton extends StatelessWidget {
             icon: post.isMustRead
                 ? Icons.notification_important
                 : Icons.notification_important_outlined,
-            label: post.isMustRead ? '필독 해제' : '필독으로 지정',
+            label: post.isMustRead ? tr('필독 해제') : tr('필독으로 지정'),
             onPressed: () => togglePostMustRead(context, session, room, post),
           ),
         if (canEdit)
           hoverMenuItem(
             icon: Icons.edit_outlined,
-            label: '수정',
+            label: tr('수정'),
             onPressed: () => showPostEditor(
               context,
               session: session,
@@ -761,7 +765,7 @@ class PostMoreButton extends StatelessWidget {
           if (canPin || canEdit) hoverMenuDivider(),
           hoverMenuItem(
             icon: Icons.delete_outline,
-            label: '삭제',
+            label: tr('삭제'),
             color: Colors.redAccent,
             onPressed: () async {
               if (await confirmAndDeletePost(context, session, room, post)) {
@@ -773,7 +777,7 @@ class PostMoreButton extends StatelessWidget {
       ],
       builder: (context, controller, _) => IconButton(
         icon: const Icon(Icons.more_horiz),
-        tooltip: '더보기',
+        tooltip: tr('더보기'),
         visualDensity: VisualDensity.compact,
         onPressed: () =>
             controller.isOpen ? controller.close() : controller.open(),
@@ -889,7 +893,7 @@ class PostCard extends StatelessWidget {
                           const SizedBox(height: 1),
                           Text(
                             '${formatPostDateTime(post.createdAt)}'
-                            '${post.editedAt != null ? ' (수정됨)' : ''}',
+                            '${post.editedAt != null ? tr(' (수정됨)') : ''}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: 12, color: hint),
@@ -946,7 +950,7 @@ class PostCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 5),
                           Text(
-                            '댓글 $comments',
+                            tr('댓글 {comments}', {'comments': comments}),
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -1118,7 +1122,7 @@ class _AttachmentPreview extends StatelessWidget {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      '파일 $files개',
+                      tr('파일 {files}개', {'files': files}),
                       style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
@@ -1205,7 +1209,7 @@ class PinnedPostTag extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = BoardColors.of(Theme.of(context)).pin;
     return Tooltip(
-      message: '고정된 게시글',
+      message: tr('고정된 게시글'),
       child: Container(
         padding: const EdgeInsets.fromLTRB(5, 1, 7, 1),
         decoration: BoxDecoration(
@@ -1218,7 +1222,7 @@ class PinnedPostTag extends StatelessWidget {
             Icon(Icons.push_pin, size: 11, color: color),
             const SizedBox(width: 2),
             Text(
-              '고정',
+              tr('고정'),
               style: TextStyle(
                 fontSize: 11,
                 height: 1.3,
@@ -1241,7 +1245,7 @@ class MustReadTag extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme.error;
     return Tooltip(
-      message: '필독 게시글',
+      message: tr('필독 게시글'),
       child: Container(
         key: const ValueKey('must-read-tag'),
         padding: const EdgeInsets.fromLTRB(5, 1, 7, 1),
@@ -1255,7 +1259,7 @@ class MustReadTag extends StatelessWidget {
             Icon(Icons.notification_important, size: 11, color: color),
             const SizedBox(width: 2),
             Text(
-              '필독',
+              tr('필독'),
               style: TextStyle(
                 fontSize: 11,
                 height: 1.3,
@@ -1350,7 +1354,7 @@ class PostTitleText extends StatelessWidget {
         if (unread)
           lead(
             Tooltip(
-              message: '안 읽은 게시글',
+              message: tr('안 읽은 게시글'),
               child: Container(
                 key: const ValueKey('post-unread-dot'),
                 width: 8,
@@ -1429,12 +1433,12 @@ class _CategoryFilterBar extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-          chip('전체', null),
+          chip(tr('전체'), null),
           for (final c in room.boardCategories)
             chip(c.name, c.id, color: c.swatch),
           if (room.canManage(session))
             IconButton(
-              tooltip: '말머리 관리',
+              tooltip: tr('말머리 관리'),
               visualDensity: VisualDensity.compact,
               icon: const Icon(Icons.tune, size: 18),
               onPressed: () =>
@@ -1455,7 +1459,7 @@ class _EmptyCategory extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 32),
       child: Text(
-        '이 말머리의 게시글이 없습니다.',
+        tr('이 말머리의 게시글이 없습니다.'),
         textAlign: TextAlign.center,
         style: TextStyle(color: Theme.of(context).hintColor),
       ),
@@ -1503,7 +1507,9 @@ class _MustReadSection extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    '읽지 않은 필독 ${items.length}',
+                    tr('읽지 않은 필독 {items.length}', {
+                      'items.length': items.length,
+                    }),
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
@@ -1517,7 +1523,7 @@ class _MustReadSection extends StatelessWidget {
                     style: TextButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                     ),
-                    child: Text(expanded ? '접기' : '모두 보기'),
+                    child: Text(expanded ? tr('접기') : tr('모두 보기')),
                   ),
               ],
             ),
@@ -1597,7 +1603,7 @@ class _PinnedSection extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  '고정된 게시글 ${posts.length}',
+                  tr('고정된 게시글 {posts.length}', {'posts.length': posts.length}),
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
@@ -1621,7 +1627,7 @@ class _PinnedSection extends StatelessWidget {
                     expanded ? Icons.expand_less : Icons.expand_more,
                     size: 18,
                   ),
-                  label: Text(expanded ? '접기' : '더 보기'),
+                  label: Text(expanded ? tr('접기') : tr('더 보기')),
                 ),
             ],
           ),
@@ -1776,7 +1782,7 @@ class _EmptyBoard extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(
-              '아직 게시글이 없습니다.',
+              tr('아직 게시글이 없습니다.'),
               textAlign: TextAlign.center,
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
@@ -1785,7 +1791,7 @@ class _EmptyBoard extends StatelessWidget {
             if (canWrite) ...[
               const SizedBox(height: 6),
               Text(
-                '오른쪽 아래 연필 버튼으로 첫 게시글을 작성해 보세요.',
+                tr('오른쪽 아래 연필 버튼으로 첫 게시글을 작성해 보세요.'),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: theme.hintColor),
               ),
@@ -1814,7 +1820,7 @@ class _BoardLoadError extends StatelessWidget {
             Icon(Icons.cloud_off_outlined, size: 40, color: theme.hintColor),
             const SizedBox(height: 14),
             Text(
-              '게시글을 불러오지 못했습니다.',
+              tr('게시글을 불러오지 못했습니다.'),
               textAlign: TextAlign.center,
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
@@ -1822,7 +1828,7 @@ class _BoardLoadError extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              '연결 상태를 확인한 뒤 다시 시도해 주세요.',
+              tr('연결 상태를 확인한 뒤 다시 시도해 주세요.'),
               textAlign: TextAlign.center,
               style: TextStyle(color: theme.hintColor),
             ),
@@ -1830,7 +1836,7 @@ class _BoardLoadError extends StatelessWidget {
             FilledButton.tonalIcon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
-              label: const Text('다시 시도'),
+              label: Text(tr('다시 시도')),
             ),
           ],
         ),
@@ -1870,8 +1876,8 @@ class _ReadOnlyNotice extends StatelessWidget {
               Flexible(
                 child: Text(
                   archived
-                      ? '보관된 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.'
-                      : '읽기 전용 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.',
+                      ? tr('보관된 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.')
+                      : tr('읽기 전용 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.'),
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13, color: hint),
                 ),
@@ -1897,16 +1903,16 @@ class _ComposeButton extends StatelessWidget {
       return FloatingActionButton.extended(
         key: const ValueKey('board-compose'),
         heroTag: null,
-        tooltip: '게시글 작성',
+        tooltip: tr('게시글 작성'),
         onPressed: onPressed,
         icon: const Icon(Icons.edit),
-        label: const Text('게시글 작성'),
+        label: Text(tr('게시글 작성')),
       );
     }
     return FloatingActionButton(
       key: const ValueKey('board-compose'),
       heroTag: null,
-      tooltip: '게시글 작성',
+      tooltip: tr('게시글 작성'),
       onPressed: onPressed,
       child: const Icon(Icons.edit),
     );
@@ -1940,7 +1946,7 @@ class _NewPostsPill extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               Text(
-                '새 게시글이 있습니다',
+                tr('새 게시글이 있습니다'),
                 style: TextStyle(
                   color: scheme.onPrimaryContainer,
                   fontWeight: FontWeight.w500,
@@ -2006,7 +2012,7 @@ class PostDetailHead extends StatelessWidget {
                   ),
                   Text(
                     '${formatPostDateTime(post.createdAt)}'
-                    '${post.editedAt != null ? ' (수정됨)' : ''}',
+                    '${post.editedAt != null ? tr(' (수정됨)') : ''}',
                     style: TextStyle(fontSize: 12, color: hint),
                   ),
                 ],
@@ -2031,7 +2037,7 @@ class PostDetailHead extends StatelessWidget {
         const SizedBox(height: 14),
         if (post.deleted)
           Text(
-            '삭제된 게시글입니다.',
+            tr('삭제된 게시글입니다.'),
             style: TextStyle(fontStyle: FontStyle.italic, color: hint),
           )
         else ...[

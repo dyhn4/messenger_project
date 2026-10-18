@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
 /// 비밀 대화 메시지/댓글이 자동 삭제되기까지 남은 시간을 1초마다 갱신해서 보여준다. 상대가
 /// 읽어서 서버가 expiresAt을 확정한 뒤부터만 쓸 수 있다(읽기 전엔 삭제 시점을 아직 모른다 —
@@ -31,11 +32,15 @@ class _SelfDestructCountdownState extends State<SelfDestructCountdown> {
   }
 
   String _format(Duration d) {
-    if (d.isNegative) return '곧 삭제';
-    if (d.inDays >= 1) return '${d.inDays}일 후 삭제';
-    if (d.inHours >= 1) return '${d.inHours}시간 후 삭제';
-    if (d.inMinutes >= 1) return '${d.inMinutes}분 후 삭제';
-    return '${d.inSeconds}초 후 삭제';
+    if (d.isNegative) return tr('곧 삭제');
+    if (d.inDays >= 1) return tr('{d.inDays}일 후 삭제', {'d.inDays': d.inDays});
+    if (d.inHours >= 1) {
+      return tr('{d.inHours}시간 후 삭제', {'d.inHours': d.inHours});
+    }
+    if (d.inMinutes >= 1) {
+      return tr('{d.inMinutes}분 후 삭제', {'d.inMinutes': d.inMinutes});
+    }
+    return tr('{d.inSeconds}초 후 삭제', {'d.inSeconds': d.inSeconds});
   }
 
   @override

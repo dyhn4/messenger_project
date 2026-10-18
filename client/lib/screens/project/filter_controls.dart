@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../widgets/muted_scrollbar.dart';
+import '../../l10n/tr.dart';
 
 /// 필터 패널과 그 안의 작은 팝업들(드롭다운 목록·달력·"필터 추가" 메뉴)이 쓰는 부품.
 ///
@@ -267,7 +268,7 @@ class FilterDropdown<T> extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    current?.label ?? allLabel,
+                    current?.label ?? tr(allLabel),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 13),
@@ -300,7 +301,7 @@ class FilterDropdown<T> extends StatelessWidget {
           child: _ScrollingColumn(
             maxHeight: 280,
             children: [
-              item(null, allLabel),
+              item(null, tr(allLabel)),
               for (final o in options) item(o.value, o.label),
             ],
           ),
@@ -430,7 +431,7 @@ class FilterDateField extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    value == null ? '연도-월-일' : format(value!),
+                    value == null ? tr('연도-월-일') : format(value!),
                     style: TextStyle(
                       fontSize: 13,
                       color: value == null ? theme.hintColor : null,
@@ -477,7 +478,15 @@ class FilterCalendar extends StatefulWidget {
 
 class _FilterCalendarState extends State<FilterCalendar> {
   static const _blue = Color(0xFF1A73E8);
-  static const _weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+  static final _weekdays = [
+    tr('일'),
+    tr('월'),
+    tr('화'),
+    tr('수'),
+    tr('목'),
+    tr('금'),
+    tr('토'),
+  ];
 
   late DateTime _month = _firstOf(widget.value ?? DateTime.now());
 
@@ -497,8 +506,11 @@ class _FilterCalendarState extends State<FilterCalendar> {
 
   Widget _header() {
     final label = _pickMonth
-        ? '${_month.year}년'
-        : '${_month.year}년 ${_month.month.toString().padLeft(2, '0')}월';
+        ? tr('{_month.year}년', {'_month.year': _month.year})
+        : tr('{_month.year}년 {p0}월', {
+            '_month.year': _month.year,
+            'p0': _month.month.toString().padLeft(2, '0'),
+          });
     Widget arrow(IconData icon, String tip, int delta) => IconButton(
       tooltip: tip,
       onPressed: () => _shift(delta),
@@ -533,8 +545,8 @@ class _FilterCalendarState extends State<FilterCalendar> {
             ),
           ),
           const Spacer(),
-          arrow(Icons.arrow_upward, _pickMonth ? '이전 해' : '이전 달', -1),
-          arrow(Icons.arrow_downward, _pickMonth ? '다음 해' : '다음 달', 1),
+          arrow(Icons.arrow_upward, _pickMonth ? tr('이전 해') : tr('이전 달'), -1),
+          arrow(Icons.arrow_downward, _pickMonth ? tr('다음 해') : tr('다음 달'), 1),
         ],
       ),
     );
@@ -643,7 +655,7 @@ class _FilterCalendarState extends State<FilterCalendar> {
                                 )
                               : null,
                           child: Text(
-                            '${row * 4 + col + 1}월',
+                            tr('{p0}월', {'p0': row * 4 + col + 1}),
                             style: TextStyle(
                               fontSize: 13,
                               color: isValue(row * 4 + col + 1)
@@ -684,9 +696,9 @@ class _FilterCalendarState extends State<FilterCalendar> {
           padding: const EdgeInsets.fromLTRB(8, 2, 8, 4),
           child: Row(
             children: [
-              footer('삭제', () => widget.onPicked(null)),
+              footer(tr('삭제'), () => widget.onPicked(null)),
               const Spacer(),
-              footer('오늘', () {
+              footer(tr('오늘'), () {
                 final now = DateTime.now();
                 widget.onPicked(DateTime(now.year, now.month, now.day));
               }),
@@ -726,7 +738,7 @@ class FilterAddButton extends StatelessWidget {
             children: [
               const Icon(Icons.add, size: 16),
               const SizedBox(width: 4),
-              const Text('필터 추가', style: TextStyle(fontSize: 13)),
+              Text(tr('필터 추가'), style: TextStyle(fontSize: 13)),
               const SizedBox(width: 2),
               Icon(Icons.arrow_drop_down, size: 18, color: color),
             ],
@@ -741,7 +753,7 @@ class FilterAddButton extends StatelessWidget {
                     vertical: 10,
                   ),
                   child: Text(
-                    '추가할 필터가 없습니다',
+                    tr('추가할 필터가 없습니다'),
                     style: TextStyle(fontSize: 13, color: theme.hintColor),
                   ),
                 )
@@ -843,7 +855,7 @@ class FilterRow extends StatelessWidget {
             SizedBox(
               width: 28,
               child: IconButton(
-                tooltip: '필터 빼기',
+                tooltip: tr('필터 빼기'),
                 onPressed: onRemove,
                 padding: EdgeInsets.zero,
                 visualDensity: VisualDensity.compact,
@@ -907,8 +919,8 @@ class _FilterPanelState extends State<FilterPanel> {
                   height: 30,
                   child: Row(
                     children: [
-                      const Text(
-                        '필터링',
+                      Text(
+                        tr('필터링'),
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -922,14 +934,14 @@ class _FilterPanelState extends State<FilterPanel> {
                             visualDensity: VisualDensity.compact,
                             textStyle: const TextStyle(fontSize: 12),
                           ),
-                          child: const Text('지우기'),
+                          child: Text(tr('지우기')),
                         ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  '빠른 필터링',
+                Text(
+                  tr('빠른 필터링'),
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 8),

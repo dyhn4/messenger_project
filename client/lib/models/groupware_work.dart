@@ -1,5 +1,6 @@
 // 그룹웨어 근태·휴가 관리의 데이터 모양 — 서버 groupwareWork.js(범위 설정·유연근무·주 52시간·연차 사용 촉진)를 옮긴 것.
 import 'groupware.dart';
+import '../l10n/tr.dart';
 
 /// 범위 설정 — 휴가 종류(꺼진 것 포함)·지출 분류·출근·퇴근 알림.
 class GroupwareOptions {
@@ -145,8 +146,11 @@ enum PromotionStage {
   none('none', '남은 연차 없음');
 
   final String wire;
-  final String label;
-  const PromotionStage(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const PromotionStage(this.wire, this._labelKo);
 
   static PromotionStage fromWire(String? v) =>
       values.firstWhere((s) => s.wire == v, orElse: () => none);

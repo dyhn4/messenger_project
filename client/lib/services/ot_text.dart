@@ -4,6 +4,8 @@
 /// 앱은 확인받지 못한 내 연산을 서버 연산에 대해 transform(내 것, 서버 것)으로 맞춘다.
 library;
 
+import '../l10n/tr.dart';
+
 typedef TextOp = List<Object>;
 
 bool _isRetain(Object? c) => c is int && c > 0;
@@ -101,7 +103,7 @@ bool isNoopOp(TextOp op) => op.every(_isRetain);
 /// [doc]에 [op]를 적용한다 — 길이가 맞지 않으면 [StateError].
 String applyOp(String doc, TextOp op) {
   if (baseLength(op) != doc.length) {
-    throw StateError('연산의 길이가 글과 맞지 않습니다.');
+    throw StateError(tr('연산의 길이가 글과 맞지 않습니다.'));
   }
   final out = StringBuffer();
   var i = 0;
@@ -120,7 +122,7 @@ String applyOp(String doc, TextOp op) {
 
 /// 같은 글에서 갈라진 [a]·[b] → (a', b') — applyOp(applyOp(doc, a), b') == applyOp(applyOp(doc, b), a').
 (TextOp, TextOp) transformOps(TextOp a, TextOp b) {
-  if (baseLength(a) != baseLength(b)) throw StateError('두 연산의 길이가 다릅니다.');
+  if (baseLength(a) != baseLength(b)) throw StateError(tr('두 연산의 길이가 다릅니다.'));
   final ap = _Builder();
   final bp = _Builder();
   var i = 0;
@@ -142,7 +144,7 @@ String applyOp(String doc, TextOp op) {
       y = next(b, j++);
       continue;
     }
-    if (x == null || y == null) throw StateError('연산을 맞출 수 없습니다.');
+    if (x == null || y == null) throw StateError(tr('연산을 맞출 수 없습니다.'));
     final xi = x as int;
     final yi = y as int;
     if (xi > 0 && yi > 0) {
@@ -172,7 +174,9 @@ String applyOp(String doc, TextOp op) {
 
 /// [a] 다음 [b]를 하나로.
 TextOp composeOps(TextOp a, TextOp b) {
-  if (targetLength(a) != baseLength(b)) throw StateError('이어 붙일 수 없는 연산입니다.');
+  if (targetLength(a) != baseLength(b)) {
+    throw StateError(tr('이어 붙일 수 없는 연산입니다.'));
+  }
   final out = _Builder();
   var i = 0;
   var j = 0;
@@ -191,7 +195,7 @@ TextOp composeOps(TextOp a, TextOp b) {
       y = next(b, j++);
       continue;
     }
-    if (x == null || y == null) throw StateError('이어 붙일 수 없는 연산입니다.');
+    if (x == null || y == null) throw StateError(tr('이어 붙일 수 없는 연산입니다.'));
     if (_isRetain(x) && _isRetain(y)) {
       final xi = x as int;
       final yi = y as int;

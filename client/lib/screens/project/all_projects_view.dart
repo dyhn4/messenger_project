@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/project.dart';
 import '../../widgets/muted_scrollbar.dart';
+import '../../l10n/tr.dart';
 
 /// 왼쪽 메뉴 [+] > 전체 프로젝트 — 내가 참여 중인 프로젝트를 한눈에(진행 중, 그 아래 종료된
 /// 프로젝트). 줄을 누르면 그 프로젝트를 연다. 공개 프로젝트는 정회원 이상이면 자동으로
@@ -76,14 +77,24 @@ class _AllProjectsViewState extends State<AllProjectsView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    '전체 프로젝트',
+                  Text(
+                    tr('전체 프로젝트'),
                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '내가 참여 중인 프로젝트 ${all.length}개'
-                    '${widget.archivedProjects.isEmpty ? '' : ' · 종료된 프로젝트 ${widget.archivedProjects.length}개'}',
+                    tr('내가 참여 중인 프로젝트 {all.length}개{p0}', {
+                      'all.length': all.length,
+                      'p0': widget.archivedProjects.isEmpty
+                          ? ''
+                          : tr(
+                              ' · 종료된 프로젝트 {widget.archivedProjects.length}개',
+                              {
+                                'widget.archivedProjects.length':
+                                    widget.archivedProjects.length,
+                              },
+                            ),
+                    }),
                     style: TextStyle(fontSize: 13, color: hint),
                   ),
                 ],
@@ -96,7 +107,7 @@ class _AllProjectsViewState extends State<AllProjectsView> {
                   style: const TextStyle(fontSize: 13),
                   decoration: InputDecoration(
                     isDense: true,
-                    hintText: '프로젝트 이름·키 검색',
+                    hintText: tr('프로젝트 이름·키 검색'),
                     prefixIcon: const Icon(Icons.search, size: 18),
                     prefixIconConstraints: const BoxConstraints(minWidth: 36),
                     border: OutlineInputBorder(
@@ -119,7 +130,9 @@ class _AllProjectsViewState extends State<AllProjectsView> {
               children: [
                 const _HeaderRow(),
                 if (active.isEmpty)
-                  _Empty(searching ? '검색 결과가 없습니다.' : '아직 참여 중인 프로젝트가 없습니다.')
+                  _Empty(
+                    searching ? tr('검색 결과가 없습니다.') : tr('아직 참여 중인 프로젝트가 없습니다.'),
+                  )
                 else
                   for (final p in active)
                     _ProjectRow(
@@ -151,7 +164,10 @@ class _AllProjectsViewState extends State<AllProjectsView> {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            '종료된 프로젝트 ${widget.archivedProjects.length}',
+                            tr('종료된 프로젝트 {widget.archivedProjects.length}', {
+                              'widget.archivedProjects.length':
+                                  widget.archivedProjects.length,
+                            }),
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -164,7 +180,7 @@ class _AllProjectsViewState extends State<AllProjectsView> {
                   ),
                   if (_showArchived || searching)
                     if (archived.isEmpty)
-                      const _Empty('검색 결과가 없습니다.')
+                      _Empty(tr('검색 결과가 없습니다.'))
                     else
                       for (final p in archived)
                         _ProjectRow(
@@ -197,18 +213,18 @@ class _HeaderRow extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
       child: Row(
         children: [
-          Expanded(child: Text('프로젝트', style: style)),
+          Expanded(child: Text(tr('프로젝트'), style: style)),
           SizedBox(
             width: _keyW,
-            child: Text('키', style: style),
+            child: Text(tr('키'), style: style),
           ),
           SizedBox(
             width: _progressW,
-            child: Text('진행률', style: style),
+            child: Text(tr('진행률'), style: style),
           ),
           SizedBox(
             width: _visibilityW,
-            child: Center(child: Text('공개', style: style)),
+            child: Center(child: Text(tr('공개'), style: style)),
           ),
           const SizedBox(width: _starW),
         ],
@@ -337,7 +353,7 @@ class _ProjectRow extends StatelessWidget {
                 SizedBox(
                   width: _visibilityW,
                   child: Tooltip(
-                    message: p.isPublic ? '공개 프로젝트' : '비공개 프로젝트',
+                    message: p.isPublic ? tr('공개 프로젝트') : tr('비공개 프로젝트'),
                     child: Icon(
                       p.isPublic ? Icons.public : Icons.lock_outline,
                       size: 16,
@@ -350,7 +366,7 @@ class _ProjectRow extends StatelessWidget {
                   child: onToggleFavorite == null
                       ? null
                       : IconButton(
-                          tooltip: p.favorite ? '즐겨찾기 해제' : '즐겨찾기',
+                          tooltip: p.favorite ? tr('즐겨찾기 해제') : tr('즐겨찾기'),
                           visualDensity: VisualDensity.compact,
                           onPressed: onToggleFavorite,
                           icon: Icon(

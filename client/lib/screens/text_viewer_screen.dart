@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
 /// txt 첨부 인앱 뷰어. 채팅 버블에서 .txt 파일명을 탭하면 엽니다 — PdfViewerScreen과 같은
 /// 이유로 [bytesFuture]를 받는다(비밀 대화는 이 화면을 열 때 복호화).
@@ -22,7 +23,13 @@ class TextViewerScreen extends StatelessWidget {
         future: bytesFuture,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(child: Text('파일을 열 수 없습니다: ${snapshot.error}'));
+            return Center(
+              child: Text(
+                tr('파일을 열 수 없습니다: {snapshot.error}', {
+                  'snapshot.error': snapshot.error,
+                }),
+              ),
+            );
           }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());

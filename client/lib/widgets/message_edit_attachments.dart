@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/message.dart';
 import '../services/session.dart';
 import 'retrying_network_image.dart';
+import '../l10n/tr.dart';
 
 /// 사진·파일 메시지 "수정" 모드의 첨부 목록 — 잔디처럼 잘못 붙인 첨부를 **지우기만** 한다(더하지는 못 한다).
 /// 첨부마다 오른쪽 위 X 버튼이 있고, 누르면 그 첨부가 "삭제 예정"(흐리게)으로 바뀐다 — 실제로 지워지는 건 [저장]을
@@ -59,7 +60,7 @@ class _RemoveButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: removed ? '삭제 취소' : '첨부 삭제',
+      message: removed ? tr('삭제 취소') : tr('첨부 삭제'),
       child: Material(
         color: Colors.black.withValues(alpha: 0.65),
         shape: const CircleBorder(),
@@ -128,9 +129,9 @@ class _ImageTile extends StatelessWidget {
             ),
           ),
           if (removed)
-            const Center(
+            Center(
               child: Text(
-                '삭제 예정',
+                tr('삭제 예정'),
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
               ),
             ),
@@ -182,7 +183,7 @@ class _FileTile extends StatelessWidget {
           const SizedBox(width: 6),
           Flexible(
             child: Text(
-              attachment.fileName ?? '파일',
+              attachment.fileName ?? tr('파일'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(

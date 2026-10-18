@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/favorite.dart';
 import 'favorites_api.dart';
+import '../l10n/tr.dart';
 
 /// 즐겨찾기 목록 하나(탭 하나)의 상태 — 서버에서 쪽 단위로 받아 이어 붙인다.
 class FavoriteFeed {
@@ -95,11 +96,11 @@ class FavoritesController extends ChangeNotifier {
         result = await api.setCommentFavorite(id, favorite);
       case FavoriteKind.member:
         if (teamId == null) {
-          throw ArgumentError('멤버 즐겨찾기는 teamId가 필요합니다.');
+          throw ArgumentError(tr('멤버 즐겨찾기는 teamId가 필요합니다.'));
         }
         result = await api.setMemberFavorite(teamId, id, favorite);
       default:
-        throw ArgumentError('이 종류는 여기서 바꾸지 않습니다: $kind');
+        throw ArgumentError(tr('이 종류는 여기서 바꾸지 않습니다: {kind}', {'kind': kind}));
     }
     _apply(kind, id, result, teamId: teamId);
     return result;

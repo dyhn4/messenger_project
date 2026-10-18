@@ -13,6 +13,7 @@ import 'filter_dropdown.dart';
 import 'home_shell_scope.dart';
 import 'hover_toolbar.dart'
     show hoverMenuDivider, hoverMenuItem, hoverMenuStyle;
+import '../l10n/tr.dart';
 
 /// 예약 목록의 상태 필터 — 보내는 중(잠깐)인 예약은 '예약됨'에 든다.
 enum ScheduledStatusFilter {
@@ -20,8 +21,11 @@ enum ScheduledStatusFilter {
   scheduled('예약됨'),
   failed('발송 실패');
 
-  final String label;
-  const ScheduledStatusFilter(this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const ScheduledStatusFilter(this._labelKo);
 
   bool accepts(ScheduledMessage m) => switch (this) {
     ScheduledStatusFilter.all => true,
@@ -38,8 +42,11 @@ enum ScheduledSort {
   /// 최근에 만든 순.
   created('생성 순');
 
-  final String label;
-  const ScheduledSort(this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const ScheduledSort(this._labelKo);
 }
 
 /// [all]에서 [roomId](null이면 모든 방)·[status]에 맞는 예약만 [sort] 순서로.
@@ -158,7 +165,7 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
       if (!mounted) return;
       // 이미 받아 둔 목록이 있으면 그대로 보여주고 알리기만 한다.
       if (_session.scheduledMessagesLoaded) {
-        showAppToast(context, '예약 목록을 새로 받지 못했습니다: $e');
+        showAppToast(context, tr('예약 목록을 새로 받지 못했습니다: {e}', {'e': e}));
       } else {
         setState(() => _loadError = e);
       }
@@ -204,7 +211,7 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('닫기'),
+            child: Text(tr('닫기')),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -229,9 +236,9 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
   Future<void> _sendNow(ScheduledMessage m) async {
     final room = _session.scheduledRoomName(m);
     final ok = await _confirm(
-      title: '지금 보내기',
-      content: "예약 시간을 기다리지 않고 '$room'에 지금 바로 보낼까요?",
-      action: '보내기',
+      title: tr('지금 보내기'),
+      content: tr('예약 시간을 기다리지 않고 \'{room}\'에 지금 바로 보낼까요?', {'room': room}),
+      action: tr('보내기'),
     );
     if (!ok || !mounted || _gone(m)) return;
     try {
@@ -241,7 +248,7 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
       if (mounted) {
         showAppToast(
           context,
-          e is ApiException ? e.message : '보내지 못했습니다: $e',
+          e is ApiException ? trServer(e.message) : tr('보내지 못했습니다: {e}', {'e': e}),
           duration: const Duration(seconds: 3),
         );
       }
@@ -251,22 +258,30 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
   Future<void> _cancel(ScheduledMessage m) async {
     final failed = m.isFailed;
     final ok = await _confirm(
-      title: failed ? '예약 메시지 삭제' : '예약 취소',
+      title: failed ? tr('예약 메시지 삭제') : tr('예약 취소'),
       content: failed
-          ? '보내지 못한 예약 메시지를 삭제할까요?'
-          : '${formatScheduleTime(m.sendAt)}에 보낼 예약을 취소할까요? 취소한 예약은 되돌릴 수 없습니다.',
-      action: failed ? '삭제' : '예약 취소',
+          ? tr('보내지 못한 예약 메시지를 삭제할까요?')
+          : tr('{p0}에 보낼 예약을 취소할까요? 취소한 예약은 되돌릴 수 없습니다.', {
+              'p0': formatScheduleTime(m.sendAt),
+            }),
+      action: failed ? tr('삭제') : tr('예약 취소'),
       destructive: true,
     );
     if (!ok || !mounted || _gone(m)) return;
     try {
       await _session.cancelScheduledMessage(m.id);
       if (mounted) {
-        showAppToast(context, failed ? '예약 메시지를 삭제했습니다.' : '예약을 취소했습니다.');
+        showAppToast(
+          context,
+          failed ? tr('예약 메시지를 삭제했습니다.') : tr('예약을 취소했습니다.'),
+        );
       }
     } catch (e) {
       if (mounted) {
-        showAppToast(context, e is ApiException ? e.message : '취소하지 못했습니다: $e');
+        showAppToast(
+          context,
+          e is ApiException ? trServer(e.message) : tr('취소하지 못했습니다: {e}', {'e': e}),
+        );
       }
     }
   }
@@ -311,7 +326,7 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
         children: [
           Expanded(
             child: Text(
-              '메시지 예약',
+              tr('메시지 예약'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.titleLarge,
@@ -320,7 +335,7 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
           IconButton(
             key: const ValueKey('scheduled-panel-close'),
             icon: const Icon(Icons.close),
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             onPressed: widget.onClose,
           ),
         ],
@@ -346,13 +361,16 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
         ),
       ),
       icon: const Icon(Icons.add, size: 20),
-      label: const Text('메시지 예약', maxLines: 1, overflow: TextOverflow.ellipsis),
+      label: Text(tr('메시지 예약'), maxLines: 1, overflow: TextOverflow.ellipsis),
     );
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: _atLimit
           ? Tooltip(
-              message: '예약 메시지는 최대 $scheduledMessageMaxCount건까지 만들 수 있습니다.',
+              message: tr(
+                '예약 메시지는 최대 {scheduledMessageMaxCount}건까지 만들 수 있습니다.',
+                {'scheduledMessageMaxCount': scheduledMessageMaxCount},
+              ),
               child: button,
             )
           : button,
@@ -360,7 +378,7 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
   }
 
   /// 대화방 필터에서 방을 고르지 않았을 때의 글자(할 일 패널과 같다).
-  static const _allRoomsLabel = '참여한 대화방';
+  static final _allRoomsLabel = tr('참여한 대화방');
 
   /// 상태 드롭다운 펼침 패널 폭.
   static const _statusPanelWidth = 180.0;
@@ -462,12 +480,15 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
           const Spacer(),
           if (_session.scheduledMessagesLoaded)
             Tooltip(
-              message: '예약 메시지는 최대 $scheduledMessageMaxCount건까지 만들 수 있습니다.',
+              message: tr(
+                '예약 메시지는 최대 {scheduledMessageMaxCount}건까지 만들 수 있습니다.',
+                {'scheduledMessageMaxCount': scheduledMessageMaxCount},
+              ),
               child: Text.rich(
                 key: const ValueKey('scheduled-panel-quota'),
                 TextSpan(
                   children: [
-                    const TextSpan(text: '예약 '),
+                    TextSpan(text: tr('예약 ')),
                     TextSpan(
                       text: '$used',
                       style: TextStyle(
@@ -516,7 +537,7 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
       builder: (context, controller, _) => Semantics(
         expanded: controller.isOpen,
         child: Tooltip(
-          message: '정렬',
+          message: tr('정렬'),
           child: InkWell(
             key: const ValueKey('scheduled-panel-sort'),
             onTap: () =>
@@ -562,7 +583,7 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
         TextSpan(
           children: [
             TextSpan(text: '${_visible.length}', style: bold),
-            const TextSpan(text: '개의 예약 메시지'),
+            TextSpan(text: tr('개의 예약 메시지')),
           ],
         ),
         style: style,
@@ -617,9 +638,9 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
     final theme = Theme.of(context);
     final filtered = _roomId != null;
     final text = switch (_status) {
-      ScheduledStatusFilter.failed => '발송에 실패한 예약 메시지가 없어요.',
-      _ when filtered => '이 대화방에 예약된 메시지가 없어요.',
-      _ => '예약된 메시지가 없어요.',
+      ScheduledStatusFilter.failed => tr('발송에 실패한 예약 메시지가 없어요.'),
+      _ when filtered => tr('이 대화방에 예약된 메시지가 없어요.'),
+      _ => tr('예약된 메시지가 없어요.'),
     };
     return Center(
       child: SingleChildScrollView(
@@ -641,8 +662,10 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
             ),
             const SizedBox(height: 4),
             Text(
-              '"메시지 예약"으로 원하는 시간에 보낼 메시지를 미리 써 두세요.\n'
-              '15분 단위로 최대 $scheduledMaxDaysAhead일 뒤까지 예약할 수 있어요.',
+              tr(
+                '"메시지 예약"으로 원하는 시간에 보낼 메시지를 미리 써 두세요.\n15분 단위로 최대 {scheduledMaxDaysAhead}일 뒤까지 예약할 수 있어요.',
+                {'scheduledMaxDaysAhead': scheduledMaxDaysAhead},
+              ),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
@@ -666,13 +689,13 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
             Icon(Icons.cloud_off_outlined, size: 40, color: theme.hintColor),
             const SizedBox(height: 12),
             Text(
-              '예약 목록을 불러오지 못했습니다.',
+              tr('예약 목록을 불러오지 못했습니다.'),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyLarge,
             ),
             const SizedBox(height: 4),
             Text(
-              '연결 상태를 확인한 뒤 다시 시도해 주세요.',
+              tr('연결 상태를 확인한 뒤 다시 시도해 주세요.'),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
@@ -682,7 +705,7 @@ class _ScheduledPanelState extends State<ScheduledPanel> {
             OutlinedButton(
               key: const ValueKey('scheduled-panel-retry'),
               onPressed: _retry,
-              child: const Text('다시 시도'),
+              child: Text(tr('다시 시도')),
             ),
           ],
         ),
@@ -787,13 +810,13 @@ class ScheduledMessageCard extends StatelessWidget {
               if (failed) ...[
                 _Badge(
                   key: ValueKey('scheduled-panel-failed-${m.id}'),
-                  label: '발송 실패',
+                  label: tr('발송 실패'),
                   color: scheme.error,
                 ),
                 const SizedBox(width: 8),
               ] else
                 Text(
-                  '발송 예정 : ',
+                  tr('발송 예정 : '),
                   style: TextStyle(
                     fontSize: 13,
                     color: scheme.onSurfaceVariant,
@@ -828,7 +851,7 @@ class ScheduledMessageCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  '보내는 중',
+                  tr('보내는 중'),
                   style: TextStyle(fontSize: 12, color: theme.hintColor),
                 ),
               ],
@@ -897,7 +920,10 @@ class ScheduledMessageCard extends StatelessWidget {
               alignment: PlaceholderAlignment.middle,
               child: Padding(
                 padding: const EdgeInsets.only(right: 6),
-                child: _Badge(label: '게시글', color: theme.colorScheme.primary),
+                child: _Badge(
+                  label: tr('게시글'),
+                  color: theme.colorScheme.primary,
+                ),
               ),
             ),
           TextSpan(
@@ -931,7 +957,7 @@ class ScheduledMessageCard extends StatelessWidget {
         const SizedBox(width: 5),
         Expanded(
           child: Text(
-            message.failReason ?? '보내지 못했습니다.',
+            message.failReason ?? tr('보내지 못했습니다.'),
             key: ValueKey('scheduled-panel-reason-${message.id}'),
             style: TextStyle(
               fontSize: 12.5,
@@ -992,19 +1018,19 @@ class _MoreButton extends StatelessWidget {
       menuChildren: [
         hoverMenuItem(
           icon: Icons.edit_outlined,
-          label: failed ? '수정해서 다시 예약' : '수정',
+          label: failed ? tr('수정해서 다시 예약') : tr('수정'),
           onPressed: onEdit,
         ),
         if (!failed)
           hoverMenuItem(
             icon: Icons.send_outlined,
-            label: '지금 보내기',
+            label: tr('지금 보내기'),
             onPressed: onSendNow,
           ),
         hoverMenuDivider(),
         hoverMenuItem(
           icon: failed ? Icons.delete_outline : Icons.event_busy_outlined,
-          label: failed ? '삭제' : '예약 취소',
+          label: failed ? tr('삭제') : tr('예약 취소'),
           color: Colors.redAccent,
           onPressed: onCancel,
         ),
@@ -1012,7 +1038,7 @@ class _MoreButton extends StatelessWidget {
       builder: (context, controller, _) => IconButton(
         key: ValueKey('scheduled-panel-more-${message.id}'),
         icon: const Icon(Icons.more_horiz, size: 20),
-        tooltip: '더보기',
+        tooltip: tr('더보기'),
         visualDensity: VisualDensity.compact,
         onPressed: () =>
             controller.isOpen ? controller.close() : controller.open(),

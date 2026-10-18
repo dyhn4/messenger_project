@@ -4,6 +4,7 @@ import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
+import '../l10n/tr.dart';
 
 /// 이 브라우저에서 이미지를 클립보드에 복사할 수 있는지 — Clipboard API는 HTTPS(보안 컨텍스트)에서만 있다.
 bool get canCopyImageToClipboard =>
@@ -43,7 +44,7 @@ Future<web.Blob> _toPngBlob(Uint8List data) async {
   canvas.toBlob(
     (web.Blob? blob) {
       if (blob == null) {
-        done.completeError(const FormatException('이미지를 PNG로 바꾸지 못했습니다.'));
+        done.completeError(FormatException(tr('이미지를 PNG로 바꾸지 못했습니다.')));
       } else {
         done.complete(blob);
       }

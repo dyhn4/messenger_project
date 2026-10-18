@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import 'ot_text.dart';
+import '../l10n/tr.dart';
 
 /// 위키 동시 편집의 소켓 통로(서버 server/src/wiki.js registerWikiSocket) — 앱은 ChatSocket이, 테스트는 가짜 서버가 맡는다.
 abstract class WikiTransport {
@@ -133,7 +134,7 @@ class WikiDocSession extends ChangeNotifier {
       (ack) {
         if (_disposed) return done.complete();
         if (ack['ok'] != true) {
-          error = ack['error']?.toString() ?? '페이지를 열지 못했습니다.';
+          error = ack['error']?.toString() ?? tr('페이지를 열지 못했습니다.');
           _notify();
           return done.complete();
         }

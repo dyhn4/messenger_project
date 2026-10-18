@@ -27,6 +27,7 @@ import 'typing_gate.dart';
 // UploadedAttachment는 예약 메시지(모델·ApiClient)도 써서 모델로 옮겼다 — 예전처럼 이 파일만
 // import해도 쓸 수 있게 다시 내보낸다.
 export '../models/uploaded_attachment.dart';
+import '../l10n/tr.dart';
 
 /// 암호화한 첨부나 썸네일 바이트를 uploadFile(XFile)에 그대로 태우는 메모리 파일 — 예전엔 임시
 /// 폴더에 파일로 썼지만 웹에는 임시 폴더가 없고, 메모리에서 바로 올리면 이름이 겹쳐 서로 덮어쓰는
@@ -1358,7 +1359,7 @@ class RoomChatController extends ChangeNotifier {
     final trimmedText = text.trim();
     _validatePost(trimmedTitle, trimmedText);
     if (attachments.length > postAttachmentsMaxCount) {
-      throw const ApiException('첨부는 30개까지 올릴 수 있습니다.');
+      throw ApiException(tr('첨부는 30개까지 올릴 수 있습니다.'));
     }
     return _session.chatSocket.send(
       roomId: room.id,
@@ -1412,13 +1413,13 @@ class RoomChatController extends ChangeNotifier {
   /// 서버와 같은 규칙(글자 수는 postTextLength 단위)으로 먼저 걸러서, 보내기 전에 편집 화면에 바로
   /// 알려줄 수 있게 한다.
   void _validatePost(String title, String text) {
-    if (title.isEmpty) throw const ApiException('제목을 입력하세요.');
+    if (title.isEmpty) throw ApiException(tr('제목을 입력하세요.'));
     if (postTextLength(title) > postTitleMaxLength) {
-      throw const ApiException('제목은 100자까지 쓸 수 있습니다.');
+      throw ApiException(tr('제목은 100자까지 쓸 수 있습니다.'));
     }
-    if (text.isEmpty) throw const ApiException('내용을 입력하세요.');
+    if (text.isEmpty) throw ApiException(tr('내용을 입력하세요.'));
     if (postTextLength(text) > postTextMaxLength) {
-      throw const ApiException('내용은 20000자까지 쓸 수 있습니다.');
+      throw ApiException(tr('내용은 20000자까지 쓸 수 있습니다.'));
     }
   }
 

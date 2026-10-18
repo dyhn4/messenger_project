@@ -7,6 +7,7 @@ import '../data/stickers.dart';
 import '../services/app_settings.dart';
 import 'category_tab_row.dart';
 import 'sticker_view.dart';
+import '../l10n/tr.dart';
 
 /// 카테고리 탭 + 이모티콘 그리드. 채팅/댓글 화면에서 메시지 목록 위에 떠 있는 오버레이 카드로
 /// 쓰인다(입력창을 밀어내지 않고 그 위에 겹쳐 보이는 카카오톡 방식) — 그래서 스스로 배경/그림자를
@@ -40,7 +41,7 @@ class StickerPicker extends StatefulWidget {
 
 /// "자주 쓰는" 탭의 이름(세트 이름과 겹치지 않게 보이지 않는 글자로 시작) — 화면에는 [_frequentLabel].
 const _frequentName = '\u0000frequent';
-const _frequentLabel = '자주 쓰는';
+final _frequentLabel = tr('자주 쓰는');
 
 class _StickerPickerState extends State<StickerPicker> {
   /// 탭은 이름으로 기억한다 — 서버 세트가 늘거나 줄어도 보던 탭이 그대로 남게.

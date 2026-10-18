@@ -16,6 +16,7 @@ import 'mention_autocomplete.dart';
 import 'rich_text_format.dart';
 import 'room_picker_field.dart';
 import 'shared_album_card.dart';
+import '../l10n/tr.dart';
 
 /// 앨범 항목을 보낼 수 있는 대화방인지 — 내가 멤버인 채팅·그룹·1:1·챗 뷰 토픽만 되고, 보드 뷰 토픽과 비밀 대화는 뺀다.
 /// 읽기 전용·보관된 토픽은 관리자만 글을 쓰므로 내가 쓸 수 없으면 뺀다. 앨범과 같은 팀의 방이어야 한다(서버 규칙).
@@ -75,7 +76,10 @@ class _AlbumShareDialogState extends State<AlbumShareDialog> {
       Navigator.of(context).pop(true);
       showAppToastOnOverlay(
         overlay,
-        "'${room.displayName(myId)}'에 ${widget.itemIds.length}개를 공유했습니다.",
+        tr('\'{p0}\'에 {widget.itemIds.length}개를 공유했습니다.', {
+          'p0': room.displayName(myId),
+          'widget.itemIds.length': widget.itemIds.length,
+        }),
       );
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -88,7 +92,7 @@ class _AlbumShareDialogState extends State<AlbumShareDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return FloatingDialog(
-      title: '대화방에 공유',
+      title: tr('대화방에 공유'),
       maxWidth: 420,
       maxHeight: 460,
       child: SingleChildScrollView(
@@ -97,12 +101,15 @@ class _AlbumShareDialogState extends State<AlbumShareDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              '선택한 ${widget.itemIds.length}개를 이미지·영상 메시지로 보냅니다. 파일은 복사되지 않고 같은 파일을 가리킵니다.',
+              tr(
+                '선택한 {widget.itemIds.length}개를 이미지·영상 메시지로 보냅니다. 파일은 복사되지 않고 같은 파일을 가리킵니다.',
+                {'widget.itemIds.length': widget.itemIds.length},
+              ),
               style: TextStyle(fontSize: 12, color: theme.hintColor),
             ),
             const SizedBox(height: 12),
-            const Text(
-              '대화방',
+            Text(
+              tr('대화방'),
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
@@ -142,7 +149,7 @@ class _AlbumShareDialogState extends State<AlbumShareDialog> {
                   onPressed: _sending
                       ? null
                       : () => Navigator.of(context).pop(false),
-                  child: const Text('취소'),
+                  child: Text(tr('취소')),
                 ),
                 const SizedBox(width: 8),
                 FilledButton(
@@ -154,7 +161,7 @@ class _AlbumShareDialogState extends State<AlbumShareDialog> {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('공유'),
+                      : Text(tr('공유')),
                 ),
               ],
             ),
@@ -274,7 +281,7 @@ class _AlbumMessageShareDialogState extends State<AlbumMessageShareDialog> {
       Navigator.of(context).pop(true);
       showAppToastOnOverlay(
         overlay,
-        "'${room.displayName(myId)}'에 앨범을 공유했습니다.",
+        tr('\'{p0}\'에 앨범을 공유했습니다.', {'p0': room.displayName(myId)}),
       );
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -311,7 +318,7 @@ class _AlbumMessageShareDialogState extends State<AlbumMessageShareDialog> {
                 children: [
                   Expanded(
                     child: Text(
-                      '앨범 공유',
+                      tr('앨범 공유'),
                       style: theme.textTheme.titleLarge?.copyWith(
                         fontSize: 19,
                         fontWeight: FontWeight.w700,
@@ -320,7 +327,7 @@ class _AlbumMessageShareDialogState extends State<AlbumMessageShareDialog> {
                   ),
                   IconButton(
                     icon: const Icon(Icons.close),
-                    tooltip: '닫기',
+                    tooltip: tr('닫기'),
                     onPressed: _sending
                         ? null
                         : () => Navigator.of(context).pop(false),
@@ -347,7 +354,7 @@ class _AlbumMessageShareDialogState extends State<AlbumMessageShareDialog> {
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size(88, 42),
                     ),
-                    child: const Text('취소'),
+                    child: Text(tr('취소')),
                   ),
                   const SizedBox(width: 8),
                   _sendButton(context),
@@ -366,10 +373,10 @@ class _AlbumMessageShareDialogState extends State<AlbumMessageShareDialog> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.close),
-          tooltip: '취소',
+          tooltip: tr('취소'),
           onPressed: _sending ? null : () => Navigator.of(context).pop(false),
         ),
-        title: const Text('앨범 공유'),
+        title: Text(tr('앨범 공유')),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -404,7 +411,7 @@ class _AlbumMessageShareDialogState extends State<AlbumMessageShareDialog> {
               height: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : const Text('공유하기'),
+          : Text(tr('공유하기')),
     );
   }
 
@@ -418,7 +425,7 @@ class _AlbumMessageShareDialogState extends State<AlbumMessageShareDialog> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        const _FieldLabel('대화방 선택'),
+        _FieldLabel(tr('대화방 선택')),
         KeyedSubtree(
           key: const ValueKey('album-message-share-room'),
           child: IgnorePointer(
@@ -436,22 +443,24 @@ class _AlbumMessageShareDialogState extends State<AlbumMessageShareDialog> {
         ),
         const SizedBox(height: 6),
         Text(
-          '※ 앨범은 채팅 및 챗 뷰 토픽에서만 공유할 수 있습니다.',
+          tr('※ 앨범은 채팅 및 챗 뷰 토픽에서만 공유할 수 있습니다.'),
           key: const ValueKey('album-message-share-note'),
           style: TextStyle(fontSize: 12, color: hint),
         ),
         const SizedBox(height: 18),
-        const _FieldLabel('공유 앨범'),
+        _FieldLabel(tr('공유 앨범')),
         AlbumShareCard(
           key: const ValueKey('album-message-share-album'),
           title: album.title,
-          subtitle: '사진·영상 ${album.itemCount}개',
+          subtitle: tr('사진·영상 {album.itemCount}개', {
+            'album.itemCount': album.itemCount,
+          }),
           coverUrl: cover == null ? null : widget.session.resolveUrl(cover),
           maxWidth: double.infinity,
         ),
         const SizedBox(height: 18),
         _FieldLabel(
-          '메시지',
+          tr('메시지'),
           required: true,
           trailing: SizedBox(
             height: 28,
@@ -498,7 +507,7 @@ class _AlbumMessageShareDialogState extends State<AlbumMessageShareDialog> {
         keyboardType: TextInputType.multiline,
         textAlignVertical: TextAlignVertical.top,
         decoration: InputDecoration(
-          hintText: '앨범과 함께 보낼 메시지를 입력하세요.',
+          hintText: tr('앨범과 함께 보낼 메시지를 입력하세요.'),
           isDense: true,
           contentPadding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
           border: _formatOpen ? InputBorder.none : const OutlineInputBorder(),

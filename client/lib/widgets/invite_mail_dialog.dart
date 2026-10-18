@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/mail_settings.dart';
 import 'app_toast.dart';
+import '../l10n/tr.dart';
 
 /// 한 번에 보낼 수 있는 주소 수 — 서버와 같다(server/src/mailRules.js INVITE_MAIL_MAX_RECIPIENTS).
 const kInviteMailMaxRecipients = 20;
@@ -17,15 +18,20 @@ final _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
     final email = part.trim();
     if (email.isEmpty) continue;
     if (!_emailPattern.hasMatch(email)) {
-      return (emails: const [], error: '이메일 형식이 아닙니다: $email');
+      return (
+        emails: const [],
+        error: tr('이메일 형식이 아닙니다: {email}', {'email': email}),
+      );
     }
     if (seen.add(email.toLowerCase())) emails.add(email);
   }
-  if (emails.isEmpty) return (emails: const [], error: '받는 사람 이메일을 넣으세요.');
+  if (emails.isEmpty) return (emails: const [], error: tr('받는 사람 이메일을 넣으세요.'));
   if (emails.length > kInviteMailMaxRecipients) {
     return (
       emails: const [],
-      error: '한 번에 $kInviteMailMaxRecipients명까지 보낼 수 있습니다.',
+      error: tr('한 번에 {kInviteMailMaxRecipients}명까지 보낼 수 있습니다.', {
+        'kInviteMailMaxRecipients': kInviteMailMaxRecipients,
+      }),
     );
   }
   return (emails: emails, error: null);
@@ -78,16 +84,26 @@ class _InviteMailDialogState extends State<_InviteMailDialog> {
       final result = await widget.send(parsed.emails);
       if (!mounted) return;
       if (result.failed.isEmpty) {
-        showAppToast(context, '초대 메일 ${result.sent}통을 보냈습니다.');
+        showAppToast(
+          context,
+          tr('초대 메일 {result.sent}통을 보냈습니다.', {'result.sent': result.sent}),
+        );
         Navigator.of(context).pop();
         return;
       }
       // 일부만 실패했으면 못 보낸 주소만 남겨 다시 보낼 수 있게 한다.
       setState(() {
         _input.text = result.failed.map((f) => f.email).join('\n');
-        _error =
-            '${result.sent > 0 ? '${result.sent}통은 보냈지만 ' : ''}${result.failed.length}통을 보내지 못했습니다: '
-            '${result.failed.first.error}';
+        _error = tr(
+          '{p0}{result.failed.length}통을 보내지 못했습니다: {result.failed.first.error}',
+          {
+            'p0': result.sent > 0
+                ? tr('{result.sent}통은 보냈지만 ', {'result.sent': result.sent})
+                : '',
+            'result.failed.length': result.failed.length,
+            'result.failed.first.error': result.failed.first.error,
+          },
+        );
       });
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -100,7 +116,7 @@ class _InviteMailDialogState extends State<_InviteMailDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
-      title: const Text('초대 메일 보내기'),
+      title: Text(tr('초대 메일 보내기')),
       content: SizedBox(
         width: 400,
         child: Column(
@@ -108,7 +124,10 @@ class _InviteMailDialogState extends State<_InviteMailDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '"${widget.linkTitle}"을(를) 메일로 보냅니다. 받는 사람은 메일의 링크로 앱을 설치하고 가입할 수 있습니다.',
+              tr(
+                '"{widget.linkTitle}"을(를) 메일로 보냅니다. 받는 사람은 메일의 링크로 앱을 설치하고 가입할 수 있습니다.',
+                {'widget.linkTitle': widget.linkTitle},
+              ),
               style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: 12),
@@ -118,9 +137,9 @@ class _InviteMailDialogState extends State<_InviteMailDialog> {
               minLines: 3,
               maxLines: 6,
               keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                labelText: '받는 사람 이메일',
-                hintText: '여러 명은 쉼표나 줄바꿈으로 — 한 번에 20명까지',
+              decoration: InputDecoration(
+                labelText: tr('받는 사람 이메일'),
+                hintText: tr('여러 명은 쉼표나 줄바꿈으로 — 한 번에 20명까지'),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -134,7 +153,7 @@ class _InviteMailDialogState extends State<_InviteMailDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: _sending ? null : _send,
@@ -144,7 +163,7 @@ class _InviteMailDialogState extends State<_InviteMailDialog> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('보내기'),
+              : Text(tr('보내기')),
         ),
       ],
     );

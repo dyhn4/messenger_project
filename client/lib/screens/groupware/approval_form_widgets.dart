@@ -8,6 +8,7 @@ import '../../widgets/app_toast.dart';
 import 'approval_forms.dart';
 import 'groupware_screen.dart'
     show GroupwareChanges, GroupwareSectionHeader, approvalKindIcon;
+import '../../l10n/tr.dart';
 
 /// 양식으로 올리는 결재(서버 approvalForms.js) — 기본 양식(일반 기안서·출장 신청·구매 요청·연장근무 신청)과 관리자가 만든 양식을
 /// 같은 칸 그리기로 받는다. 칸 종류: 한 줄 글·여러 줄 글·숫자·금액·날짜·기간·시간대·고르기·품목 표.
@@ -44,15 +45,15 @@ class FormValues extends ChangeNotifier {
               !v.any((r) => (r as Map)['name'].toString().trim().isNotEmpty),
         _ => v == null || v.toString().trim().isEmpty,
       };
-      if (empty) return '"${f.label}"을(를) 넣으세요.';
+      if (empty) return tr('"{f.label}"을(를) 넣으세요.', {'f.label': f.label});
       if (f.type == FormFieldType.timeRange) {
         final m = v as Map;
         if (!isHmText('${m['start']}') || !isHmText('${m['end']}')) {
-          return '"${f.label}"을(를) HH:MM으로 넣으세요.';
+          return tr('"{f.label}"을(를) HH:MM으로 넣으세요.', {'f.label': f.label});
         }
       }
     }
-    if (uploading) return '첨부를 올리는 중입니다. 잠시 뒤 다시 누르세요.';
+    if (uploading) return tr('첨부를 올리는 중입니다. 잠시 뒤 다시 누르세요.');
     return null;
   }
 
@@ -147,7 +148,7 @@ class _FormRequestDialogState extends State<FormRequestDialog> {
           controller: _title,
           maxLength: 100,
           decoration: InputDecoration(
-            labelText: _titleRequired ? '제목' : '제목(비우면 자동)',
+            labelText: _titleRequired ? tr('제목') : tr('제목(비우면 자동)'),
             border: const OutlineInputBorder(),
           ),
         ),
@@ -160,7 +161,9 @@ class _FormRequestDialogState extends State<FormRequestDialog> {
           ),
       ],
       validate: () {
-        if (_titleRequired && _title.text.trim().isEmpty) return '제목을 넣으세요.';
+        if (_titleRequired && _title.text.trim().isEmpty) {
+          return tr('제목을 넣으세요.');
+        }
         return _values.validate();
       },
       submit:
@@ -254,7 +257,7 @@ class _FormFieldsEditorState extends State<FormFieldsEditor> {
           decoration: InputDecoration(
             labelText: _label(f),
             border: border,
-            suffixText: f.type == FormFieldType.money ? '원' : null,
+            suffixText: f.type == FormFieldType.money ? tr('원') : null,
           ),
           onChanged: (v) => _v.set(f.key, v),
         );
@@ -289,13 +292,13 @@ class _FormFieldsEditorState extends State<FormFieldsEditor> {
             Text(_label(f)),
             ApprovalDateField(
               key: ValueKey('form-field-${f.key}-start'),
-              label: '시작',
+              label: tr('시작'),
               value: range['start'] as String?,
               onChanged: (v) => setRange('start', v),
             ),
             ApprovalDateField(
               key: ValueKey('form-field-${f.key}-end'),
-              label: '끝',
+              label: tr('끝'),
               value: range['end'] as String?,
               onChanged: (v) => setRange('end', v),
             ),
@@ -315,7 +318,7 @@ class _FormFieldsEditorState extends State<FormFieldsEditor> {
                 key: ValueKey('form-field-${f.key}-start'),
                 controller: _c('${f.key}.start'),
                 decoration: InputDecoration(
-                  labelText: '${_label(f)} 시작 (HH:MM)',
+                  labelText: tr('{p0} 시작 (HH:MM)', {'p0': _label(f)}),
                   border: border,
                 ),
                 onChanged: (v) => setPart('start', v),
@@ -330,8 +333,8 @@ class _FormFieldsEditorState extends State<FormFieldsEditor> {
                 key: ValueKey('form-field-${f.key}-end'),
                 controller: _c('${f.key}.end'),
                 decoration: InputDecoration(
-                  labelText: '끝 (HH:MM)',
-                  helperText: '시작보다 이르면 다음 날',
+                  labelText: tr('끝 (HH:MM)'),
+                  helperText: tr('시작보다 이르면 다음 날'),
                   border: border,
                 ),
                 onChanged: (v) => setPart('end', v),
@@ -426,7 +429,7 @@ class _ItemsEditorState extends State<_ItemsEditor> {
                   child: TextField(
                     key: ValueKey('form-item-$i-name'),
                     controller: widget.controllerOf('$_key.$id.name'),
-                    decoration: dec('품명'),
+                    decoration: dec(tr('품명')),
                     onChanged: (v) {
                       _rows[id]!['name'] = v;
                       _sync();
@@ -440,7 +443,7 @@ class _ItemsEditorState extends State<_ItemsEditor> {
                     key: ValueKey('form-item-$i-qty'),
                     controller: widget.controllerOf('$_key.$id.qty', '1'),
                     keyboardType: TextInputType.number,
-                    decoration: dec('수량'),
+                    decoration: dec(tr('수량')),
                     onChanged: (v) {
                       _rows[id]!['qty'] = v;
                       _sync();
@@ -454,7 +457,7 @@ class _ItemsEditorState extends State<_ItemsEditor> {
                     key: ValueKey('form-item-$i-price'),
                     controller: widget.controllerOf('$_key.$id.unitPrice'),
                     keyboardType: TextInputType.number,
-                    decoration: dec('단가(원)'),
+                    decoration: dec(tr('단가(원)')),
                     onChanged: (v) {
                       _rows[id]!['unitPrice'] = v;
                       _sync();
@@ -462,7 +465,7 @@ class _ItemsEditorState extends State<_ItemsEditor> {
                   ),
                 ),
                 IconButton(
-                  tooltip: '이 줄 빼기',
+                  tooltip: tr('이 줄 빼기'),
                   icon: const Icon(Icons.close, size: 18),
                   onPressed: _rowIds.length == 1
                       ? null
@@ -488,11 +491,11 @@ class _ItemsEditorState extends State<_ItemsEditor> {
                       _sync();
                     },
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('품목 추가'),
+              label: Text(tr('품목 추가')),
             ),
             const Spacer(),
             Text(
-              '합계 ${wonText(total)}',
+              tr('합계 {p0}', {'p0': wonText(total)}),
               key: const ValueKey('form-items-total'),
               style: TextStyle(
                 fontWeight: FontWeight.w600,
@@ -543,7 +546,7 @@ class _FormAttachmentsState extends State<_FormAttachments> {
         if (mounted) setState(() {});
       }
     } catch (e) {
-      if (mounted) showAppToast(context, '첨부 실패: $e');
+      if (mounted) showAppToast(context, tr('첨부 실패: {e}', {'e': e}));
     } finally {
       v.uploading = false;
       if (mounted) setState(() {});
@@ -573,7 +576,10 @@ class _FormAttachmentsState extends State<_FormAttachments> {
                 )
               : const Icon(Icons.attach_file, size: 16),
           label: Text(
-            '첨부 (${v.attachments.length}/${widget.ctx.attachmentsMax})',
+            tr('첨부 ({v.attachments.length}/{widget.ctx.attachmentsMax})', {
+              'v.attachments.length': v.attachments.length,
+              'widget.ctx.attachmentsMax': widget.ctx.attachmentsMax,
+            }),
           ),
           onPressed:
               v.uploading || v.attachments.length >= widget.ctx.attachmentsMax
@@ -640,7 +646,7 @@ class FormValuesView extends StatelessWidget {
             children: [
               TableRow(
                 children: [
-                  for (final h in ['품명', '수량', '단가', '금액'])
+                  for (final h in [tr('품명'), tr('수량'), tr('단가'), tr('금액')])
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
                       child: Text(
@@ -666,7 +672,9 @@ class FormValuesView extends StatelessWidget {
           Align(
             alignment: Alignment.centerRight,
             child: Text(
-              '합계 ${wonText((value['total'] as num?)?.toInt() ?? 0)}',
+              tr('합계 {p0}', {
+                'p0': wonText((value['total'] as num?)?.toInt() ?? 0),
+              }),
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
@@ -716,7 +724,9 @@ Future<ApprovalDocument?> showNewApprovalChooser(
   try {
     forms = (await api.forms()).where((f) => f.enabled).toList();
   } catch (e) {
-    if (context.mounted) showAppToast(context, '양식을 불러오지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('양식을 불러오지 못했습니다: {e}', {'e': e}));
+    }
     return null;
   }
   if (!context.mounted) return null;
@@ -739,7 +749,7 @@ Future<ApprovalDocument?> showNewApprovalChooser(
         onTap: () => Navigator.of(dialogContext).pop(value),
       );
       return AlertDialog(
-        title: const Text('새 결재'),
+        title: Text(tr('새 결재')),
         contentPadding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
         content: SizedBox(
           width: 420,
@@ -749,15 +759,15 @@ Future<ApprovalDocument?> showNewApprovalChooser(
               option(
                 ApprovalKind.leave,
                 approvalKindIcon(ApprovalKind.leave),
-                '휴가 신청',
-                '연차·반차·경조사 등',
+                tr('휴가 신청'),
+                tr('연차·반차·경조사 등'),
                 const ValueKey('new-approval-leave'),
               ),
               option(
                 ApprovalKind.expense,
                 approvalKindIcon(ApprovalKind.expense),
-                '지출 결재',
-                '영수증을 붙여 비용 처리',
+                tr('지출 결재'),
+                tr('영수증을 붙여 비용 처리'),
                 const ValueKey('new-approval-expense'),
               ),
               if (forms.isNotEmpty) const Divider(),
@@ -772,7 +782,7 @@ Future<ApprovalDocument?> showNewApprovalChooser(
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 child: Text(
-                  '근태 수정은 출퇴근 탭에서 그날을 골라 "수정 요청"으로 올립니다.',
+                  tr('근태 수정은 출퇴근 탭에서 그날을 골라 "수정 요청"으로 올립니다.'),
                   style: TextStyle(
                     fontSize: 12,
                     color: Theme.of(dialogContext).hintColor,
@@ -785,7 +795,7 @@ Future<ApprovalDocument?> showNewApprovalChooser(
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('닫기'),
+            child: Text(tr('닫기')),
           ),
         ],
       );
@@ -862,7 +872,7 @@ class _ApprovalFormsAdminSectionState extends State<ApprovalFormsAdminSection> {
       await action();
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -882,7 +892,12 @@ class _ApprovalFormsAdminSectionState extends State<ApprovalFormsAdminSection> {
           fields: result.fields,
           allowAttachments: result.allowAttachments,
         );
-        if (mounted) showAppToast(context, '"${result.name}" 양식을 만들었습니다.');
+        if (mounted) {
+          showAppToast(
+            context,
+            tr('"{result.name}" 양식을 만들었습니다.', {'result.name': result.name}),
+          );
+        }
       } else {
         await widget.api.updateForm(
           form.id,
@@ -899,17 +914,21 @@ class _ApprovalFormsAdminSectionState extends State<ApprovalFormsAdminSection> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('양식 지우기'),
-        content: Text('"${form.name}" 양식을 지울까요? 이 양식으로 이미 올린 결재는 그대로 남습니다.'),
+        title: Text(tr('양식 지우기')),
+        content: Text(
+          tr('"{form.name}" 양식을 지울까요? 이 양식으로 이미 올린 결재는 그대로 남습니다.', {
+            'form.name': form.name,
+          }),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('gw-form-delete-confirm'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('지우기'),
+            child: Text(tr('지우기')),
           ),
         ],
       ),
@@ -926,18 +945,20 @@ class _ApprovalFormsAdminSectionState extends State<ApprovalFormsAdminSection> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         GroupwareSectionHeader(
-          '결재 양식',
+          tr('결재 양식'),
           trailing: TextButton.icon(
             key: const ValueKey('gw-form-create'),
             onPressed: _busy ? null : () => _edit(),
             icon: const Icon(Icons.add, size: 18),
-            label: const Text('양식 만들기'),
+            label: Text(tr('양식 만들기')),
           ),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
-            '휴가·지출·근태 수정 말고 쓸 양식입니다. 끈 양식은 "새 결재"에 나오지 않고, 양식을 고치거나 지워도 이미 올린 결재는 그대로입니다.',
+            tr(
+              '휴가·지출·근태 수정 말고 쓸 양식입니다. 끈 양식은 "새 결재"에 나오지 않고, 양식을 고치거나 지워도 이미 올린 결재는 그대로입니다.',
+            ),
             style: TextStyle(fontSize: 12, color: hint),
           ),
         ),
@@ -957,9 +978,17 @@ class _ApprovalFormsAdminSectionState extends State<ApprovalFormsAdminSection> {
                 approvalKindIcon(f.kind),
                 color: f.enabled ? null : hint,
               ),
-              title: Text(f.builtin ? f.name : '${f.name} (직접 만든 양식)'),
+              title: Text(
+                f.builtin
+                    ? f.name
+                    : tr('{f.name} (직접 만든 양식)', {'f.name': f.name}),
+              ),
               subtitle: Text(
-                '칸 ${f.fields.length}개${f.allowAttachments ? ' · 첨부' : ''}${f.enabled ? '' : ' · 꺼짐'}',
+                tr('칸 {f.fields.length}개{p0}{p1}', {
+                  'f.fields.length': f.fields.length,
+                  'p0': f.allowAttachments ? tr(' · 첨부') : '',
+                  'p1': f.enabled ? '' : tr(' · 꺼짐'),
+                }),
                 style: TextStyle(color: hint),
               ),
               trailing: Row(
@@ -979,12 +1008,12 @@ class _ApprovalFormsAdminSectionState extends State<ApprovalFormsAdminSection> {
                       key: ValueKey('gw-form-menu-${f.id}'),
                       enabled: !_busy,
                       onSelected: (v) => v == 'edit' ? _edit(f) : _delete(f),
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'edit', child: Text('고치기')),
+                      itemBuilder: (_) => [
+                        PopupMenuItem(value: 'edit', child: Text(tr('고치기'))),
                         PopupMenuItem(
                           value: 'delete',
                           child: Text(
-                            '지우기',
+                            tr('지우기'),
                             style: TextStyle(color: Colors.redAccent),
                           ),
                         ),
@@ -1061,12 +1090,14 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
 
   void _submit() {
     final name = _name.text.trim();
-    if (name.isEmpty) return setState(() => _error = '양식 이름을 넣으세요.');
+    if (name.isEmpty) return setState(() => _error = tr('양식 이름을 넣으세요.'));
     final fields = <FormFieldDef>[];
     for (final (i, d) in _fields.indexed) {
       final label = d.label.text.trim();
       if (label.isEmpty) {
-        return setState(() => _error = '${i + 1}번째 칸의 이름을 넣으세요.');
+        return setState(
+          () => _error = tr('{p0}번째 칸의 이름을 넣으세요.', {'p0': i + 1}),
+        );
       }
       final options = d.type == FormFieldType.select
           ? d.options.text
@@ -1076,7 +1107,11 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
                 .toList()
           : const <String>[];
       if (d.type == FormFieldType.select && options.length < 2) {
-        return setState(() => _error = '"$label"의 고를 거리를 쉼표로 나눠 둘 이상 넣으세요.');
+        return setState(
+          () => _error = tr('"{label}"의 고를 거리를 쉼표로 나눠 둘 이상 넣으세요.', {
+            'label': label,
+          }),
+        );
       }
       fields.add(
         FormFieldDef(
@@ -1100,7 +1135,7 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.initial == null ? '양식 만들기' : '양식 고치기'),
+      title: Text(widget.initial == null ? tr('양식 만들기') : tr('양식 고치기')),
       content: SizedBox(
         width: 520,
         child: SingleChildScrollView(
@@ -1112,18 +1147,16 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
                 key: const ValueKey('gw-form-name'),
                 controller: _name,
                 maxLength: 30,
-                decoration: const InputDecoration(
-                  labelText: '양식 이름',
-                  hintText: '예: 교육 신청',
+                decoration: InputDecoration(
+                  labelText: tr('양식 이름'),
+                  hintText: tr('예: 교육 신청'),
                 ),
               ),
               TextField(
                 key: const ValueKey('gw-form-description'),
                 controller: _description,
                 maxLength: 200,
-                decoration: const InputDecoration(
-                  labelText: '설명(새 결재 고르기에 보임)',
-                ),
+                decoration: InputDecoration(labelText: tr('설명(새 결재 고르기에 보임)')),
               ),
               CheckboxListTile(
                 key: const ValueKey('gw-form-attachments'),
@@ -1131,7 +1164,7 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
                 dense: true,
                 value: _attachments,
                 onChanged: (v) => setState(() => _attachments = v ?? false),
-                title: const Text('파일 첨부 받기'),
+                title: Text(tr('파일 첨부 받기')),
               ),
               const Divider(),
               for (final (i, d) in _fields.indexed)
@@ -1148,7 +1181,7 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
                               key: ValueKey('gw-form-field-$i-label'),
                               controller: d.label,
                               decoration: InputDecoration(
-                                labelText: '칸 ${i + 1} 이름',
+                                labelText: tr('칸 {p0} 이름', {'p0': i + 1}),
                                 isDense: true,
                               ),
                             ),
@@ -1156,8 +1189,8 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
                               TextField(
                                 key: ValueKey('gw-form-field-$i-options'),
                                 controller: d.options,
-                                decoration: const InputDecoration(
-                                  labelText: '고를 거리(쉼표로)',
+                                decoration: InputDecoration(
+                                  labelText: tr('고를 거리(쉼표로)'),
                                   isDense: true,
                                 ),
                               ),
@@ -1171,8 +1204,8 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
                           key: ValueKey('gw-form-field-$i-type'),
                           initialValue: d.type,
                           isDense: true,
-                          decoration: const InputDecoration(
-                            labelText: '종류',
+                          decoration: InputDecoration(
+                            labelText: tr('종류'),
                             isDense: true,
                           ),
                           items: [
@@ -1185,7 +1218,7 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
                       ),
                       Column(
                         children: [
-                          const Text('필수', style: TextStyle(fontSize: 11)),
+                          Text(tr('필수'), style: TextStyle(fontSize: 11)),
                           Checkbox(
                             key: ValueKey('gw-form-field-$i-required'),
                             value: d.required,
@@ -1195,7 +1228,7 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
                         ],
                       ),
                       IconButton(
-                        tooltip: '칸 빼기',
+                        tooltip: tr('칸 빼기'),
                         icon: const Icon(Icons.close, size: 18),
                         onPressed: _fields.length == 1
                             ? null
@@ -1213,7 +1246,7 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
                       ? null
                       : () => setState(() => _fields.add(_FieldDraft())),
                   icon: const Icon(Icons.add, size: 18),
-                  label: const Text('칸 추가'),
+                  label: Text(tr('칸 추가')),
                 ),
               ),
               if (_error != null)
@@ -1228,12 +1261,12 @@ class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('gw-form-save'),
           onPressed: _submit,
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ],
     );

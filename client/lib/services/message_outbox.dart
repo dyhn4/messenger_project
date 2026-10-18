@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/message.dart';
 import 'chat_socket.dart' show MessageSendException;
+import '../l10n/tr.dart';
 
 /// 대기 중인 메시지 하나의 상태 — 보내는 중 · 연결을 기다림(끊겨서 붙으면 다시 보냄) · 실패(서버가 거절 — 다시 보내기·지우기).
 enum OutboxState { sending, waiting, failed }
@@ -74,17 +75,19 @@ String outboxPreviewOf(Map<String, dynamic> payload) {
   final attachments = payload['attachments'];
   switch (payload['type']) {
     case 'sticker':
-      return '이모티콘';
+      return tr('이모티콘');
     case 'image':
       final n = attachments is List ? attachments.length : 1;
-      final label = n > 1 ? '사진 $n장' : '사진';
+      final label = n > 1 ? tr('사진 {n}장', {'n': n}) : tr('사진');
       return caption == null ? label : '$label · $caption';
     case 'file':
       final n = attachments is List ? attachments.length : 1;
       final name = attachments is List && attachments.isNotEmpty
-          ? (attachments.first as Map)['fileName'] as String? ?? '파일'
-          : payload['fileName'] as String? ?? '파일';
-      final label = n > 1 ? '$name 외 ${n - 1}개' : name;
+          ? (attachments.first as Map)['fileName'] as String? ?? tr('파일')
+          : payload['fileName'] as String? ?? tr('파일');
+      final label = n > 1
+          ? tr('{name} 외 {p0}개', {'name': name, 'p0': n - 1})
+          : name;
       return caption == null ? label : '$label · $caption';
     default:
       return caption ?? '';

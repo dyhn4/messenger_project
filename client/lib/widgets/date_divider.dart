@@ -1,9 +1,23 @@
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
-const _weekdays = ['월', '화', '수', '목', '금', '토', '일'];
+final _weekdays = [
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+  tr('일'),
+];
 
 String _formatDate(DateTime date) =>
-    '${date.year}년 ${date.month}월 ${date.day}일 ${_weekdays[date.weekday - 1]}요일';
+    tr('{date.year}년 {date.month}월 {date.day}일 {p0}요일', {
+      'date.year': date.year,
+      'date.month': date.month,
+      'date.day': date.day,
+      'p0': _weekdays[date.weekday - 1],
+    });
 
 /// 채팅 목록에서 날짜가 바뀔 때 가운데에 보여주는 구분선: 얇은 선 위에 날짜 텍스트를 겹쳐서
 /// 선을 끊어 보이게 하는 흔한 "divider with label" 스타일. intl 로케일 데이터 초기화가

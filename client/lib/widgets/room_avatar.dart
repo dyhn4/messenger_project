@@ -6,6 +6,7 @@ import '../services/session.dart';
 import 'avatar_utils.dart';
 import 'my_avatar.dart';
 import 'user_avatar.dart';
+import '../l10n/tr.dart';
 
 /// 아바타 오른쪽 아래에 작은 '나' 꼬리표를 붙인다 — 나와의 대화 표시. 비밀 대화 자물쇠 배지처럼
 /// 아바타 자리([size])는 그대로 두고 꼬리표만 살짝 밖으로 걸쳐 그린다(목록 줄 정렬이 안 흔들리게).
@@ -40,7 +41,7 @@ class MeTagAvatar extends StatelessWidget {
                 ),
               ),
               child: Text(
-                '나',
+                tr('나'),
                 style: TextStyle(
                   fontSize: fontSize,
                   height: 1.25,

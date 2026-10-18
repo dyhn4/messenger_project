@@ -2,6 +2,7 @@ import 'announcement.dart';
 import 'app_user.dart';
 import 'board_category.dart';
 import 'message.dart';
+import '../l10n/tr.dart';
 
 enum RoomType { topic, group, dm }
 
@@ -25,13 +26,13 @@ extension TopicViewModeLabel on TopicViewMode {
   String get wire => name;
 
   String get label => switch (this) {
-    TopicViewMode.chat => '챗 뷰',
-    TopicViewMode.board => '보드 뷰',
+    TopicViewMode.chat => tr('챗 뷰'),
+    TopicViewMode.board => tr('보드 뷰'),
   };
 
   String get description => switch (this) {
-    TopicViewMode.chat => '메시지를 주고받는 대화방',
-    TopicViewMode.board => '제목이 있는 게시글을 올리는 게시판',
+    TopicViewMode.chat => tr('메시지를 주고받는 대화방'),
+    TopicViewMode.board => tr('제목이 있는 게시글을 올리는 게시판'),
   };
 }
 
@@ -44,7 +45,7 @@ const groupNameMaxLength = topicNameMaxLength;
 const groupDescriptionMaxLength = topicDescriptionMaxLength;
 
 /// 나와의 대화(나만 보는 메모 방)의 이름 — 방 목록·대화 헤더·알림이 같이 쓴다.
-const selfRoomName = '나와의 대화';
+final selfRoomName = tr('나와의 대화');
 
 /// 보관 시각 없이 archived만 온 경우(부분 응답)에도 보관 상태는 놓치지 않는다.
 DateTime? _archivedAtFromJson(Map<String, dynamic> json) {
@@ -418,9 +419,11 @@ class Room {
         if (m.id != myUserId) return m.name;
       }
       if (secretDepartedMemberName != null) {
-        return '$secretDepartedMemberName (나갔음)';
+        return tr('{secretDepartedMemberName} (나갔음)', {
+          'secretDepartedMemberName': secretDepartedMemberName,
+        });
       }
-      return '(알 수 없음)';
+      return tr('(알 수 없음)');
     }
     return memberNames(myUserId);
   }
@@ -431,7 +434,7 @@ class Room {
     final names =
         members.where((m) => m.id != myUserId).map((m) => m.name).toList()
           ..sort();
-    if (names.isEmpty) return '(알 수 없음)';
+    if (names.isEmpty) return tr('(알 수 없음)');
     return names.join(', ');
   }
 

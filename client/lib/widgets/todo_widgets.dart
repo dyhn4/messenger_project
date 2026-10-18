@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/todo.dart';
 import 'compact_menu.dart';
+import '../l10n/tr.dart';
 
 // 할 일 화면들(목록 카드·일정·상세·생성)이 같이 쓰는 작은 조각 — 진척률 색(todoProgressColor)·진척률 고르기 상자
 // (TodoProgressSelect), 그리고 PC 할 일 패널 안에서 화면을 바꾸는 모양(TodoViewMode)·전환(todoPanelRoute)·머리
@@ -215,14 +216,14 @@ class TodoPageHeader extends StatelessWidget {
             IconButton(
               key: const ValueKey('todo-page-back'),
               icon: const Icon(Icons.arrow_back),
-              tooltip: '뒤로',
+              tooltip: tr('뒤로'),
               onPressed: back,
             ),
             const SizedBox(width: 4),
           ],
           Expanded(
             child: Text(
-              title,
+              tr(title),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.titleLarge,
@@ -233,7 +234,7 @@ class TodoPageHeader extends StatelessWidget {
             IconButton(
               key: const ValueKey('todo-page-close'),
               icon: const Icon(Icons.close),
-              tooltip: '닫기',
+              tooltip: tr('닫기'),
               onPressed: close,
             ),
         ],
@@ -411,7 +412,7 @@ class _ProgressSelectButtonState extends State<_ProgressSelectButton> {
     return Semantics(
       expanded: _open,
       child: Tooltip(
-        message: '진척률 변경',
+        message: tr('진척률 변경'),
         child: InkWell(
           borderRadius: BorderRadius.circular(6),
           onTap: _show,

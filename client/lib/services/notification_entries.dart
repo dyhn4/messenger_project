@@ -3,6 +3,7 @@ import '../models/groupware.dart' show ApprovalNotification;
 import '../models/project.dart' show ProjectNotification;
 import '../models/room.dart';
 import 'notification_controller.dart';
+import '../l10n/tr.dart';
 
 /// 메시지 탭(안 읽은 대화)에 보여 줄 안 읽은 방인지.
 ///   - 보드 뷰 토픽은 뺀다 — 거기 올라온 새 글·수정·댓글은 보드 알림(보드·공지 탭)으로 따로 오고, 채팅이 아니다.
@@ -32,8 +33,8 @@ String roomPreviewLine(Room room) {
 ({String lead, String body}) serverNotificationSummary(AppNotification n) {
   final actor = (n.actorName ?? '').trim();
   final label = switch (n.kind) {
-    NotificationKind.boardEdit => '수정',
-    NotificationKind.boardComment => '댓글',
+    NotificationKind.boardEdit => tr('수정'),
+    NotificationKind.boardComment => tr('댓글'),
     _ => '',
   };
   final lead = [

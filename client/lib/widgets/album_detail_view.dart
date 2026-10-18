@@ -17,6 +17,7 @@ import 'attachment_widgets.dart' show DropZoneOverlay;
 import 'compact_menu.dart';
 import 'dropped_files.dart';
 import 'panel_filters.dart' show formatPanelDate;
+import '../l10n/tr.dart';
 
 /// 앨범 상세 — 위에 뒤로가기·제목·⋯(수정/전체 다운로드/삭제), 설명, `+ 파일 추가`·`선택` 단추, 드래그 앤 드롭 영역(PC),
 /// 올리는 중인 파일(진행률·재시도), 정사각 썸네일 격자, 선택 모드의 아래 막대(다운로드·공유·삭제).
@@ -67,8 +68,14 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
     if (!mounted) return;
     final notes = <String>[
       if (result.overLimit > 0)
-        '한 번에 $albumUploadMaxCount개까지 올릴 수 있어 앞의 $albumUploadMaxCount개만 올립니다.',
-      if (result.unsupported > 0) '이미지·영상이 아닌 ${result.unsupported}개는 제외했습니다.',
+        tr(
+          '한 번에 {albumUploadMaxCount}개까지 올릴 수 있어 앞의 {albumUploadMaxCount}개만 올립니다.',
+          {'albumUploadMaxCount': albumUploadMaxCount},
+        ),
+      if (result.unsupported > 0)
+        tr('이미지·영상이 아닌 {result.unsupported}개는 제외했습니다.', {
+          'result.unsupported': result.unsupported,
+        }),
     ];
     if (notes.isNotEmpty) {
       showAppToast(
@@ -102,7 +109,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
         },
       );
     } catch (e) {
-      if (mounted) showAppToast(context, '다운로드하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('다운로드하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _downloadDone = null);
     }
@@ -118,7 +125,12 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
     final ids = [for (final i in _albums.selectedItems) i.id];
     if (ids.isEmpty) return;
     if (ids.length > albumShareMaxCount) {
-      showAppToast(context, '한 번에 $albumShareMaxCount개까지 공유할 수 있습니다.');
+      showAppToast(
+        context,
+        tr('한 번에 {albumShareMaxCount}개까지 공유할 수 있습니다.', {
+          'albumShareMaxCount': albumShareMaxCount,
+        }),
+      );
       return;
     }
     final shared = await showAlbumShareDialog(
@@ -137,27 +149,32 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
     if (deletable == 0) {
       showAppToast(
         context,
-        '지울 권한이 있는 항목이 없습니다. (올린 사람이나 앨범을 만든 사람, 팀 관리자만 지울 수 있어요)',
+        tr('지울 권한이 있는 항목이 없습니다. (올린 사람이나 앨범을 만든 사람, 팀 관리자만 지울 수 있어요)'),
       );
       return;
     }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('항목 삭제'),
+        title: Text(tr('항목 삭제')),
         content: Text(
           deletable == selected.length
-              ? '선택한 ${selected.length}개를 앨범에서 삭제할까요?'
-              : '선택한 ${selected.length}개 중 내가 지울 수 있는 $deletable개만 삭제됩니다. 계속할까요?',
+              ? tr('선택한 {selected.length}개를 앨범에서 삭제할까요?', {
+                  'selected.length': selected.length,
+                })
+              : tr(
+                  '선택한 {selected.length}개 중 내가 지울 수 있는 {deletable}개만 삭제됩니다. 계속할까요?',
+                  {'selected.length': selected.length, 'deletable': deletable},
+                ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+            child: Text(tr('삭제'), style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -172,11 +189,19 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
       showAppToastOnOverlay(
         overlay,
         result.skipped > 0
-            ? '${result.deleted}개를 삭제했습니다. 권한이 없는 ${result.skipped}개는 남겼습니다.'
-            : '${result.deleted}개를 삭제했습니다.',
+            ? tr(
+                '{result.deleted}개를 삭제했습니다. 권한이 없는 {result.skipped}개는 남겼습니다.',
+                {
+                  'result.deleted': result.deleted,
+                  'result.skipped': result.skipped,
+                },
+              )
+            : tr('{result.deleted}개를 삭제했습니다.', {
+                'result.deleted': result.deleted,
+              }),
       );
     } catch (e) {
-      showAppToastOnOverlay(overlay, '삭제하지 못했습니다: $e');
+      showAppToastOnOverlay(overlay, tr('삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -188,9 +213,9 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
       await _albums.updateAlbum(coverItemId: selected.first.id);
       await _albums.reloadAlbum();
       _albums.clearSelection();
-      showAppToastOnOverlay(overlay, '대표 이미지로 정했습니다.');
+      showAppToastOnOverlay(overlay, tr('대표 이미지로 정했습니다.'));
     } catch (e) {
-      showAppToastOnOverlay(overlay, '대표 이미지를 정하지 못했습니다: $e');
+      showAppToastOnOverlay(overlay, tr('대표 이미지를 정하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -244,13 +269,13 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
             children: [
               IconButton(
                 icon: const Icon(Icons.arrow_back),
-                tooltip: '목록으로',
+                tooltip: tr('목록으로'),
                 onPressed: _albums.closeAlbum,
               ),
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.close),
-                tooltip: '닫기',
+                tooltip: tr('닫기'),
                 onPressed: widget.onClose,
               ),
             ],
@@ -259,7 +284,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
         Expanded(
           child: Center(
             child: Text(
-              _albums.detailError ?? '삭제되었거나 볼 수 없는 앨범입니다.',
+              _albums.detailError ?? tr('삭제되었거나 볼 수 없는 앨범입니다.'),
               key: const ValueKey('album-gone'),
               style: TextStyle(color: Theme.of(context).hintColor),
             ),
@@ -277,7 +302,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
           IconButton(
             key: const ValueKey('album-back'),
             icon: const Icon(Icons.arrow_back),
-            tooltip: '목록으로',
+            tooltip: tr('목록으로'),
             onPressed: _albums.closeAlbum,
           ),
           Expanded(
@@ -291,7 +316,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
           ),
           PopupMenuButton<AlbumAction>(
             key: const ValueKey('album-more'),
-            tooltip: '더보기',
+            tooltip: tr('더보기'),
             position: PopupMenuPosition.under,
             color: CompactMenu.color(context),
             shape: CompactMenu.shape,
@@ -313,7 +338,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
           ),
           IconButton(
             icon: const Icon(Icons.close),
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             onPressed: widget.onClose,
           ),
         ],
@@ -330,7 +355,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
       if (album.roomName != null) album.roomName!,
       if (album.creatorName != null) album.creatorName!,
       formatPanelDate(album.createdAt),
-      '사진·영상 ${album.itemCount}개',
+      tr('사진·영상 {album.itemCount}개', {'album.itemCount': album.itemCount}),
     ].join(' · ');
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
@@ -365,7 +390,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                     if (album.viewOnly) ...[
                       const SizedBox(height: 8),
                       Text(
-                        '공유된 앨범입니다. 이 앨범의 대화방 멤버만 사진·영상을 올리거나 지울 수 있습니다.',
+                        tr('공유된 앨범입니다. 이 앨범의 대화방 멤버만 사진·영상을 올리거나 지울 수 있습니다.'),
                         key: const ValueKey('album-view-only'),
                         style: TextStyle(fontSize: 12, color: hint),
                       ),
@@ -381,7 +406,10 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                       _progressCard(
                         context,
                         key: const ValueKey('album-download-progress'),
-                        label: '다운로드 중 $_downloadDone/$_downloadTotal',
+                        label: tr('다운로드 중 {_downloadDone}/{_downloadTotal}', {
+                          '_downloadDone': _downloadDone,
+                          '_downloadTotal': _downloadTotal,
+                        }),
                         value: _downloadTotal == 0
                             ? null
                             : _downloadDone! / _downloadTotal,
@@ -409,8 +437,8 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                       child: Text(
                         _albums.detailError ??
                             (album.viewOnly
-                                ? '아직 사진·영상이 없습니다.'
-                                : '아직 사진·영상이 없습니다.\n+ 파일 추가로 올려 보세요.'),
+                                ? tr('아직 사진·영상이 없습니다.')
+                                : tr('아직 사진·영상이 없습니다.\n+ 파일 추가로 올려 보세요.')),
                         key: const ValueKey('album-items-empty'),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: hint, height: 1.5),
@@ -481,7 +509,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
         children: [
           Expanded(
             child: Text(
-              '$count개 선택',
+              tr('{count}개 선택', {'count': count}),
               key: const ValueKey('album-selected-count'),
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
@@ -489,12 +517,12 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
           TextButton(
             key: const ValueKey('album-select-all'),
             onPressed: allSelected ? _albums.deselectAll : _albums.selectAll,
-            child: Text(allSelected ? '선택 해제' : '전체 선택'),
+            child: Text(allSelected ? tr('선택 해제') : tr('전체 선택')),
           ),
           TextButton(
             key: const ValueKey('album-select-cancel'),
             onPressed: _albums.clearSelection,
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
         ],
       );
@@ -509,14 +537,14 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
               key: const ValueKey('album-add-files'),
               onPressed: _pickFiles,
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('파일 추가'),
+              label: Text(tr('파일 추가')),
             ),
           ),
         const SizedBox(width: 8),
         OutlinedButton(
           key: const ValueKey('album-select'),
           onPressed: _albums.items.isEmpty ? null : _albums.startSelecting,
-          child: const Text('선택'),
+          child: Text(tr('선택')),
         ),
       ],
     );
@@ -549,7 +577,9 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
             const SizedBox(width: 8),
             Flexible(
               child: Text(
-                '사진·영상을 여기로 끌어다 놓으세요 (한 번에 최대 $albumUploadMaxCount개)',
+                tr('사진·영상을 여기로 끌어다 놓으세요 (한 번에 최대 {albumUploadMaxCount}개)', {
+                  'albumUploadMaxCount': albumUploadMaxCount,
+                }),
                 style: TextStyle(fontSize: 12, color: theme.hintColor),
               ),
             ),
@@ -611,8 +641,13 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
         children: [
           Text(
             active.isNotEmpty
-                ? '업로드 중 ${done + failed.length}/${uploads.length}'
-                : '업로드 ${failed.length}개 실패',
+                ? tr('업로드 중 {p0}/{uploads.length}', {
+                    'p0': done + failed.length,
+                    'uploads.length': uploads.length,
+                  })
+                : tr('업로드 {failed.length}개 실패', {
+                    'failed.length': failed.length,
+                  }),
             key: const ValueKey('album-upload-label'),
             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
@@ -632,7 +667,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
               ),
             if (active.length > 3)
               Text(
-                '외 ${active.length - 3}개',
+                tr('외 {p0}개', {'p0': active.length - 3}),
                 style: TextStyle(fontSize: 11, color: theme.hintColor),
               ),
           ],
@@ -659,7 +694,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                           style: const TextStyle(fontSize: 12),
                         ),
                         Text(
-                          u.error ?? '업로드하지 못했습니다.',
+                          u.error ?? tr('업로드하지 못했습니다.'),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -673,12 +708,12 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                   TextButton(
                     key: ValueKey('album-upload-retry-${u.id}'),
                     onPressed: () => _albums.retryUpload(u.id),
-                    child: const Text('재시도'),
+                    child: Text(tr('재시도')),
                   ),
                   TextButton(
                     key: ValueKey('album-upload-skip-${u.id}'),
                     onPressed: () => _albums.skipUpload(u.id),
-                    child: const Text('건너뛰기'),
+                    child: Text(tr('건너뛰기')),
                   ),
                 ],
               ),
@@ -732,7 +767,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
             action(
               key: const ValueKey('album-action-download'),
               icon: Icons.file_download_outlined,
-              label: '다운로드',
+              label: tr('다운로드'),
               onPressed: empty || _downloadDone != null
                   ? null
                   : () => _download(selected),
@@ -741,21 +776,21 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
               action(
                 key: const ValueKey('album-action-share'),
                 icon: Icons.share_outlined,
-                label: '공유',
+                label: tr('공유'),
                 onPressed: empty ? null : () => _share(album),
               ),
             if (canCover)
               action(
                 key: const ValueKey('album-action-cover'),
                 icon: Icons.image_outlined,
-                label: '대표로',
+                label: tr('대표로'),
                 onPressed: _setCover,
               ),
             if (!album.viewOnly)
               action(
                 key: const ValueKey('album-action-delete'),
                 icon: Icons.delete_outline,
-                label: '삭제',
+                label: tr('삭제'),
                 color: Colors.redAccent,
                 onPressed: empty || !canDeleteAny
                     ? null
@@ -837,7 +872,7 @@ class AlbumItemTile extends StatelessWidget {
               child: _Badge(
                 key: ValueKey('album-duration-${item.id}'),
                 text: item.durationMs == null
-                    ? '영상'
+                    ? tr('영상')
                     : formatAlbumDuration(item.durationMs),
               ),
             ),

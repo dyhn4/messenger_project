@@ -17,6 +17,7 @@ import '../home_screen.dart' show wideBreakpoint;
 import '../invite_members_screen.dart' show showPickMembers;
 import 'calendar_common.dart';
 import 'event_resource_picker.dart';
+import '../../l10n/tr.dart';
 
 /// 일정 만들기 화면 항목의 글자 수 한도 — 서버 규약과 같다.
 const kEventTitleMax = 50;
@@ -60,7 +61,10 @@ Future<bool> showEventEditor(
           MaterialPageRoute(fullscreenDialog: true, builder: (_) => editor),
         );
   if (saved == true && context.mounted) {
-    showAppToast(context, editing == null ? '일정을 만들었습니다.' : '일정을 수정했습니다.');
+    showAppToast(
+      context,
+      editing == null ? tr('일정을 만들었습니다.') : tr('일정을 수정했습니다.'),
+    );
   }
   return saved == true;
 }
@@ -366,7 +370,7 @@ class EventEditorState extends State<EventEditor> {
     final picked = await showPickMembers(
       context,
       widget.session,
-      title: '참석자 선택',
+      title: tr('참석자 선택'),
       initialSelected: _attendees.keys.toList(),
     );
     if (picked == null || !mounted) return;
@@ -421,7 +425,7 @@ class EventEditorState extends State<EventEditor> {
     final repeating = _repeat != _Repeat.none || (_editing?.recurring ?? false);
     if (repeating && _resourceId == null) {
       return Text(
-        '반복 일정에는 회의실·자원을 잡을 수 없습니다 — 회차마다 따로 잡으세요.',
+        tr('반복 일정에는 회의실·자원을 잡을 수 없습니다 — 회차마다 따로 잡으세요.'),
         key: const ValueKey('event-resource-repeat'),
         style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
       );
@@ -433,7 +437,7 @@ class EventEditorState extends State<EventEditor> {
           key: const ValueKey('event-resource-pick'),
           onPressed: _pickResource,
           icon: const Icon(Icons.meeting_room_outlined, size: 18),
-          label: const Text('회의실·자원 잡기'),
+          label: Text(tr('회의실·자원 잡기')),
         ),
       );
     }
@@ -444,13 +448,13 @@ class EventEditorState extends State<EventEditor> {
         InputChip(
           key: const ValueKey('event-resource-chip'),
           avatar: const Icon(Icons.meeting_room_outlined, size: 18),
-          label: Text(_resourceName ?? '회의실'),
+          label: Text(_resourceName ?? tr('회의실')),
           onDeleted: () => _change(() {
             _resourceId = null;
             _resourceName = null;
           }),
         ),
-        TextButton(onPressed: _pickResource, child: const Text('바꾸기')),
+        TextButton(onPressed: _pickResource, child: Text(tr('바꾸기'))),
       ],
     );
   }
@@ -470,7 +474,7 @@ class EventEditorState extends State<EventEditor> {
         return (value: const Recurrence(freq: 'yearly'), error: null);
       case _Repeat.weekly:
         if (_weekdays.isEmpty) {
-          return (value: null, error: '반복할 요일을 하나 이상 고르세요.');
+          return (value: null, error: tr('반복할 요일을 하나 이상 고르세요.'));
         }
         return (
           value: Recurrence(freq: 'weekly', byWeekday: _weekdays.toList()),
@@ -483,25 +487,29 @@ class EventEditorState extends State<EventEditor> {
             interval > kRecurrenceIntervalMax) {
           return (
             value: null,
-            error: '반복 간격은 1~$kRecurrenceIntervalMax 사이의 숫자여야 합니다.',
+            error: tr('반복 간격은 1~{kRecurrenceIntervalMax} 사이의 숫자여야 합니다.', {
+              'kRecurrenceIntervalMax': kRecurrenceIntervalMax,
+            }),
           );
         }
         if (_customFreq == 'weekly' && _weekdays.isEmpty) {
-          return (value: null, error: '반복할 요일을 하나 이상 고르세요.');
+          return (value: null, error: tr('반복할 요일을 하나 이상 고르세요.'));
         }
         DateTime? until;
         int? count;
         if (_repeatEnd == _RepeatEnd.until) {
           until = dateOnly(_until);
           if (until.isBefore(dateOnly(_start))) {
-            return (value: null, error: '반복 종료일은 시작일 이후여야 합니다.');
+            return (value: null, error: tr('반복 종료일은 시작일 이후여야 합니다.'));
           }
         } else if (_repeatEnd == _RepeatEnd.count) {
           count = int.tryParse(_count.text.trim());
           if (count == null || count < 1 || count > kRecurrenceCountMax) {
             return (
               value: null,
-              error: '반복 횟수는 1~$kRecurrenceCountMax 사이의 숫자여야 합니다.',
+              error: tr('반복 횟수는 1~{kRecurrenceCountMax} 사이의 숫자여야 합니다.', {
+                'kRecurrenceCountMax': kRecurrenceCountMax,
+              }),
             );
           }
         }
@@ -530,30 +538,36 @@ class EventEditorState extends State<EventEditor> {
   String? _validate() {
     final title = _title.text.trim();
     if (title.isEmpty) {
-      _titleError = '제목을 입력하세요.';
+      _titleError = tr('제목을 입력하세요.');
       return _titleError;
     }
     if (title.characters.length > kEventTitleMax) {
-      _titleError = '제목은 $kEventTitleMax자까지 입력할 수 있습니다.';
+      _titleError = tr('제목은 {kEventTitleMax}자까지 입력할 수 있습니다.', {
+        'kEventTitleMax': kEventTitleMax,
+      });
       return _titleError;
     }
-    if (_calendarId == null) return '일정을 만들 수 있는 캘린더가 없습니다.';
+    if (_calendarId == null) return tr('일정을 만들 수 있는 캘린더가 없습니다.');
     if (_allDay
         ? dateOnly(_end).isBefore(dateOnly(_start))
         : !_end.isAfter(_start)) {
-      return '종료 시각은 시작 시각보다 뒤여야 합니다.';
+      return tr('종료 시각은 시작 시각보다 뒤여야 합니다.');
     }
     if (_location.text.characters.length > kEventLocationMax) {
-      return '장소는 $kEventLocationMax자까지 입력할 수 있습니다.';
+      return tr('장소는 {kEventLocationMax}자까지 입력할 수 있습니다.', {
+        'kEventLocationMax': kEventLocationMax,
+      });
     }
     if (_description.text.characters.length > kEventDescriptionMax) {
-      return '설명은 $kEventDescriptionMax자까지 입력할 수 있습니다.';
+      return tr('설명은 {kEventDescriptionMax}자까지 입력할 수 있습니다.', {
+        'kEventDescriptionMax': kEventDescriptionMax,
+      });
     }
     if (!_thisOnly) {
       final r = _buildRecurrence();
       if (r.error != null) return r.error;
       if (_resourceId != null && r.value != null) {
-        return '회의실·자원을 잡은 일정은 반복할 수 없습니다. 회의실·자원을 빼거나 반복을 끄세요.';
+        return tr('회의실·자원을 잡은 일정은 반복할 수 없습니다. 회의실·자원을 빼거나 반복을 끄세요.');
       }
     }
     return null;
@@ -598,7 +612,9 @@ class EventEditorState extends State<EventEditor> {
       if (!mounted) return;
       setState(() {
         _saving = false;
-        _error = e is ApiException ? e.message : '저장하지 못했습니다. 잠시 후 다시 시도하세요.';
+        _error = e is ApiException
+            ? e.message
+            : tr('저장하지 못했습니다. 잠시 후 다시 시도하세요.');
       });
     }
   }
@@ -671,16 +687,16 @@ class EventEditorState extends State<EventEditor> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('작성을 그만할까요?'),
-        content: const Text('입력한 내용이 저장되지 않습니다.'),
+        title: Text(tr('작성을 그만할까요?')),
+        content: Text(tr('입력한 내용이 저장되지 않습니다.')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('계속 작성'),
+            child: Text(tr('계속 작성')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('나가기'),
+            child: Text(tr('나가기')),
           ),
         ],
       ),
@@ -699,7 +715,7 @@ class EventEditorState extends State<EventEditor> {
 
   @override
   Widget build(BuildContext context) {
-    final title = _isEdit ? '일정 수정' : '일정 만들기';
+    final title = _isEdit ? tr('일정 수정') : tr('일정 만들기');
     final form = _buildForm(context);
     final footer = _buildFooter(context);
     final body = PopScope(
@@ -741,7 +757,7 @@ class EventEditorState extends State<EventEditor> {
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('저장'),
+                        : Text(tr('저장')),
                   ),
                 ],
               ),
@@ -783,7 +799,7 @@ class EventEditorState extends State<EventEditor> {
               onPressed: _saving
                   ? null
                   : () => Navigator.of(context).maybePop(),
-              child: const Text('취소'),
+              child: Text(tr('취소')),
             ),
             const SizedBox(width: 8),
             FilledButton(
@@ -795,7 +811,7 @@ class EventEditorState extends State<EventEditor> {
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('저장'),
+                  : Text(tr('저장')),
             ),
           ],
         ),
@@ -815,8 +831,8 @@ class EventEditorState extends State<EventEditor> {
           maxLength: kEventTitleMax,
           autofocus: !_isEdit,
           decoration: InputDecoration(
-            labelText: '제목',
-            hintText: '일정 제목 (필수)',
+            labelText: tr('제목'),
+            hintText: tr('일정 제목 (필수)'),
             errorText: _titleError,
             border: const OutlineInputBorder(),
           ),
@@ -825,10 +841,10 @@ class EventEditorState extends State<EventEditor> {
           },
         ),
         const SizedBox(height: 4),
-        _label('캘린더'),
+        _label(tr('캘린더')),
         _calendarDropdown(calendars),
         const SizedBox(height: 14),
-        _label('색'),
+        _label(tr('색')),
         CalendarColorGrid(
           selected: _colorHex,
           size: 26,
@@ -838,7 +854,7 @@ class EventEditorState extends State<EventEditor> {
           }),
         ),
         const SizedBox(height: 14),
-        _label('기간'),
+        _label(tr('기간')),
         _buildDateTimeRow(
           keyPrefix: 'event-start',
           value: _start,
@@ -860,13 +876,13 @@ class EventEditorState extends State<EventEditor> {
           key: const ValueKey('event-allday'),
           contentPadding: EdgeInsets.zero,
           dense: true,
-          title: const Text('종일'),
+          title: Text(tr('종일')),
           value: _allDay,
           onChanged: (v) => _change(() => _allDay = v),
         ),
         if (!_isGuest) ...[
           const SizedBox(height: 6),
-          _label('참석자'),
+          _label(tr('참석자')),
           _buildAttendees(theme),
         ],
         const SizedBox(height: 14),
@@ -874,26 +890,26 @@ class EventEditorState extends State<EventEditor> {
           key: const ValueKey('event-location'),
           controller: _location,
           maxLength: kEventLocationMax,
-          decoration: const InputDecoration(
-            labelText: '장소',
+          decoration: InputDecoration(
+            labelText: tr('장소'),
             prefixIcon: Icon(Icons.place_outlined),
             border: OutlineInputBorder(),
           ),
         ),
         if (_hasResources && !_isGuest) ...[
-          _label('회의실·자원'),
+          _label(tr('회의실·자원')),
           _buildResource(theme),
           const SizedBox(height: 8),
         ],
         if (!_thisOnly) ...[
           const SizedBox(height: 4),
-          _label('반복'),
+          _label(tr('반복')),
           _buildRepeat(theme),
         ] else
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 8),
             child: Text(
-              '이 일정만 수정합니다. 수정한 일정은 반복되지 않는 별도 일정이 됩니다.',
+              tr('이 일정만 수정합니다. 수정한 일정은 반복되지 않는 별도 일정이 됩니다.'),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
@@ -906,27 +922,27 @@ class EventEditorState extends State<EventEditor> {
           maxLength: kEventDescriptionMax,
           minLines: 3,
           maxLines: 6,
-          decoration: const InputDecoration(
-            labelText: '설명',
+          decoration: InputDecoration(
+            labelText: tr('설명'),
             alignLabelWithHint: true,
             border: OutlineInputBorder(),
           ),
         ),
         const SizedBox(height: 4),
-        _label('공개 설정'),
+        _label(tr('공개 설정')),
         SegmentedButton<String>(
           key: const ValueKey('event-visibility'),
           showSelectedIcon: false,
-          segments: const [
+          segments: [
             ButtonSegment(
               value: 'public',
               icon: Icon(Icons.public, size: 18),
-              label: Text('공개'),
+              label: Text(tr('공개')),
             ),
             ButtonSegment(
               value: 'private',
               icon: Icon(Icons.lock_outline, size: 18),
-              label: Text('비공개'),
+              label: Text(tr('비공개')),
             ),
           ],
           selected: {_visibility},
@@ -936,8 +952,8 @@ class EventEditorState extends State<EventEditor> {
           padding: const EdgeInsets.only(top: 6),
           child: Text(
             _visibility == 'private'
-                ? '비공개 일정은 초대된 사람만 자세한 내용을 볼 수 있습니다.'
-                : '캘린더를 볼 수 있는 모든 사람이 자세한 내용을 볼 수 있습니다.',
+                ? tr('비공개 일정은 초대된 사람만 자세한 내용을 볼 수 있습니다.')
+                : tr('캘린더를 볼 수 있는 모든 사람이 자세한 내용을 볼 수 있습니다.'),
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),
         ),
@@ -969,7 +985,7 @@ class EventEditorState extends State<EventEditor> {
   Widget _calendarDropdown(List<CalendarInfo> calendars) {
     if (calendars.isEmpty) {
       return Text(
-        '일정을 만들 수 있는 캘린더가 없습니다.',
+        tr('일정을 만들 수 있는 캘린더가 없습니다.'),
         style: TextStyle(color: Theme.of(context).colorScheme.error),
       );
     }
@@ -1128,9 +1144,9 @@ class EventEditorState extends State<EventEditor> {
               child: TextField(
                 key: const ValueKey('event-attendee-search'),
                 controller: _search,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   isDense: true,
-                  hintText: '이름으로 검색',
+                  hintText: tr('이름으로 검색'),
                   prefixIcon: Icon(Icons.search, size: 20),
                   border: OutlineInputBorder(),
                 ),
@@ -1146,7 +1162,7 @@ class EventEditorState extends State<EventEditor> {
               key: const ValueKey('event-attendee-org'),
               onPressed: _pickFromOrg,
               icon: const Icon(Icons.account_tree_outlined, size: 18),
-              label: const Text('조직도'),
+              label: Text(tr('조직도')),
             ),
           ],
         ),
@@ -1196,13 +1212,13 @@ class EventEditorState extends State<EventEditor> {
   }
 
   Widget _buildRepeat(ThemeData theme) {
-    const labels = {
-      _Repeat.none: '반복 안 함',
-      _Repeat.daily: '매일',
-      _Repeat.weekly: '매주',
-      _Repeat.monthly: '매월',
-      _Repeat.yearly: '매년',
-      _Repeat.custom: '사용자 정의',
+    final labels = {
+      _Repeat.none: tr('반복 안 함'),
+      _Repeat.daily: tr('매일'),
+      _Repeat.weekly: tr('매주'),
+      _Repeat.monthly: tr('매월'),
+      _Repeat.yearly: tr('매년'),
+      _Repeat.custom: tr('사용자 정의'),
     };
     final rec = _buildRecurrence();
     return Column(
@@ -1272,17 +1288,17 @@ class EventEditorState extends State<EventEditor> {
   ];
 
   List<Widget> _customRepeat(ThemeData theme) {
-    const freqLabels = {
-      'daily': '일',
-      'weekly': '주',
-      'monthly': '개월',
-      'yearly': '년',
+    final freqLabels = {
+      'daily': tr('일'),
+      'weekly': tr('주'),
+      'monthly': tr('개월'),
+      'yearly': tr('년'),
     };
     return [
       const SizedBox(height: 10),
       Row(
         children: [
-          const Text('반복 주기'),
+          Text(tr('반복 주기')),
           const SizedBox(width: 12),
           SizedBox(
             width: 64,
@@ -1309,7 +1325,9 @@ class EventEditorState extends State<EventEditor> {
               for (final entry in freqLabels.entries)
                 DropdownMenuItem(
                   value: entry.key,
-                  child: Text('${entry.value}마다'),
+                  child: Text(
+                    tr('{entry.value}마다', {'entry.value': entry.value}),
+                  ),
                 ),
             ],
           ),
@@ -1319,7 +1337,7 @@ class EventEditorState extends State<EventEditor> {
       const SizedBox(height: 10),
       Row(
         children: [
-          const Text('종료'),
+          Text(tr('종료')),
           const SizedBox(width: 12),
           DropdownButton<_RepeatEnd>(
             key: const ValueKey('event-repeat-end'),
@@ -1327,10 +1345,13 @@ class EventEditorState extends State<EventEditor> {
             onChanged: (v) {
               if (v != null) _change(() => _repeatEnd = v);
             },
-            items: const [
-              DropdownMenuItem(value: _RepeatEnd.never, child: Text('종료 없음')),
-              DropdownMenuItem(value: _RepeatEnd.until, child: Text('날짜')),
-              DropdownMenuItem(value: _RepeatEnd.count, child: Text('횟수')),
+            items: [
+              DropdownMenuItem(
+                value: _RepeatEnd.never,
+                child: Text(tr('종료 없음')),
+              ),
+              DropdownMenuItem(value: _RepeatEnd.until, child: Text(tr('날짜'))),
+              DropdownMenuItem(value: _RepeatEnd.count, child: Text(tr('횟수'))),
             ],
           ),
           const SizedBox(width: 12),
@@ -1371,7 +1392,7 @@ class EventEditorState extends State<EventEditor> {
               ),
             ),
             const SizedBox(width: 6),
-            const Text('회'),
+            Text(tr('회')),
           ],
         ],
       ),

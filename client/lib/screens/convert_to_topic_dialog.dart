@@ -5,11 +5,12 @@ import '../services/api_client.dart' show ApiException;
 import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
 import 'new_group_dialog.dart' show GroupFormLabel, GroupFormNotice;
+import '../l10n/tr.dart';
 
 /// 되돌릴 수 없다는 경고 — 전환 대화상자 맨 위에 늘 보인다.
-const convertToTopicWarning =
-    '토픽으로 전환하면 다시 그룹채팅으로 되돌릴 수 없습니다. 비공개 토픽으로 전환되며 전환한 사람이 토픽 관리자가 됩니다. '
-    '대화 내용은 그대로 유지됩니다.';
+final convertToTopicWarning = tr(
+  '토픽으로 전환하면 다시 그룹채팅으로 되돌릴 수 없습니다. 비공개 토픽으로 전환되며 전환한 사람이 토픽 관리자가 됩니다. 대화 내용은 그대로 유지됩니다.',
+);
 
 /// "토픽으로 전환" 대화상자를 연다 — 그룹채팅 '채팅 정보 변경' 창의 단추가 부른다. 토픽 이름(필수)과 설명을 받아
 /// 전환하고, 전환됐으면 true를 돌려준다(취소·닫기면 false).
@@ -76,7 +77,7 @@ class _ConvertToTopicDialogState extends State<ConvertToTopicDialog> {
         _saving = false;
         _error = e is ApiException
             ? e.message
-            : '토픽으로 전환하지 못했습니다. 잠시 후 다시 시도하세요.';
+            : tr('토픽으로 전환하지 못했습니다. 잠시 후 다시 시도하세요.');
       });
     }
   }
@@ -86,7 +87,7 @@ class _ConvertToTopicDialogState extends State<ConvertToTopicDialog> {
     return PopScope(
       canPop: !_saving,
       child: FloatingDialog(
-        title: '토픽으로 전환',
+        title: tr('토픽으로 전환'),
         maxWidth: 480,
         maxHeight: 640,
         child: Column(
@@ -98,13 +99,13 @@ class _ConvertToTopicDialogState extends State<ConvertToTopicDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const GroupFormNotice(
+                    GroupFormNotice(
                       key: ValueKey('convert-topic-warning'),
                       icon: Icons.warning_amber_outlined,
                       text: convertToTopicWarning,
                     ),
                     const SizedBox(height: 16),
-                    const GroupFormLabel('토픽 이름'),
+                    GroupFormLabel(tr('토픽 이름')),
                     TextField(
                       key: const ValueKey('convert-topic-name'),
                       controller: _name,
@@ -112,15 +113,15 @@ class _ConvertToTopicDialogState extends State<ConvertToTopicDialog> {
                       enabled: !_saving,
                       maxLength: topicNameMaxLength,
                       textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        hintText: '토픽 이름을 입력하세요',
+                      decoration: InputDecoration(
+                        hintText: tr('토픽 이름을 입력하세요'),
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
                       onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 8),
-                    const GroupFormLabel('설명', optional: true),
+                    GroupFormLabel(tr('설명'), optional: true),
                     TextField(
                       key: const ValueKey('convert-topic-description'),
                       controller: _description,
@@ -128,8 +129,8 @@ class _ConvertToTopicDialogState extends State<ConvertToTopicDialog> {
                       maxLength: topicDescriptionMaxLength,
                       minLines: 2,
                       maxLines: 4,
-                      decoration: const InputDecoration(
-                        hintText: '어떤 이야기를 나누는 토픽인지 적어 주세요',
+                      decoration: InputDecoration(
+                        hintText: tr('어떤 이야기를 나누는 토픽인지 적어 주세요'),
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
@@ -155,7 +156,7 @@ class _ConvertToTopicDialogState extends State<ConvertToTopicDialog> {
                   onPressed: _saving
                       ? null
                       : () => Navigator.of(context).pop(false),
-                  child: const Text('취소'),
+                  child: Text(tr('취소')),
                 ),
                 const SizedBox(width: 8),
                 FilledButton(
@@ -167,7 +168,7 @@ class _ConvertToTopicDialogState extends State<ConvertToTopicDialog> {
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('전환'),
+                      : Text(tr('전환')),
                 ),
               ],
             ),

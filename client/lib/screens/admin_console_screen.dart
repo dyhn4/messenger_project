@@ -24,6 +24,7 @@ import 'admin_commands_tab.dart';
 import 'admin_login_security_tab.dart';
 import 'admin_mail_tab.dart';
 import 'admin_stickers_tab.dart';
+import '../l10n/tr.dart';
 
 /// 서버 운영자 전용 관리자 콘솔. 팀 설정(팀 안의 관리)과 달리 **서버 전체**를 다룬다 —
 /// 운영 현황 / 회원 / 팀 / 감사 로그 / FCM 설정 / DDNS / 이모티콘 일곱 탭. DDNS 탭에는 DuckDNS 자동 갱신과
@@ -47,28 +48,28 @@ class AdminConsoleScreen extends StatelessWidget {
     return DefaultTabController(
       length: 11,
       child: FloatingDialog(
-        title: '서버 관리',
+        title: tr('서버 관리'),
         maxWidth: 820,
         maxHeight: 720,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const TabBar(
+            TabBar(
               isScrollable: true,
               tabAlignment: TabAlignment.start,
               tabs: [
-                Tab(text: '운영 현황'),
-                Tab(text: '회원'),
-                Tab(text: '팀'),
-                Tab(text: '감사 로그'),
-                Tab(text: 'FCM 설정'),
+                Tab(text: tr('운영 현황')),
+                Tab(text: tr('회원')),
+                Tab(text: tr('팀')),
+                Tab(text: tr('감사 로그')),
+                Tab(text: tr('FCM 설정')),
                 Tab(text: 'DDNS'),
-                Tab(text: '메일'),
-                Tab(text: '로그인 보안'),
-                Tab(text: '슬래시 명령'),
-                Tab(text: '백업'),
-                Tab(text: '이모티콘'),
+                Tab(text: tr('메일')),
+                Tab(text: tr('로그인 보안')),
+                Tab(text: tr('슬래시 명령')),
+                Tab(text: tr('백업')),
+                Tab(text: tr('이모티콘')),
               ],
             ),
             const SizedBox(height: 12),
@@ -149,7 +150,7 @@ class _StatsTabState extends State<_StatsTab> {
       }
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -171,17 +172,39 @@ class _StatsTabState extends State<_StatsTab> {
             spacing: 12,
             runSpacing: 12,
             children: [
-              _StatCard(label: '회원', value: '${stats.users}명'),
-              _StatCard(label: '팀', value: '${stats.teams}개'),
-              _StatCard(label: '대화방', value: '${stats.rooms}개'),
-              _StatCard(label: '전체 메시지', value: '${stats.messages}건'),
-              _StatCard(label: '오늘 메시지·댓글', value: '${stats.messagesToday}건'),
-              _StatCard(label: '첨부 용량', value: _formatBytes(stats.uploadBytes)),
+              _StatCard(
+                label: tr('회원'),
+                value: tr('{stats.users}명', {'stats.users': stats.users}),
+              ),
+              _StatCard(
+                label: tr('팀'),
+                value: tr('{stats.teams}개', {'stats.teams': stats.teams}),
+              ),
+              _StatCard(
+                label: tr('대화방'),
+                value: tr('{stats.rooms}개', {'stats.rooms': stats.rooms}),
+              ),
+              _StatCard(
+                label: tr('전체 메시지'),
+                value: tr('{stats.messages}건', {
+                  'stats.messages': stats.messages,
+                }),
+              ),
+              _StatCard(
+                label: tr('오늘 메시지·댓글'),
+                value: tr('{stats.messagesToday}건', {
+                  'stats.messagesToday': stats.messagesToday,
+                }),
+              ),
+              _StatCard(
+                label: tr('첨부 용량'),
+                value: _formatBytes(stats.uploadBytes),
+              ),
             ],
           ),
           const SizedBox(height: 20),
           Text(
-            '서버 시작: ${formatDateTime(stats.serverStartedAt)}',
+            tr('서버 시작: {p0}', {'p0': formatDateTime(stats.serverStartedAt)}),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
@@ -190,14 +213,15 @@ class _StatsTabState extends State<_StatsTab> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              '팀 생성 권한',
+              tr('팀 생성 권한'),
               style: Theme.of(context).textTheme.labelMedium,
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            '팀을 새로 만들 수 있는 최소 등급입니다. 준회원은 어느 설정에서도 팀을 만들 수 없고, '
-            '서버 운영자는 설정과 무관하게 항상 만들 수 있습니다.',
+            tr(
+              '팀을 새로 만들 수 있는 최소 등급입니다. 준회원은 어느 설정에서도 팀을 만들 수 없고, 서버 운영자는 설정과 무관하게 항상 만들 수 있습니다.',
+            ),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
@@ -223,15 +247,15 @@ class _StatsTabState extends State<_StatsTab> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              '팀 초대 링크 생성 권한',
+              tr('팀 초대 링크 생성 권한'),
               style: Theme.of(context).textTheme.labelMedium,
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            '"팀 초대 링크"로 가입하면 지정한 팀에 자동 합류하고 등급도 자동으로 부여됩니다. '
-            '이 링크를 만들 수 있는 최소 등급입니다. 준회원은 어느 설정에서도 만들 수 없고, '
-            '서버 운영자는 설정과 무관하게 항상 만들 수 있습니다.',
+            tr(
+              '"팀 초대 링크"로 가입하면 지정한 팀에 자동 합류하고 등급도 자동으로 부여됩니다. 이 링크를 만들 수 있는 최소 등급입니다. 준회원은 어느 설정에서도 만들 수 없고, 서버 운영자는 설정과 무관하게 항상 만들 수 있습니다.',
+            ),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
@@ -257,15 +281,15 @@ class _StatsTabState extends State<_StatsTab> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              '프로젝트 생성 권한',
+              tr('프로젝트 생성 권한'),
               style: Theme.of(context).textTheme.labelMedium,
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            '"프로젝트"(업무 관리 공간)를 새로 만들 수 있는 최소 등급입니다. 준회원은 어느 '
-            '설정에서도 만들 수 없고, 서버 운영자는 설정과 무관하게 항상 만들 수 있습니다. '
-            '이미 만들어진 프로젝트에 초대받아 참여하는 것은 이 설정과 무관합니다.',
+            tr(
+              '"프로젝트"(업무 관리 공간)를 새로 만들 수 있는 최소 등급입니다. 준회원은 어느 설정에서도 만들 수 없고, 서버 운영자는 설정과 무관하게 항상 만들 수 있습니다. 이미 만들어진 프로젝트에 초대받아 참여하는 것은 이 설정과 무관합니다.',
+            ),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
@@ -291,14 +315,15 @@ class _StatsTabState extends State<_StatsTab> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              '팀·직책 관리',
+              tr('팀·직책 관리'),
               style: Theme.of(context).textTheme.labelMedium,
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            '팀 단위로 두면 한 사람이 팀마다 다른 직책을 가질 수 있고, 각 팀에서 팀 설정으로 정합니다. '
-            '계정 단위로 두면 조직도가 하나로 통일되고, 여기 회원 탭에서 아래 직책 목록 중 하나를 골라 정합니다.',
+            tr(
+              '팀 단위로 두면 한 사람이 팀마다 다른 직책을 가질 수 있고, 각 팀에서 팀 설정으로 정합니다. 계정 단위로 두면 조직도가 하나로 통일되고, 여기 회원 탭에서 아래 직책 목록 중 하나를 골라 정합니다.',
+            ),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
@@ -307,9 +332,9 @@ class _StatsTabState extends State<_StatsTab> {
           Align(
             alignment: Alignment.centerLeft,
             child: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'team', label: Text('팀 단위')),
-                ButtonSegment(value: 'account', label: Text('계정 단위')),
+              segments: [
+                ButtonSegment(value: 'team', label: Text(tr('팀 단위'))),
+                ButtonSegment(value: 'account', label: Text(tr('계정 단위'))),
               ],
               selected: {stats.orgScope},
               onSelectionChanged: _saving
@@ -321,15 +346,15 @@ class _StatsTabState extends State<_StatsTab> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              '그룹웨어 범위',
+              tr('그룹웨어 범위'),
               style: Theme.of(context).textTheme.labelMedium,
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            '전자결재·연차·출퇴근을 팀마다 따로 둘지, 회사 전체 하나로 둘지 정합니다. "팀·직책 설정을 따름"이면 위 설정이 '
-            '계정 단위일 때 회사 전체, 팀 단위일 때 팀마다입니다. 바꾸면 이전 범위의 결재·근태 기록은 그 범위에 남아 새 범위에서는 '
-            '보이지 않으니, 운영을 시작하기 전에 정하세요.',
+            tr(
+              '전자결재·연차·출퇴근을 팀마다 따로 둘지, 회사 전체 하나로 둘지 정합니다. "팀·직책 설정을 따름"이면 위 설정이 계정 단위일 때 회사 전체, 팀 단위일 때 팀마다입니다. 바꾸면 이전 범위의 결재·근태 기록은 그 범위에 남아 새 범위에서는 보이지 않으니, 운영을 시작하기 전에 정하세요.',
+            ),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
@@ -339,10 +364,10 @@ class _StatsTabState extends State<_StatsTab> {
             alignment: Alignment.centerLeft,
             child: SegmentedButton<String>(
               key: const ValueKey('admin-groupware-scope'),
-              segments: const [
-                ButtonSegment(value: 'org', label: Text('팀·직책 설정을 따름')),
-                ButtonSegment(value: 'team', label: Text('팀마다')),
-                ButtonSegment(value: 'server', label: Text('회사 전체')),
+              segments: [
+                ButtonSegment(value: 'org', label: Text(tr('팀·직책 설정을 따름'))),
+                ButtonSegment(value: 'team', label: Text(tr('팀마다'))),
+                ButtonSegment(value: 'server', label: Text(tr('회사 전체'))),
               ],
               selected: {stats.groupwareScope},
               onSelectionChanged: _saving
@@ -354,14 +379,15 @@ class _StatsTabState extends State<_StatsTab> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              '직책 목록',
+              tr('직책 목록'),
               style: Theme.of(context).textTheme.labelMedium,
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            '팀·직책 관리가 "계정 단위"일 때, 회원 탭의 직책 수정에서 자유 입력 대신 이 목록 '
-            '중 하나를 고르게 합니다.',
+            tr(
+              '팀·직책 관리가 "계정 단위"일 때, 회원 탭의 직책 수정에서 자유 입력 대신 이 목록 중 하나를 고르게 합니다.',
+            ),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
@@ -427,7 +453,7 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
       final created = await widget.session.createPositionOption(label);
       if (mounted) setState(() => _options = [...?_options, created]);
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _adding = false);
     }
@@ -442,7 +468,7 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
         );
       }
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -475,7 +501,7 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
       final updated = await widget.session.reorderPositionOptions(ids);
       if (mounted) setState(() => _options = updated);
     } catch (e) {
-      if (mounted) showAppToast(context, '순서를 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('순서를 바꾸지 못했습니다: {e}', {'e': e}));
       await _load();
     }
   }
@@ -492,7 +518,7 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
       );
       if (mounted) setState(() => _options = updated);
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -513,7 +539,7 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '직책을 끌어서 옮기면 서열을 바꿀 수 있습니다(왼쪽이 위).',
+          tr('직책을 끌어서 옮기면 서열을 바꿀 수 있습니다(왼쪽이 위).'),
           style: Theme.of(context).textTheme.bodySmall?.copyWith(color: hint),
         ),
         const SizedBox(height: 8),
@@ -532,7 +558,7 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
                 onDelete: () => _delete(option),
               ),
             IconButton.filledTonal(
-              tooltip: '직책 추가',
+              tooltip: tr('직책 추가'),
               icon: _adding
                   ? const SizedBox(
                       width: 16,
@@ -548,7 +574,10 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
         const SizedBox(height: 14),
         Row(
           children: [
-            Text('회원가입 시 기본 직책', style: Theme.of(context).textTheme.bodyMedium),
+            Text(
+              tr('회원가입 시 기본 직책'),
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
             const SizedBox(width: 10),
             _DefaultPositionPicker(
               options: _options!,
@@ -608,12 +637,12 @@ class _DefaultPositionPicker extends StatelessWidget {
     );
 
     return PopupMenuButton<String>(
-      tooltip: '기본 직책 선택',
+      tooltip: tr('기본 직책 선택'),
       position: PopupMenuPosition.under,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       onSelected: (v) => onSelected(v == _none ? null : v),
       itemBuilder: (_) => [
-        item(_none, '지정 안 함'),
+        item(_none, tr('지정 안 함')),
         const PopupMenuDivider(),
         for (final o in options) item(o.id, o.label),
       ],
@@ -629,7 +658,7 @@ class _DefaultPositionPicker extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              selected?.label ?? '지정 안 함',
+              selected?.label ?? tr('지정 안 함'),
               style: TextStyle(
                 color: fg,
                 fontWeight: selected != null ? FontWeight.w600 : null,
@@ -730,7 +759,9 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
           appId == null ||
           projectId == null ||
           senderId == null) {
-        throw '필요한 값(api_key/mobilesdk_app_id/project_id/project_number)을 찾지 못했습니다.';
+        throw tr(
+          '필요한 값(api_key/mobilesdk_app_id/project_id/project_number)을 찾지 못했습니다.',
+        );
       }
       setState(() {
         _apiKey.text = apiKey;
@@ -741,12 +772,15 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
       if (mounted) {
         showAppToast(
           context,
-          'google-services.json에서 값을 불러왔습니다. 확인 후 저장을 누르세요.',
+          tr('google-services.json에서 값을 불러왔습니다. 확인 후 저장을 누르세요.'),
         );
       }
     } catch (e) {
       if (mounted) {
-        showAppToast(context, 'google-services.json을 읽지 못했습니다: $e');
+        showAppToast(
+          context,
+          tr('google-services.json을 읽지 못했습니다: {e}', {'e': e}),
+        );
       }
     }
   }
@@ -765,11 +799,11 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
       jsonDecode(content); // 최소한 JSON 형식인지만 여기서 미리 확인.
       setState(() => _serviceAccountJson.text = content);
       if (mounted) {
-        showAppToast(context, '서비스 계정 키를 불러왔습니다. 저장을 눌러야 반영됩니다.');
+        showAppToast(context, tr('서비스 계정 키를 불러왔습니다. 저장을 눌러야 반영됩니다.'));
       }
     } catch (e) {
       if (mounted) {
-        showAppToast(context, '파일을 읽지 못했습니다: $e');
+        showAppToast(context, tr('파일을 읽지 못했습니다: {e}', {'e': e}));
       }
     }
   }
@@ -793,11 +827,11 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
       _serviceAccountJson.clear();
       await _load();
       if (mounted) {
-        showAppToast(context, 'FCM 설정을 저장했습니다.');
+        showAppToast(context, tr('FCM 설정을 저장했습니다.'));
       }
     } catch (e) {
       if (mounted) {
-        showAppToast(context, '실패: $e');
+        showAppToast(context, tr('실패: {e}', {'e': e}));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -824,7 +858,7 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
           child: OutlinedButton.icon(
             onPressed: _pickGoogleServicesJson,
             icon: const Icon(Icons.folder_open, size: 18),
-            label: const Text('google-services.json 열기'),
+            label: Text(tr('google-services.json 열기')),
           ),
         ),
         const SizedBox(height: 12),
@@ -833,8 +867,10 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
         // 고칠 일이 없다 — 서비스 계정 키와 같은 "열기 버튼 + 설정 여부" 방식으로 맞춘다.
         Text(
           _projectId.text.isEmpty
-              ? 'Google 서비스 설정: 설정 안 됨'
-              : 'Google 서비스 설정: 설정됨 (프로젝트 ID: ${_projectId.text})',
+              ? tr('Google 서비스 설정: 설정 안 됨')
+              : tr('Google 서비스 설정: 설정됨 (프로젝트 ID: {_projectId.text})', {
+                  '_projectId.text': _projectId.text,
+                }),
           style: TextStyle(
             color: _projectId.text.isEmpty
                 ? Theme.of(context).colorScheme.error
@@ -848,7 +884,7 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
           child: OutlinedButton.icon(
             onPressed: _pickServiceAccountJson,
             icon: const Icon(Icons.folder_open, size: 18),
-            label: const Text('서비스 계정 JSON 열기'),
+            label: Text(tr('서비스 계정 JSON 열기')),
           ),
         ),
         const SizedBox(height: 12),
@@ -858,10 +894,12 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
         // 눌러야 서버로 전송된다.
         Text(
           _serviceAccountJson.text.isNotEmpty
-              ? '새 서비스 계정 키를 선택했습니다 — 저장을 눌러야 적용됩니다.'
+              ? tr('새 서비스 계정 키를 선택했습니다 — 저장을 눌러야 적용됩니다.')
               : settings.serviceAccountConfigured
-              ? '서비스 계정: 설정됨 (${settings.serviceAccountEmail ?? '확인 불가'})'
-              : '서비스 계정: 설정 안 됨 — 설정 전까지 푸시가 발송되지 않습니다.',
+              ? tr('서비스 계정: 설정됨 ({p0})', {
+                  'p0': settings.serviceAccountEmail ?? tr('확인 불가'),
+                })
+              : tr('서비스 계정: 설정 안 됨 — 설정 전까지 푸시가 발송되지 않습니다.'),
           style: TextStyle(
             color:
                 _serviceAccountJson.text.isEmpty &&
@@ -873,7 +911,7 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
         ),
         const SizedBox(height: 4),
         Text(
-          '서비스 계정 설정이 완료되면 다운받은 json 파일은 반드시 삭제해야 합니다.',
+          tr('서비스 계정 설정이 완료되면 다운받은 json 파일은 반드시 삭제해야 합니다.'),
           style: Theme.of(context).textTheme.bodySmall?.copyWith(color: hint),
         ),
         const SizedBox(height: 12),
@@ -887,7 +925,7 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('저장'),
+                : Text(tr('저장')),
           ),
         ),
       ],
@@ -1006,16 +1044,16 @@ class _AddPositionDialogState extends State<_AddPositionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('직책 추가'),
+      title: Text(tr('직책 추가')),
       content: SizedBox(
         width: 320,
         child: TextField(
           controller: _label,
           autofocus: true,
           maxLength: 30,
-          decoration: const InputDecoration(
-            labelText: '직책 이름',
-            hintText: '예: 팀장',
+          decoration: InputDecoration(
+            labelText: tr('직책 이름'),
+            hintText: tr('예: 팀장'),
             border: OutlineInputBorder(),
           ),
           onSubmitted: (_) => _submit(),
@@ -1024,13 +1062,13 @@ class _AddPositionDialogState extends State<_AddPositionDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         ValueListenableBuilder<TextEditingValue>(
           valueListenable: _label,
           builder: (context, value, _) => FilledButton(
             onPressed: value.text.trim().isEmpty ? null : _submit,
-            child: const Text('추가'),
+            child: Text(tr('추가')),
           ),
         ),
       ],
@@ -1138,7 +1176,7 @@ class _UsersTabState extends State<_UsersTab> {
     try {
       await action();
     } catch (e) {
-      _toast('실패: $e');
+      _toast(tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -1146,55 +1184,67 @@ class _UsersTabState extends State<_UsersTab> {
     final suspend = !user.suspended;
     if (suspend) {
       final ok = await _confirm(
-        title: '계정 정지',
-        message:
-            '${user.name} 님의 계정을 정지할까요?\n'
-            '로그인과 실시간 연결이 즉시 끊기고, 다시 로그인할 수 없게 됩니다. 나중에 해제할 수 있습니다.',
-        confirmLabel: '정지',
+        title: tr('계정 정지'),
+        message: tr(
+          '{user.name} 님의 계정을 정지할까요?\n로그인과 실시간 연결이 즉시 끊기고, 다시 로그인할 수 없게 됩니다. 나중에 해제할 수 있습니다.',
+          {'user.name': user.name},
+        ),
+        confirmLabel: tr('정지'),
       );
       if (ok != true) return;
     }
     await _run(() async {
       _replace(await widget.session.api!.setUserSuspended(user.id, suspend));
       _toast(
-        suspend ? '${user.name} 님을 정지했습니다.' : '${user.name} 님의 정지를 해제했습니다.',
+        suspend
+            ? tr('{user.name} 님을 정지했습니다.', {'user.name': user.name})
+            : tr('{user.name} 님의 정지를 해제했습니다.', {'user.name': user.name}),
       );
     });
   }
 
   Future<void> _logoutAll(AdminUser user) async {
     final ok = await _confirm(
-      title: '강제 로그아웃',
-      message: '${user.name} 님의 모든 기기에서 로그아웃시킬까요? 다시 로그인하면 정상적으로 사용할 수 있습니다.',
-      confirmLabel: '로그아웃',
+      title: tr('강제 로그아웃'),
+      message: tr(
+        '{user.name} 님의 모든 기기에서 로그아웃시킬까요? 다시 로그인하면 정상적으로 사용할 수 있습니다.',
+        {'user.name': user.name},
+      ),
+      confirmLabel: tr('로그아웃'),
     );
     if (ok != true) return;
     await _run(() async {
       _replace(await widget.session.api!.logoutUserEverywhere(user.id));
-      _toast('${user.name} 님을 모든 기기에서 로그아웃시켰습니다.');
+      _toast(tr('{user.name} 님을 모든 기기에서 로그아웃시켰습니다.', {'user.name': user.name}));
     });
   }
 
   /// 2단계 인증 해제 — 휴대폰을 잃어버려 복구 코드도 없는 사람(다음 로그인부터 비밀번호만, 정책상 꼭 써야 하면 다시 켜게 된다).
   Future<void> _resetOtp(AdminUser user) async {
     final ok = await _confirm(
-      title: '2단계 인증 해제',
-      message:
-          '${user.name} 님의 2단계 인증을 해제할까요? 휴대폰을 잃어버렸을 때만 하세요. 다음 로그인부터는 비밀번호만으로 들어오고, '
-          '관리자가 2단계 인증을 꼭 쓰게 정했으면 그때 다시 켜게 됩니다.',
-      confirmLabel: '해제',
+      title: tr('2단계 인증 해제'),
+      message: tr(
+        '{user.name} 님의 2단계 인증을 해제할까요? 휴대폰을 잃어버렸을 때만 하세요. 다음 로그인부터는 비밀번호만으로 들어오고, 관리자가 2단계 인증을 꼭 쓰게 정했으면 그때 다시 켜게 됩니다.',
+        {'user.name': user.name},
+      ),
+      confirmLabel: tr('해제'),
     );
     if (ok != true) return;
     await _run(() async {
       _replace(await widget.session.api!.resetUserOtp(user.id));
-      _toast('${user.name} 님의 2단계 인증을 해제했습니다.');
+      _toast(tr('{user.name} 님의 2단계 인증을 해제했습니다.', {'user.name': user.name}));
     });
   }
 
   Future<void> _changeRole(AdminUser user, String role) async {
     await _run(() async {
       _replace(await widget.session.api!.setUserRole(user.id, role));
-      _toast('${user.name} 님을 ${accountRoleLabel(role)}(으)로 바꿨습니다.');
+      _toast(
+        tr('{user.name} 님을 {p0}(으)로 바꿨습니다.', {
+          'user.name': user.name,
+          'p0': accountRoleLabel(role),
+        }),
+      );
     });
   }
 
@@ -1223,8 +1273,11 @@ class _UsersTabState extends State<_UsersTab> {
       );
       _toast(
         result.position.isEmpty
-            ? '${user.name} 님의 직책을 지웠습니다.'
-            : '${user.name} 님의 직책을 "${result.position}"(으)로 바꿨습니다.',
+            ? tr('{user.name} 님의 직책을 지웠습니다.', {'user.name': user.name})
+            : tr('{user.name} 님의 직책을 "{result.position}"(으)로 바꿨습니다.', {
+                'user.name': user.name,
+                'result.position': result.position,
+              }),
       );
     });
   }
@@ -1232,19 +1285,21 @@ class _UsersTabState extends State<_UsersTab> {
   Future<void> _toggleServerAdmin(AdminUser user) async {
     final grant = !user.isServerAdmin;
     final ok = await _confirm(
-      title: grant ? '서버 운영자로 지정' : '서버 운영자 해제',
+      title: grant ? tr('서버 운영자로 지정') : tr('서버 운영자 해제'),
       message: grant
-          ? '${user.name} 님에게 서버 관리 권한을 줄까요? 회원·팀·감사 로그를 모두 볼 수 있게 됩니다.'
-          : '${user.name} 님의 서버 관리 권한을 해제할까요?',
-      confirmLabel: grant ? '지정' : '해제',
+          ? tr('{user.name} 님에게 서버 관리 권한을 줄까요? 회원·팀·감사 로그를 모두 볼 수 있게 됩니다.', {
+              'user.name': user.name,
+            })
+          : tr('{user.name} 님의 서버 관리 권한을 해제할까요?', {'user.name': user.name}),
+      confirmLabel: grant ? tr('지정') : tr('해제'),
     );
     if (ok != true) return;
     await _run(() async {
       _replace(await widget.session.api!.setUserServerAdmin(user.id, grant));
       _toast(
         grant
-            ? '${user.name} 님을 서버 운영자로 지정했습니다.'
-            : '${user.name} 님의 서버 운영자 권한을 해제했습니다.',
+            ? tr('{user.name} 님을 서버 운영자로 지정했습니다.', {'user.name': user.name})
+            : tr('{user.name} 님의 서버 운영자 권한을 해제했습니다.', {'user.name': user.name}),
       );
     });
   }
@@ -1262,7 +1317,7 @@ class _UsersTabState extends State<_UsersTab> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -1326,11 +1381,11 @@ class _UsersTabState extends State<_UsersTab> {
       children: [
         TextField(
           decoration: InputDecoration(
-            hintText: '이름·아이디 검색',
+            hintText: tr('이름·아이디 검색'),
             isDense: true,
             prefixIcon: const Icon(Icons.search, size: 18),
             border: const OutlineInputBorder(),
-            helperText: '총 ${users.length}명',
+            helperText: tr('총 {users.length}명', {'users.length': users.length}),
           ),
           onChanged: (v) => setState(() => _filter = v),
         ),
@@ -1402,7 +1457,7 @@ class _UsersTabState extends State<_UsersTab> {
                                             left: 6,
                                           ),
                                           child: Text(
-                                            '(나)',
+                                            tr('(나)'),
                                             style: TextStyle(
                                               fontSize: 12,
                                               color: Theme.of(
@@ -1441,7 +1496,7 @@ class _UsersTabState extends State<_UsersTab> {
                         flex: 9,
                         child: user.teams.isEmpty
                             ? Text(
-                                '없음',
+                                tr('없음'),
                                 style: TextStyle(
                                   color: Theme.of(context).hintColor,
                                   fontStyle: FontStyle.italic,
@@ -1462,7 +1517,7 @@ class _UsersTabState extends State<_UsersTab> {
                         child: Text(
                           user.position?.isNotEmpty == true
                               ? user.position!
-                              : '미등록',
+                              : tr('미등록'),
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: Theme.of(context).hintColor,
@@ -1476,7 +1531,7 @@ class _UsersTabState extends State<_UsersTab> {
                       SizedBox(
                         width: sortMenuButtonWidth,
                         child: PopupMenuButton<void>(
-                          tooltip: '회원 관리',
+                          tooltip: tr('회원 관리'),
                           position: PopupMenuPosition.under,
                           itemBuilder: (context) => [
                             // 계정 등급은 서버 운영자만 정한다 — 여기가 유일한 변경 지점이다.
@@ -1503,21 +1558,21 @@ class _UsersTabState extends State<_UsersTab> {
                             const PopupMenuDivider(),
                             PopupMenuItem<void>(
                               onTap: () => _editOrg(user),
-                              child: const Row(
+                              child: Row(
                                 children: [
                                   Icon(Icons.badge_outlined, size: 20),
                                   SizedBox(width: 8),
-                                  Text('직책 수정'),
+                                  Text(tr('직책 수정')),
                                 ],
                               ),
                             ),
                             PopupMenuItem<void>(
                               onTap: () => _logoutAll(user),
-                              child: const Row(
+                              child: Row(
                                 children: [
                                   Icon(Icons.logout, size: 20),
                                   SizedBox(width: 8),
-                                  Text('모든 기기에서 로그아웃'),
+                                  Text(tr('모든 기기에서 로그아웃')),
                                 ],
                               ),
                             ),
@@ -1525,14 +1580,14 @@ class _UsersTabState extends State<_UsersTab> {
                               PopupMenuItem<void>(
                                 key: const ValueKey('admin-user-otp-reset'),
                                 onTap: () => _resetOtp(user),
-                                child: const Row(
+                                child: Row(
                                   children: [
                                     Icon(
                                       Icons.phonelink_lock_outlined,
                                       size: 20,
                                     ),
                                     SizedBox(width: 8),
-                                    Text('2단계 인증 해제'),
+                                    Text(tr('2단계 인증 해제')),
                                   ],
                                 ),
                               ),
@@ -1544,8 +1599,8 @@ class _UsersTabState extends State<_UsersTab> {
                                   const SizedBox(width: 8),
                                   Text(
                                     user.isServerAdmin
-                                        ? '서버 운영자 해제'
-                                        : '서버 운영자로 지정',
+                                        ? tr('서버 운영자 해제')
+                                        : tr('서버 운영자로 지정'),
                                   ),
                                 ],
                               ),
@@ -1567,7 +1622,9 @@ class _UsersTabState extends State<_UsersTab> {
                                     ),
                                     const SizedBox(width: 8),
                                     Text(
-                                      user.suspended ? '정지 해제' : '계정 정지',
+                                      user.suspended
+                                          ? tr('정지 해제')
+                                          : tr('계정 정지'),
                                       style: TextStyle(
                                         color: user.suspended
                                             ? null
@@ -1618,13 +1675,13 @@ class _UsersTableHead extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          Expanded(flex: 9, child: Text('회원', style: style)),
+          Expanded(flex: 9, child: Text(tr('회원'), style: style)),
           const SizedBox(width: 20),
-          Expanded(flex: 5, child: Text('등급', style: style)),
+          Expanded(flex: 5, child: Text(tr('등급'), style: style)),
           const SizedBox(width: 20),
-          Expanded(flex: 9, child: Text('팀', style: style)),
+          Expanded(flex: 9, child: Text(tr('팀'), style: style)),
           const SizedBox(width: 20),
-          Expanded(flex: 5, child: Text('직책', style: style)),
+          Expanded(flex: 5, child: Text(tr('직책'), style: style)),
           SortMenuButton<MemberSortField>(
             fields: const [
               MemberSortField.name,
@@ -1682,7 +1739,7 @@ class _DeletedUserRow extends StatelessWidget {
           Transform.translate(
             offset: const Offset(-10, 0),
             child: RoleBadge(
-              label: '탈퇴',
+              label: tr('탈퇴'),
               bg: Theme.of(context).colorScheme.surfaceContainerHighest,
               fg: hint,
             ),
@@ -1704,13 +1761,13 @@ List<Widget> _statusBadges(BuildContext context, AdminUser user) {
     ),
     if (user.isServerAdmin)
       RoleBadge(
-        label: '서버 운영자',
+        label: tr('서버 운영자'),
         bg: roleBadgeColors(context, 'op').bg,
         fg: roleBadgeColors(context, 'op').fg,
       ),
     if (user.suspended)
       RoleBadge(
-        label: '정지됨',
+        label: tr('정지됨'),
         bg: roleBadgeColors(context, 'suspended').bg,
         fg: roleBadgeColors(context, 'suspended').fg,
       ),
@@ -1795,7 +1852,7 @@ class _TeamsTabState extends State<_TeamsTab> {
     if (_error != null) return Center(child: Text(_error!));
     final teams = _teams;
     if (teams == null) return const Center(child: CircularProgressIndicator());
-    if (teams.isEmpty) return const Center(child: Text('팀이 없습니다.'));
+    if (teams.isEmpty) return Center(child: Text(tr('팀이 없습니다.')));
 
     return MutedScrollbar(
       controller: _scrollController,
@@ -1820,9 +1877,15 @@ class _TeamsTabState extends State<_TeamsTab> {
             ),
             title: Text(team.name),
             subtitle: Text(
-              '${team.memberCount}명'
-              '${team.createdBy == null ? '' : ' · 만든 사람 ${team.createdBy}'}'
-              ' · ${formatDateTime(team.createdAt)}',
+              tr('{team.memberCount}명{p0} · {p1}', {
+                'team.memberCount': team.memberCount,
+                'p0': team.createdBy == null
+                    ? ''
+                    : tr(' · 만든 사람 {team.createdBy}', {
+                        'team.createdBy': team.createdBy,
+                      }),
+                'p1': formatDateTime(team.createdAt),
+              }),
             ),
           );
         },
@@ -1892,11 +1955,11 @@ class _AuditTabState extends State<_AuditTab> {
       children: [
         Row(
           children: [
-            const Text('행위'),
+            Text(tr('행위')),
             const SizedBox(width: 12),
             DropdownButton<String?>(
               value: _action,
-              hint: const Text('전체'),
+              hint: Text(tr('전체')),
               onChanged: (v) {
                 setState(() {
                   _action = v;
@@ -1906,7 +1969,7 @@ class _AuditTabState extends State<_AuditTab> {
                 _load();
               },
               items: [
-                const DropdownMenuItem<String?>(child: Text('전체')),
+                DropdownMenuItem<String?>(child: Text(tr('전체'))),
                 for (final a in auditActionFilters)
                   DropdownMenuItem<String?>(
                     value: a,
@@ -1916,7 +1979,7 @@ class _AuditTabState extends State<_AuditTab> {
             ),
             const Spacer(),
             Text(
-              '$_total건',
+              tr('{_total}건', {'_total': _total}),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).hintColor,
               ),
@@ -1926,7 +1989,7 @@ class _AuditTabState extends State<_AuditTab> {
         const Divider(height: 1),
         Expanded(
           child: logs.isEmpty
-              ? const Center(child: Text('기록이 없습니다.'))
+              ? Center(child: Text(tr('기록이 없습니다.')))
               : MutedScrollbar(
                   controller: _scrollController,
                   child: ListView.separated(
@@ -2046,10 +2109,9 @@ class _FcmTab extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '푸시 알림(FCM)은 이 서버의 Firebase 프로젝트 값을 입력해야 동작합니다. '
-            'Firebase 콘솔에서 프로젝트를 만들고 안드로이드 앱(패키지명 com.teamtalk.messenger)을 '
-            '등록하면 "프로젝트 설정 > 일반"에서 google-services.json 파일을 다운로드하여 열기 버튼을 눌러 등록하면 아래 4개 값을 확인할 수 있습니다. 서비스 계정 키(발송용)는 '
-            '"프로젝트 설정 > 서비스 계정 > 새 비공개 키 생성"으로 받은 JSON 파일도 열기 버튼으로 등록합니다.',
+            tr(
+              '푸시 알림(FCM)은 이 서버의 Firebase 프로젝트 값을 입력해야 동작합니다. Firebase 콘솔에서 프로젝트를 만들고 안드로이드 앱(패키지명 com.teamtalk.messenger)을 등록하면 "프로젝트 설정 > 일반"에서 google-services.json 파일을 다운로드하여 열기 버튼을 눌러 등록하면 아래 4개 값을 확인할 수 있습니다. 서비스 계정 키(발송용)는 "프로젝트 설정 > 서비스 계정 > 새 비공개 키 생성"으로 받은 JSON 파일도 열기 버튼으로 등록합니다.',
+            ),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),

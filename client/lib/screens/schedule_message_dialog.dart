@@ -36,6 +36,7 @@ import '../widgets/xfile_image.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'post_editor_dialog.dart' show fileIconFor;
 import '../widgets/retrying_network_image.dart';
+import '../l10n/tr.dart';
 
 /// 예약할 수 있는 대화방인지 — 지금 팀의 방이고, 비밀 대화가 아니고, 내가 글을 쓸 수 있어야 한다(읽기
 /// 전용·보관된 토픽은 토픽 관리자만). 서버 /scheduled-messages와 같은 규칙 — 대화방 고르기와 입력칸의
@@ -98,7 +99,9 @@ Future<ScheduledMessage?> showScheduleMessageEditor(
     final when = formatScheduleTime(saved.sendAt);
     showAppToast(
       context,
-      editing == null ? '메시지를 예약했습니다 · $when' : '예약 메시지를 수정했습니다 · $when',
+      editing == null
+          ? tr('메시지를 예약했습니다 · {when}', {'when': when})
+          : tr('예약 메시지를 수정했습니다 · {when}', {'when': when}),
     );
   }
   return saved;
@@ -207,21 +210,27 @@ DateTime _valueOnDay(
 /// "3시간 15분 뒤" — 발송 시간 아래 안내(분 단위는 올림).
 String _untilText(DateTime sendAt, DateTime now) {
   final total = math.max(1, (sendAt.difference(now).inSeconds / 60).ceil());
-  if (total < 60) return '$total분 뒤';
+  if (total < 60) return tr('{total}분 뒤', {'total': total});
   final days = total ~/ (24 * 60);
   final hours = total % (24 * 60) ~/ 60;
   final minutes = total % 60;
-  if (days > 0) return hours > 0 ? '$days일 $hours시간 뒤' : '$days일 뒤';
-  return minutes > 0 ? '$hours시간 $minutes분 뒤' : '$hours시간 뒤';
+  if (days > 0) {
+    return hours > 0
+        ? tr('{days}일 {hours}시간 뒤', {'days': days, 'hours': hours})
+        : tr('{days}일 뒤', {'days': days});
+  }
+  return minutes > 0
+      ? tr('{hours}시간 {minutes}분 뒤', {'hours': hours, 'minutes': minutes})
+      : tr('{hours}시간 뒤', {'hours': hours});
 }
 
 /// 빠른 선택 — 이름과 그 시각(지금 기준).
 List<(String, DateTime)> _quickTimes(DateTime now) => [
-  ('1시간 뒤', ceilToScheduleSlot(now.add(const Duration(hours: 1)))),
-  ('내일 오전 9:00', DateTime(now.year, now.month, now.day + 1, 9)),
+  (tr('1시간 뒤'), ceilToScheduleSlot(now.add(const Duration(hours: 1)))),
+  (tr('내일 오전 9:00'), DateTime(now.year, now.month, now.day + 1, 9)),
   // 다가오는 월요일(오늘이 월요일이면 다음 주) — 일요일이면 내일이다.
   (
-    '다음 주 월요일 오전 9:00',
+    tr('다음 주 월요일 오전 9:00'),
     DateTime(now.year, now.month, now.day + (8 - now.weekday), 9),
   ),
 ];
@@ -479,16 +488,16 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
   String? _roomProblem(Room room) {
     final session = widget.session;
     if (session.roomById(room.id) == null) {
-      return '이 대화방에 더 이상 참여하고 있지 않습니다. 다른 대화방을 선택하세요.';
+      return tr('이 대화방에 더 이상 참여하고 있지 않습니다. 다른 대화방을 선택하세요.');
     }
-    if (room.isSecret) return '비밀 대화에는 예약할 수 없습니다.';
+    if (room.isSecret) return tr('비밀 대화에는 예약할 수 없습니다.');
     if (room.teamId != session.currentTeam?.id) {
-      return '지금 팀의 대화방만 선택할 수 있습니다.';
+      return tr('지금 팀의 대화방만 선택할 수 있습니다.');
     }
     if (!room.canWrite(session)) {
       return room.isArchived
-          ? '보관된 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.'
-          : '읽기 전용 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.';
+          ? tr('보관된 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.')
+          : tr('읽기 전용 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.');
     }
     return null;
   }
@@ -568,7 +577,13 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
         } catch (e) {
           if (!mounted || next.removed || token != next.token) continue;
           setState(() => next.error = '$e');
-          showAppToast(context, "'${next.name}' 파일을 올리지 못했습니다: $e");
+          showAppToast(
+            context,
+            tr('\'{next.name}\' 파일을 올리지 못했습니다: {e}', {
+              'next.name': next.name,
+              'e': e,
+            }),
+          );
         }
       }
     } finally {
@@ -620,7 +635,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
   /// 서버와 같은 규칙으로 먼저 걸러 칸 아래에 바로 알린다. 첫 번째로 걸린 칸으로 커서를 옮긴다.
   bool _validate() {
     final room = _room;
-    final roomError = room == null ? '대화방을 선택하세요.' : _roomProblem(room);
+    final roomError = room == null ? tr('대화방을 선택하세요.') : _roomProblem(room);
     final titleError = room != null && room.isBoard
         ? validateScheduledTitle(_title.text, isBoard: true)
         : null;
@@ -669,7 +684,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
     if (_submitting || _atLimit) return;
     if (!_validate()) return;
     if (_hasFailedUpload) {
-      showAppToast(context, '올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.');
+      showAppToast(context, tr('올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.'));
       return;
     }
     setState(() => _submitting = true);
@@ -680,7 +695,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       }
       if (!mounted) return;
       if (_hasFailedUpload) {
-        showAppToast(context, '올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.');
+        showAppToast(context, tr('올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.'));
         return;
       }
       final room = _room!;
@@ -721,7 +736,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       if (mounted) {
         showAppToast(
           context,
-          e is ApiException ? e.message : '예약하지 못했습니다: $e',
+          e is ApiException ? trServer(e.message) : tr('예약하지 못했습니다: {e}', {'e': e}),
           duration: const Duration(seconds: 3),
         );
       }
@@ -744,21 +759,20 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       final discard = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: Text(editing ? '수정 취소' : '작성 취소'),
+          title: Text(editing ? tr('수정 취소') : tr('작성 취소')),
           content: Text(
-            editing ? '고친 내용을 저장하지 않고 닫을까요?' : '작성 중인 예약 메시지를 버리고 닫을까요?',
+            editing
+                ? tr('고친 내용을 저장하지 않고 닫을까요?')
+                : tr('작성 중인 예약 메시지를 버리고 닫을까요?'),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('계속 쓰기'),
+              child: Text(tr('계속 쓰기')),
             ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text(
-                '닫기',
-                style: TextStyle(color: Colors.redAccent),
-              ),
+              child: Text(tr('닫기'), style: TextStyle(color: Colors.redAccent)),
             ),
           ],
         ),
@@ -806,7 +820,8 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
     );
   }
 
-  String get _screenTitle => _editing == null ? '메시지 예약 생성' : '예약 메시지 수정';
+  String get _screenTitle =>
+      _editing == null ? tr('메시지 예약 생성') : tr('예약 메시지 수정');
 
   Widget _buildDialog(BuildContext context) {
     return FloatingDialog(
@@ -855,7 +870,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.close),
-          tooltip: '취소',
+          tooltip: tr('취소'),
           onPressed: _requestClose,
         ),
         title: Text(_screenTitle),
@@ -888,9 +903,12 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
     final pending = _items.where((i) => i.pending).length;
     final String busyLabel;
     if (pending > 0) {
-      busyLabel = '업로드 중 ${_items.length - pending}/${_items.length}';
+      busyLabel = tr('업로드 중 {p0}/{_items.length}', {
+        'p0': _items.length - pending,
+        '_items.length': _items.length,
+      });
     } else {
-      busyLabel = editing ? '저장 중' : '예약 중';
+      busyLabel = editing ? tr('저장 중') : tr('예약 중');
     }
     return Row(
       children: [
@@ -898,7 +916,9 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
         Expanded(
           child: AppPlatform.isWindows && widget.asDialog
               ? Text(
-                  'Ctrl + Enter 로 ${editing ? '저장' : '예약'} · Esc 로 닫기',
+                  tr('Ctrl + Enter 로 {p0} · Esc 로 닫기', {
+                    'p0': editing ? tr('저장') : tr('예약'),
+                  }),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 12, color: hint),
@@ -907,7 +927,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
         ),
         TextButton(
           onPressed: _submitting ? null : _requestClose,
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         const SizedBox(width: 8),
         FilledButton(
@@ -926,7 +946,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
                     Text(busyLabel),
                   ],
                 )
-              : Text(editing ? '저장' : '예약'),
+              : Text(editing ? tr('저장') : tr('예약')),
         ),
       ],
     );
@@ -952,15 +972,16 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_atLimit) ...[
-          const _Notice(
+          _Notice(
             key: ValueKey('schedule-limit'),
-            text:
-                '예약 메시지는 최대 $scheduledMessageMaxCount건까지 만들 수 있습니다. '
-                '목록에서 필요 없는 예약을 취소한 뒤 다시 만들어 주세요.',
+            text: tr(
+              '예약 메시지는 최대 {scheduledMessageMaxCount}건까지 만들 수 있습니다. 목록에서 필요 없는 예약을 취소한 뒤 다시 만들어 주세요.',
+              {'scheduledMessageMaxCount': scheduledMessageMaxCount},
+            ),
           ),
           const SizedBox(height: 14),
         ],
-        const _Label('대화방'),
+        _Label(tr('대화방')),
         RoomPickerField(
           key: const ValueKey('schedule-room'),
           session: session,
@@ -969,11 +990,15 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
           onChanged: _onRoomChanged,
         ),
         if (lostRoomName != null && _roomError == null)
-          _FieldHint("원래 대화방 '$lostRoomName'에는 보낼 수 없습니다. 다른 대화방을 선택하세요."),
+          _FieldHint(
+            tr('원래 대화방 \'{lostRoomName}\'에는 보낼 수 없습니다. 다른 대화방을 선택하세요.', {
+              'lostRoomName': lostRoomName,
+            }),
+          ),
         if (_roomError != null) _FieldError(_roomError!),
         const SizedBox(height: 16),
         if (_isBoard) ...[
-          const _Label('제목', note: '보드 뷰 토픽에는 게시글로 올라갑니다'),
+          _Label(tr('제목'), note: tr('보드 뷰 토픽에는 게시글로 올라갑니다')),
           TextField(
             key: const ValueKey('schedule-title'),
             controller: _title,
@@ -983,7 +1008,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
             textInputAction: TextInputAction.next,
             onSubmitted: (_) => _messageFocus.requestFocus(),
             decoration: InputDecoration(
-              hintText: '게시글 제목을 입력하세요',
+              hintText: tr('게시글 제목을 입력하세요'),
               border: const OutlineInputBorder(),
               isDense: true,
               errorText: _titleError,
@@ -992,7 +1017,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
           const SizedBox(height: 6),
         ],
         _Label(
-          '메시지',
+          tr('메시지'),
           trailing: SizedBox(
             height: 28,
             child: Theme(
@@ -1023,15 +1048,20 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
         const SizedBox(height: 14),
         _buildAttachments(context),
         const SizedBox(height: 18),
-        const _Label('발송 시간'),
+        _Label(tr('발송 시간')),
         _buildTimePicker(context),
         Padding(
           padding: const EdgeInsets.only(top: 8),
           child: timeProblem != null
               ? _FieldError(timeProblem, padded: false)
               : Text(
-                  '${_untilText(_sendAt, now)}에 보냅니다 · '
-                  '15분 단위로 최대 $scheduledMaxDaysAhead일 뒤까지 예약할 수 있어요.',
+                  tr(
+                    '{p0}에 보냅니다 · 15분 단위로 최대 {scheduledMaxDaysAhead}일 뒤까지 예약할 수 있어요.',
+                    {
+                      'p0': _untilText(_sendAt, now),
+                      'scheduledMaxDaysAhead': scheduledMaxDaysAhead,
+                    },
+                  ),
                   key: const ValueKey('schedule-time-hint'),
                   style: TextStyle(fontSize: 12, color: hint),
                 ),
@@ -1078,7 +1108,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
             keyboardType: TextInputType.multiline,
             textAlignVertical: TextAlignVertical.top,
             decoration: InputDecoration(
-              hintText: _isBoard ? '게시글 내용을 입력하세요' : '보낼 메시지를 입력하세요',
+              hintText: _isBoard ? tr('게시글 내용을 입력하세요') : tr('보낼 메시지를 입력하세요'),
               isDense: true,
               contentPadding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
               border: _formatOpen
@@ -1149,8 +1179,8 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       children: [
         Row(
           children: [
-            const Text(
-              '파일 첨부',
+            Text(
+              tr('파일 첨부'),
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
             ),
             const SizedBox(width: 6),
@@ -1168,7 +1198,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
               key: const ValueKey('schedule-attach'),
               onPressed: _submitting || full ? null : _pickFiles,
               icon: const Icon(Icons.attach_file, size: 18),
-              label: const Text('파일 첨부'),
+              label: Text(tr('파일 첨부')),
               style: OutlinedButton.styleFrom(
                 visualDensity: VisualDensity.compact,
               ),
@@ -1180,8 +1210,14 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
             padding: const EdgeInsets.only(top: 4),
             child: Text(
               AppPlatform.isWindows
-                  ? '파일을 이 창에 끌어다 놓거나 붙여넣어도 첨부됩니다. 고르면 바로 올라가요.'
-                  : '파일은 $scheduledAttachmentMaxCount개까지 첨부할 수 있어요. 고르면 바로 올라가요.',
+                  ? tr('파일을 이 창에 끌어다 놓거나 붙여넣어도 첨부됩니다. 고르면 바로 올라가요.')
+                  : tr(
+                      '파일은 {scheduledAttachmentMaxCount}개까지 첨부할 수 있어요. 고르면 바로 올라가요.',
+                      {
+                        'scheduledAttachmentMaxCount':
+                            scheduledAttachmentMaxCount,
+                      },
+                    ),
               style: TextStyle(fontSize: 12, color: hint),
             ),
           )
@@ -1559,7 +1595,15 @@ class _DateFieldState extends State<_DateField> with WidgetsBindingObserver {
 
 const _calendarWidth = 296.0;
 const _calendarHeight = 330.0;
-const _weekdayHeaders = ['일', '월', '화', '수', '목', '금', '토'];
+final _weekdayHeaders = [
+  tr('일'),
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+];
 
 /// 발송 날짜 달력 — [first]~[last] 밖의 날은 흐리게 두고 누를 수 없다. 오늘은 굵게, 고른 날은 동그라미.
 class _ScheduleCalendar extends StatefulWidget {
@@ -1618,7 +1662,7 @@ class _ScheduleCalendarState extends State<_ScheduleCalendar> {
               children: [
                 arrow(
                   Icons.chevron_left,
-                  '이전 달',
+                  tr('이전 달'),
                   _canPrev
                       ? () => setState(
                           () =>
@@ -1628,7 +1672,10 @@ class _ScheduleCalendarState extends State<_ScheduleCalendar> {
                 ),
                 Expanded(
                   child: Text(
-                    '${_month.year}년 ${_month.month}월',
+                    tr('{_month.year}년 {_month.month}월', {
+                      '_month.year': _month.year,
+                      '_month.month': _month.month,
+                    }),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontWeight: FontWeight.w600,
@@ -1638,7 +1685,7 @@ class _ScheduleCalendarState extends State<_ScheduleCalendar> {
                 ),
                 arrow(
                   Icons.chevron_right,
-                  '다음 달',
+                  tr('다음 달'),
                   _canNext
                       ? () => setState(
                           () =>
@@ -1905,13 +1952,13 @@ class _AttachmentTile extends StatelessWidget {
                 child: InkWell(
                   borderRadius: BorderRadius.circular(10),
                   onTap: onRetry,
-                  child: const Column(
+                  child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(Icons.refresh, color: Colors.white, size: 20),
                       SizedBox(height: 2),
                       Text(
-                        '다시 시도',
+                        tr('다시 시도'),
                         style: TextStyle(color: Colors.white, fontSize: 11),
                       ),
                     ],
@@ -1937,7 +1984,7 @@ class _AttachmentTile extends StatelessWidget {
                     Text(
                       uploading && progress != null
                           ? '${(progress * 100).round()}%'
-                          : '대기 중',
+                          : tr('대기 중'),
                       style: const TextStyle(color: Colors.white, fontSize: 9),
                     ),
                     const SizedBox(height: 2),
@@ -1965,7 +2012,7 @@ class _AttachmentTile extends StatelessWidget {
       status = InkWell(
         onTap: onRetry,
         child: Text(
-          '올리지 못함 · 다시 시도',
+          tr('올리지 못함 · 다시 시도'),
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
@@ -1991,7 +2038,7 @@ class _AttachmentTile extends StatelessWidget {
           Text(
             uploading && progress != null
                 ? '${(progress * 100).round()}%'
-                : '대기',
+                : tr('대기'),
             style: TextStyle(fontSize: 11, color: hint),
           ),
         ],
@@ -2053,7 +2100,7 @@ class _RemoveBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: '첨부 빼기',
+      message: tr('첨부 빼기'),
       child: GestureDetector(
         onTap: onTap,
         child: Container(
@@ -2389,7 +2436,7 @@ class _ScheduleTimeBox extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.only(left: 4),
                 child: Text(
-                  '시간',
+                  tr('시간'),
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,

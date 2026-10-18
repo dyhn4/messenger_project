@@ -1,6 +1,15 @@
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
-const _weekdayHeaders = ['일', '월', '화', '수', '목', '금', '토'];
+final _weekdayHeaders = [
+  tr('일'),
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+];
 
 /// 기간(시작일~종료일) 선택용 달력 — date_picker_popup.dart의 "선택 날짜로 이동" 달력과 같은
 /// 모양(월 이동 화살표, "오늘" 버튼, 일/토 빨강·파랑 표시, 검은 원 선택 표시)이지만, 팝업으로
@@ -122,7 +131,7 @@ class _DateRangeCalendarPanelState extends State<DateRangeCalendarPanel> {
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               onPressed: _goToday,
-              child: const Text('오늘', style: TextStyle(fontSize: 12)),
+              child: Text(tr('오늘'), style: TextStyle(fontSize: 12)),
             ),
           ],
         ),

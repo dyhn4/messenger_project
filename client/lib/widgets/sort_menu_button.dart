@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'compact_menu_anchor.dart';
+import '../l10n/tr.dart';
 
 /// 회원/멤버 목록 정렬 기준 — 팀 설정 "멤버" 탭, 조직도 "멤버" 탭, 관리자 콘솔 "회원" 탭이
 /// 공통으로 쓴다. 팀 설정·조직도의 "멤버" 탭은 팀 칼럼이 없어서 [SortMenuButton.fields]에
@@ -9,10 +10,10 @@ enum MemberSortField { name, role, team, position }
 
 extension MemberSortFieldLabel on MemberSortField {
   String get label => switch (this) {
-    MemberSortField.name => '이름',
-    MemberSortField.role => '등급',
-    MemberSortField.team => '팀',
-    MemberSortField.position => '직책',
+    MemberSortField.name => tr('이름'),
+    MemberSortField.role => tr('등급'),
+    MemberSortField.team => tr('팀'),
+    MemberSortField.position => tr('직책'),
   };
 }
 
@@ -56,13 +57,13 @@ class SortMenuButton<T> extends StatelessWidget {
           CompactMenuOption(
             key: ValueKey('sort-menu-$field'),
             value: field,
-            label: '${labelOf(field)} 순',
+            label: tr('{p0} 순', {'p0': labelOf(field)}),
           ),
       ],
       builder: (context, open, toggle) => Semantics(
         expanded: open,
         child: Tooltip(
-          message: '정렬',
+          message: tr('정렬'),
           child: InkWell(
             key: const ValueKey('sort-menu-button'),
             onTap: toggle,
@@ -87,7 +88,7 @@ class SortMenuButton<T> extends StatelessWidget {
                     const SizedBox(width: 2),
                     Flexible(
                       child: Text(
-                        '${labelOf(selectedField)} 순',
+                        tr('{p0} 순', {'p0': labelOf(selectedField)}),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(

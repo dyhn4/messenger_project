@@ -8,6 +8,7 @@ import '../../widgets/hover_toolbar.dart' show hoverMenuItem, hoverMenuStyle;
 import '../../widgets/rich_text_format.dart';
 import '../../widgets/my_avatar.dart';
 import '../../widgets/user_avatar.dart';
+import '../../l10n/tr.dart';
 
 /// 댓글 한 개(업무·노트 공통).
 class CommentEntry {
@@ -260,19 +261,19 @@ class _CommentsSectionState extends State<CommentsSection> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('댓글 삭제'),
+        title: Text(tr('댓글 삭제')),
         content: Text(
-          hasReplies ? '이 댓글을 삭제할까요? 달린 답글도 함께 삭제됩니다.' : '이 댓글을 삭제할까요?',
+          hasReplies ? tr('이 댓글을 삭제할까요? 달린 답글도 함께 삭제됩니다.') : tr('이 댓글을 삭제할까요?'),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       ),
@@ -324,7 +325,15 @@ class _CommentsSectionState extends State<CommentsSection> {
         border: Border(bottom: BorderSide(color: theme.dividerColor)),
       ),
       child: Row(
-        children: [tab('댓글 (${widget.comments.length})', 0), tab('기록', 1)],
+        children: [
+          tab(
+            tr('댓글 ({widget.comments.length})', {
+              'widget.comments.length': widget.comments.length,
+            }),
+            0,
+          ),
+          tab(tr('기록'), 1),
+        ],
       ),
     );
   }
@@ -360,7 +369,7 @@ class _CommentsSectionState extends State<CommentsSection> {
                       child: RichEditorBox(
                         controller: _newText,
                         focusNode: _newFocus,
-                        hintText: '댓글을 입력하세요...',
+                        hintText: tr('댓글을 입력하세요...'),
                         alwaysShowToolbar: false,
                         onSubmit: enabled ? _submitNew : null,
                       ),
@@ -373,7 +382,7 @@ class _CommentsSectionState extends State<CommentsSection> {
                   onPressed: !enabled || _newText.text.trim().isEmpty
                       ? null
                       : _submitNew,
-                  child: const Text('저장'),
+                  child: Text(tr('저장')),
                 ),
               ],
             ),
@@ -409,10 +418,10 @@ class _CommentsSectionState extends State<CommentsSection> {
             FilledButton(
               style: _saveStyle(theme),
               onPressed: controller.text.trim().isEmpty ? null : onSave,
-              child: const Text('저장'),
+              child: Text(tr('저장')),
             ),
             const SizedBox(width: 4),
-            TextButton(onPressed: onCancel, child: const Text('취소')),
+            TextButton(onPressed: onCancel, child: Text(tr('취소'))),
           ],
         ),
       ],
@@ -458,7 +467,7 @@ class _CommentsSectionState extends State<CommentsSection> {
                   const SizedBox(width: 6),
                   Text(
                     formatRelativeTime(c.createdAt) +
-                        (c.editedAt != null ? ' (수정됨)' : ''),
+                        (c.editedAt != null ? tr(' (수정됨)') : ''),
                     style: TextStyle(fontSize: 11, color: theme.hintColor),
                   ),
                 ],
@@ -471,7 +480,7 @@ class _CommentsSectionState extends State<CommentsSection> {
                     theme: theme,
                     controller: _editText,
                     focusNode: _editFocus,
-                    hint: '댓글을 입력하세요...',
+                    hint: tr('댓글을 입력하세요...'),
                     onSave: () => _submitEdit(c),
                     onCancel: () => setState(() => _editing = null),
                   ),
@@ -490,7 +499,7 @@ class _CommentsSectionState extends State<CommentsSection> {
                       _toolButton(
                         theme,
                         icon: Icons.reply,
-                        tooltip: '답글',
+                        tooltip: tr('답글'),
                         onPressed: () => _openReply(threadId),
                       ),
                       if (mine || canDelete)
@@ -500,13 +509,13 @@ class _CommentsSectionState extends State<CommentsSection> {
                             if (mine)
                               hoverMenuItem(
                                 icon: Icons.edit_outlined,
-                                label: '수정',
+                                label: tr('수정'),
                                 onPressed: () => _startEdit(c),
                               ),
                             if (canDelete)
                               hoverMenuItem(
                                 icon: Icons.delete_outline,
-                                label: '삭제',
+                                label: tr('삭제'),
                                 color: Colors.redAccent,
                                 onPressed: () =>
                                     _delete(c, hasReplies: hasReplies),
@@ -515,7 +524,7 @@ class _CommentsSectionState extends State<CommentsSection> {
                           builder: (context, controller, _) => _toolButton(
                             theme,
                             icon: Icons.more_horiz,
-                            tooltip: '더보기',
+                            tooltip: tr('더보기'),
                             onPressed: () => controller.isOpen
                                 ? controller.close()
                                 : controller.open(),
@@ -571,7 +580,7 @@ class _CommentsSectionState extends State<CommentsSection> {
                 theme: theme,
                 controller: _replyText,
                 focusNode: _replyFocus,
-                hint: '답글을 입력하세요...',
+                hint: tr('답글을 입력하세요...'),
                 onSave: () => _submitReply(c.id),
                 onCancel: () => setState(() => _replyTo = null),
               ),
@@ -613,7 +622,7 @@ class _CommentsSectionState extends State<CommentsSection> {
               ? Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Text(
-                    '댓글이 없습니다.',
+                    tr('댓글이 없습니다.'),
                     textAlign: TextAlign.center,
                     style: TextStyle(color: theme.hintColor, fontSize: 12),
                   ),
@@ -698,7 +707,7 @@ class _TaskHistoryViewState extends State<TaskHistoryView> {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 20),
         child: Text(
-          '기록이 없습니다.',
+          tr('기록이 없습니다.'),
           textAlign: TextAlign.center,
           style: TextStyle(color: theme.hintColor, fontSize: 12),
         ),
@@ -747,7 +756,9 @@ class _TaskHistoryViewState extends State<TaskHistoryView> {
           date: task.createdAt,
           actorId: task.creatorId ?? items.first.actorId,
           actorName: task.creatorName ?? items.first.actorName,
-          tooltip: '업무를 만들었습니다. · ${formatDateTime(task.createdAt)}',
+          tooltip: tr('업무를 만들었습니다. · {p0}', {
+            'p0': formatDateTime(task.createdAt),
+          }),
         ),
       );
     }

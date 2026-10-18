@@ -8,6 +8,7 @@ import 'album_api.dart';
 import 'album_media.dart';
 import 'api_client.dart' show ApiException, UploadCancelToken;
 import 'memory_file.dart';
+import '../l10n/tr.dart';
 
 /// 올리는 중인 파일 하나의 상태.
 enum AlbumUploadStatus { queued, uploading, done, failed }
@@ -708,7 +709,7 @@ class AlbumController extends ChangeNotifier {
           for (final u in chunk) {
             u.committing = false;
             u.status = AlbumUploadStatus.failed;
-            u.error = '앨범에 담지 못했습니다: $e';
+            u.error = tr('앨범에 담지 못했습니다: {e}', {'e': e});
           }
         }
         _notify();

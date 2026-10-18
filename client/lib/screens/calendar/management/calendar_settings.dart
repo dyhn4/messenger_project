@@ -10,11 +10,16 @@ import '../../invite_members_screen.dart' show MemberPicker, MemberPickerFrame;
 import '../calendar_common.dart';
 import 'calendar_create.dart' show kCalendarNameMax, validateCalendarName;
 import 'calendar_management_common.dart';
+import '../../../l10n/tr.dart';
 
 /// 멤버 권한 이름(서버 role 값 → 화면 문구).
-const calendarRoleLabels = {'admin': '관리자', 'write': '쓰기', 'read': '읽기'};
+final calendarRoleLabels = {
+  'admin': tr('관리자'),
+  'write': tr('쓰기'),
+  'read': tr('읽기'),
+};
 
-const _roleHelp = '관리자: 설정·멤버 관리, 모든 일정 수정  ·  쓰기: 일정 만들기  ·  읽기: 보기만';
+final _roleHelp = tr('관리자: 설정·멤버 관리, 모든 일정 수정  ·  쓰기: 일정 만들기  ·  읽기: 보기만');
 
 /// ⋯ 메뉴 "캘린더 설정" — 캘린더 관리자는 이름·공개 여부·멤버를 고치고, 그 밖의 멤버·구독자는 읽기 전용으로 보되
 /// 색(나에게만 적용되는 개인 설정)은 바꿀 수 있다. 소유자만 삭제할 수 있다.
@@ -26,7 +31,7 @@ Future<void> showCalendarSettings(
 ) {
   return showCalendarSheet<void>(
     context,
-    title: '캘린더 설정',
+    title: tr('캘린더 설정'),
     maxWidth: 560,
     child: CalendarSettingsView(
       session: session,
@@ -107,7 +112,9 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _membersError = calendarErrorText(e, '멤버를 불러오지 못했습니다.'));
+      setState(
+        () => _membersError = calendarErrorText(e, tr('멤버를 불러오지 못했습니다.')),
+      );
     }
   }
 
@@ -152,17 +159,20 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
         name: _name.text.trim(),
       );
       _name.text = updated.name;
-      if (mounted) _toast('캘린더 이름을 바꿨습니다.');
-    }, '이름을 바꾸지 못했습니다.');
+      if (mounted) _toast(tr('캘린더 이름을 바꿨습니다.'));
+    }, tr('이름을 바꾸지 못했습니다.'));
   }
 
   Future<void> _setPublic(bool value) => _run(() async {
     await widget.controller.updateCalendar(_cal.id, isPublic: value);
-  }, '공개 설정을 바꾸지 못했습니다.');
+  }, tr('공개 설정을 바꾸지 못했습니다.'));
 
   Future<void> _setColor(String hex) {
     if (hex.toUpperCase() == _cal.color.toUpperCase()) return Future.value();
-    return _run(() => widget.controller.setColor(_cal, hex), '색을 바꾸지 못했습니다.');
+    return _run(
+      () => widget.controller.setColor(_cal, hex),
+      tr('색을 바꾸지 못했습니다.'),
+    );
   }
 
   // ---- 멤버 ----
@@ -192,12 +202,12 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
         ),
       ];
     });
-    if (!quiet) _toast('${user.name} 님을 추가했습니다.');
+    if (!quiet) _toast(tr('{user.name} 님을 추가했습니다.', {'user.name': user.name}));
   }
 
   Future<void> _addFromSuggestion(AppUser user) {
     _search.clear();
-    return _run(() => _addUser(user), '멤버를 추가하지 못했습니다.');
+    return _run(() => _addUser(user), tr('멤버를 추가하지 못했습니다.'));
   }
 
   Future<List<AppUser>?> _openOrgPicker() {
@@ -205,16 +215,16 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
       for (final m in _members ?? const <CalendarMember>[]) m.userId,
     };
     Widget screen({required bool asDialog}) => MemberPickerFrame(
-      title: '멤버 추가',
+      title: tr('멤버 추가'),
       asDialog: asDialog,
       child: Builder(
         builder: (pickerContext) => MemberPicker(
           session: widget.session,
           excludeIds: {...existing, ?widget.session.userId},
-          emptySelectedText: '추가할 멤버를 선택하세요.',
-          noMembersText: '추가할 수 있는 멤버가 없습니다.',
+          emptySelectedText: tr('추가할 멤버를 선택하세요.'),
+          noMembersText: tr('추가할 수 있는 멤버가 없습니다.'),
           footer: Text(
-            '준회원은 읽기 권한으로만 추가돼요.',
+            tr('준회원은 읽기 권한으로만 추가돼요.'),
             style: TextStyle(color: Theme.of(pickerContext).hintColor),
           ),
           actionsBuilder: (context, selected, _) => Row(
@@ -222,7 +232,7 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
             children: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('취소'),
+                child: Text(tr('취소')),
               ),
               const SizedBox(width: 8),
               FilledButton(
@@ -231,7 +241,11 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
                     ? null
                     : () => Navigator.of(context).pop(selected),
                 child: Text(
-                  selected.isEmpty ? '추가하기' : '추가하기 (${selected.length})',
+                  selected.isEmpty
+                      ? tr('추가하기')
+                      : tr('추가하기 ({selected.length})', {
+                          'selected.length': selected.length,
+                        }),
                 ),
               ),
             ],
@@ -261,16 +275,16 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
           await _addUser(u, quiet: true);
           added++;
         } catch (e) {
-          failures.add('${u.name}: ${calendarErrorText(e, '추가하지 못했습니다.')}');
+          failures.add('${u.name}: ${calendarErrorText(e, tr('추가하지 못했습니다.'))}');
         }
       }
       if (!mounted) return;
       if (failures.isEmpty) {
-        _toast('멤버 $added명을 추가했습니다.');
+        _toast(tr('멤버 {added}명을 추가했습니다.', {'added': added}));
       } else {
         _toast(failures.join('\n'));
       }
-    }, '멤버를 추가하지 못했습니다.');
+    }, tr('멤버를 추가하지 못했습니다.'));
   }
 
   Future<void> _changeRole(CalendarMember m, String role) async {
@@ -296,19 +310,19 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
       if (m.userId == widget.session.userId) {
         await widget.controller.loadCalendars();
         if (mounted && !_cal.canEditSettings) {
-          _toast('이제 이 캘린더의 설정을 바꿀 수 없습니다.');
+          _toast(tr('이제 이 캘린더의 설정을 바꿀 수 없습니다.'));
           Navigator.of(context).pop();
         }
       }
-    }, '권한을 바꾸지 못했습니다.');
+    }, tr('권한을 바꾸지 못했습니다.'));
   }
 
   Future<void> _removeMember(CalendarMember m) async {
     final ok = await confirmCalendarAction(
       context,
-      title: '멤버 내보내기',
-      message: "'${m.name}' 님을 이 캘린더에서 내보낼까요?",
-      confirmLabel: '내보내기',
+      title: tr('멤버 내보내기'),
+      message: tr('\'{m.name}\' 님을 이 캘린더에서 내보낼까요?', {'m.name': m.name}),
+      confirmLabel: tr('내보내기'),
     );
     if (!ok || !mounted) return;
     await _run(() async {
@@ -320,8 +334,8 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
             if (x.userId != m.userId) x,
         ];
       });
-      _toast('${m.name} 님을 내보냈습니다.');
-    }, '멤버를 내보내지 못했습니다.');
+      _toast(tr('{m.name} 님을 내보냈습니다.', {'m.name': m.name}));
+    }, tr('멤버를 내보내지 못했습니다.'));
   }
 
   // ---- 나가기 · 삭제 ----
@@ -356,13 +370,13 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
   }
 
   String get _kindLabel => switch (_cal.kind) {
-    'personal' => '기본 캘린더',
-    'team' => '팀 캘린더',
-    _ => '공유 캘린더',
+    'personal' => tr('기본 캘린더'),
+    'team' => tr('팀 캘린더'),
+    _ => tr('공유 캘린더'),
   };
 
   String get _roleLabel => _cal.role == 'subscriber'
-      ? '구독 중'
+      ? tr('구독 중')
       : (calendarRoleLabels[_cal.role] ?? _cal.role);
 
   List<Widget> _buildInfo(BuildContext context) {
@@ -382,25 +396,33 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
             ),
           ),
           const SizedBox(width: 8),
-          Expanded(child: Text('$_kindLabel · 내 권한 $_roleLabel', style: hint)),
+          Expanded(
+            child: Text(
+              tr('{_kindLabel} · 내 권한 {_roleLabel}', {
+                '_kindLabel': _kindLabel,
+                '_roleLabel': _roleLabel,
+              }),
+              style: hint,
+            ),
+          ),
         ],
       ),
       if (cal.kind == 'team')
         Padding(
           padding: const EdgeInsets.only(top: 8),
-          child: Text('팀 캘린더는 설정이 없고, 색만 나에게 맞게 바꿀 수 있어요.', style: hint),
+          child: Text(tr('팀 캘린더는 설정이 없고, 색만 나에게 맞게 바꿀 수 있어요.'), style: hint),
         )
       else if (!_canManage)
         Padding(
           padding: const EdgeInsets.only(top: 8),
           child: Text(
-            '캘린더 관리자만 이름·공개 여부·멤버를 바꿀 수 있어요. 색은 나에게만 적용되는 설정이라 바꿀 수 있어요.',
+            tr('캘린더 관리자만 이름·공개 여부·멤버를 바꿀 수 있어요. 색은 나에게만 적용되는 설정이라 바꿀 수 있어요.'),
             key: const ValueKey('cal-settings-readonly-note'),
             style: hint,
           ),
         ),
       const SizedBox(height: 16),
-      Text('캘린더 이름', style: theme.textTheme.labelLarge),
+      Text(tr('캘린더 이름'), style: theme.textTheme.labelLarge),
       const SizedBox(height: 6),
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -436,22 +458,23 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
                 onPressed: _busy || validateCalendarName(_name.text) != null
                     ? null
                     : _saveName,
-                child: const Text('저장'),
+                child: Text(tr('저장')),
               ),
             ),
           ],
         ],
       ),
-      if (cal.kind == 'personal') Text('기본 캘린더의 이름은 바꿀 수 없어요.', style: hint),
+      if (cal.kind == 'personal')
+        Text(tr('기본 캘린더의 이름은 바꿀 수 없어요.'), style: hint),
       const SizedBox(height: 12),
-      Text('색 (나에게만 적용)', style: theme.textTheme.labelLarge),
+      Text(tr('색 (나에게만 적용)'), style: theme.textTheme.labelLarge),
       const SizedBox(height: 8),
       CalendarColorGrid(selected: cal.color, onSelected: _setColor),
       if (cal.ownerName != null) ...[
         const SizedBox(height: 16),
         Row(
           children: [
-            Text('소유자', style: theme.textTheme.labelLarge),
+            Text(tr('소유자'), style: theme.textTheme.labelLarge),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -467,11 +490,11 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
         SwitchListTile(
           key: const ValueKey('cal-settings-public'),
           contentPadding: EdgeInsets.zero,
-          title: const Text('공개'),
+          title: Text(tr('공개')),
           subtitle: Text(
             cal.isPublic
-                ? '팀원이 캘린더 이름으로 검색해서 구독할 수 있어요.'
-                : '비공개 캘린더는 다른 팀원이 구독할 수 없어요.',
+                ? tr('팀원이 캘린더 이름으로 검색해서 구독할 수 있어요.')
+                : tr('비공개 캘린더는 다른 팀원이 구독할 수 없어요.'),
           ),
           value: cal.isPublic,
           onChanged: _canManage && !_busy ? _setPublic : null,
@@ -497,7 +520,7 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
           ].take(6).toList();
     return [
       const Divider(height: 32),
-      Text('멤버', style: theme.textTheme.titleSmall),
+      Text(tr('멤버'), style: theme.textTheme.titleSmall),
       const SizedBox(height: 8),
       Wrap(
         spacing: 8,
@@ -509,9 +532,9 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
             child: TextField(
               key: const ValueKey('cal-member-search'),
               controller: _search,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 isDense: true,
-                hintText: '이름으로 멤버 검색',
+                hintText: tr('이름으로 멤버 검색'),
                 prefixIcon: Icon(Icons.search, size: 20),
                 border: OutlineInputBorder(),
               ),
@@ -522,7 +545,7 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
             key: const ValueKey('cal-member-org'),
             onPressed: _busy ? null : _addFromOrg,
             icon: const Icon(Icons.account_tree_outlined, size: 18),
-            label: const Text('조직도'),
+            label: Text(tr('조직도')),
           ),
           DropdownButton<String>(
             key: const ValueKey('cal-member-add-role'),
@@ -532,7 +555,7 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
               for (final e in calendarRoleLabels.entries)
                 DropdownMenuItem(
                   value: e.key,
-                  child: Text('추가 권한: ${e.value}'),
+                  child: Text(tr('추가 권한: {e.value}', {'e.value': e.value})),
                 ),
             ],
             onChanged: (v) => setState(() => _addRole = v ?? _addRole),
@@ -556,7 +579,7 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
                   title: Text(u.name),
                   subtitle: Text(
                     u.role == 'guest'
-                        ? '준회원 · 읽기 권한으로 추가돼요'
+                        ? tr('준회원 · 읽기 권한으로 추가돼요')
                         : (u.orgLine ?? u.username),
                   ),
                   onTap: _busy ? null : () => _addFromSuggestion(u),
@@ -580,7 +603,7 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
                 style: TextStyle(color: theme.colorScheme.error),
               ),
             ),
-            TextButton(onPressed: _loadMembers, child: const Text('다시 시도')),
+            TextButton(onPressed: _loadMembers, child: Text(tr('다시 시도'))),
           ],
         )
       else if (_members == null)
@@ -623,12 +646,12 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
                 children: [
                   if (isSelf)
                     TextSpan(
-                      text: ' (나)',
+                      text: tr(' (나)'),
                       style: TextStyle(color: theme.hintColor),
                     ),
                   if (guest)
                     TextSpan(
-                      text: ' · 준회원',
+                      text: tr(' · 준회원'),
                       style: TextStyle(color: theme.hintColor),
                     ),
                 ],
@@ -641,7 +664,7 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text(
-                '소유자',
+                tr('소유자'),
                 key: const ValueKey('cal-member-owner-badge'),
                 style: TextStyle(color: theme.hintColor),
               ),
@@ -668,7 +691,7 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
           else
             IconButton(
               key: ValueKey('cal-member-remove-${m.userId}'),
-              tooltip: '내보내기',
+              tooltip: tr('내보내기'),
               visualDensity: VisualDensity.compact,
               icon: const Icon(Icons.person_remove_outlined, size: 20),
               onPressed: _busy ? null : () => _removeMember(m),
@@ -697,20 +720,20 @@ class _CalendarSettingsViewState extends State<CalendarSettingsView> {
                 ),
                 onPressed: _busy ? null : _delete,
                 icon: const Icon(Icons.delete_outline, size: 18),
-                label: const Text('캘린더 삭제'),
+                label: Text(tr('캘린더 삭제')),
               )
             : OutlinedButton.icon(
                 key: const ValueKey('cal-settings-leave'),
                 onPressed: _busy ? null : _leave,
                 icon: const Icon(Icons.logout, size: 18),
-                label: Text(cal.isSubscriber ? '구독 취소' : '나에게만 삭제'),
+                label: Text(cal.isSubscriber ? tr('구독 취소') : tr('나에게만 삭제')),
               ),
       ),
       if (canDelete)
         Padding(
           padding: const EdgeInsets.only(top: 6),
           child: Text(
-            '삭제하면 캘린더의 모든 일정도 함께 삭제돼요.',
+            tr('삭제하면 캘린더의 모든 일정도 함께 삭제돼요.'),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),

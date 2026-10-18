@@ -36,6 +36,7 @@ import 'integration_widgets.dart';
 import 'mention_autocomplete.dart';
 import 'muted_scrollbar.dart';
 import 'rich_text_format.dart';
+import '../l10n/tr.dart';
 
 /// 첨부 하나의 클라이언트 쪽 진행 상태. 첨부한 즉시(_ChatInputBarState._stageAndUpload)
 /// 업로드가 시작되고, [result]가 채워지면 업로드가 끝난 것 — "보내기"는 이미 끝난 결과만
@@ -154,8 +155,8 @@ class ChatInputBarState extends State<ChatInputBar> {
       room.type == RoomType.topic && (room.readOnly || room.isArchived);
 
   String get _readOnlyNotice => _archived
-      ? '보관된 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.'
-      : '읽기 전용 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.';
+      ? tr('보관된 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.')
+      : tr('읽기 전용 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.');
 
   /// 세션이 바뀔 때마다 부르지만, 쓰기 가능 여부가 실제로 바뀐 때만 다시 그린다(입력 중 불필요한
   /// 다시 그리기를 줄이려고).
@@ -284,7 +285,15 @@ class ChatInputBarState extends State<ChatInputBar> {
     } catch (e) {
       // 실패하면 친 글을 되돌려 고쳐서 다시 보낼 수 있게.
       if (_controller.text.isEmpty) _controller.text = raw;
-      if (mounted) showAppToast(context, '/${invocation.command} 실행 실패: $e');
+      if (mounted) {
+        showAppToast(
+          context,
+          tr('/{invocation.command} 실행 실패: {e}', {
+            'invocation.command': invocation.command,
+            'e': e,
+          }),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() => _sending = false);
@@ -491,12 +500,12 @@ class ChatInputBarState extends State<ChatInputBar> {
     try {
       outcome = await startScreenCapture(hideMessenger: hideMessenger);
     } catch (e) {
-      if (mounted) showAppToast(context, '화면을 캡처하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('화면을 캡처하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _capturing = false);
     }
     if (outcome?.error != null && mounted) {
-      showAppToast(context, '화면을 캡처하지 못했습니다: ${outcome!.error}');
+      showAppToast(context, tr('화면을 캡처하지 못했습니다: {p0}', {'p0': outcome!.error}));
     }
     final file = outcome?.file;
     if (outcome == null || file == null || !mounted) return;
@@ -522,7 +531,7 @@ class ChatInputBarState extends State<ChatInputBar> {
   /// 공유 대화방) 그 방의 컨트롤러를 따로 가져온다.
   Future<void> _uploadCapture(Room room, File file, String caption) async {
     final controller = widget.session.controllerFor(room);
-    if (mounted) showAppToast(context, '캡처를 업로드하는 중입니다...');
+    if (mounted) showAppToast(context, tr('캡처를 업로드하는 중입니다...'));
     try {
       final bytes = await file.readAsBytes();
       final thumb = await generateThumbnail(bytes);
@@ -533,16 +542,16 @@ class ChatInputBarState extends State<ChatInputBar> {
         thumbBytes: thumb,
       );
       await controller.sendUploadedAttachment(uploaded, caption: caption);
-      if (mounted) showAppToast(context, '캡처를 보냈습니다.');
+      if (mounted) showAppToast(context, tr('캡처를 보냈습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '캡처를 보내지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('캡처를 보내지 못했습니다: {e}', {'e': e}));
     }
   }
 
   Future<void> _saveCapture(File file) async {
     final name = file.uri.pathSegments.last;
     final path = await FilePicker.saveFile(
-      dialogTitle: '캡처 저장',
+      dialogTitle: tr('캡처 저장'),
       fileName: name,
       type: FileType.custom,
       allowedExtensions: ['png'],
@@ -550,9 +559,9 @@ class ChatInputBarState extends State<ChatInputBar> {
     if (path == null) return;
     try {
       await file.copy(path.toLowerCase().endsWith('.png') ? path : '$path.png');
-      if (mounted) showAppToast(context, '캡처를 저장했습니다.');
+      if (mounted) showAppToast(context, tr('캡처를 저장했습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -638,7 +647,7 @@ class ChatInputBarState extends State<ChatInputBar> {
       setState(() => _attachments.remove(attachment));
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('업로드 실패: $e')));
+      ).showSnackBar(SnackBar(content: Text(tr('업로드 실패: {e}', {'e': e}))));
     }
   }
 
@@ -735,7 +744,7 @@ class ChatInputBarState extends State<ChatInputBar> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('전송 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('전송 실패: {e}', {'e': e}))));
       }
     } finally {
       if (mounted) {
@@ -784,7 +793,11 @@ class ChatInputBarState extends State<ChatInputBar> {
     return PopupMenuButton<String>(
       key: const ValueKey('chat-attach-menu'),
       icon: const Icon(Icons.attach_file),
-      tooltip: ['파일', if (poll) '투표', if (mention) '멘션'].join(' · '),
+      tooltip: [
+        tr('파일'),
+        if (poll) tr('투표'),
+        if (mention) tr('멘션'),
+      ].join(' · '),
       enabled: !_sending,
       onSelected: (v) {
         switch (v) {
@@ -797,13 +810,13 @@ class ChatInputBarState extends State<ChatInputBar> {
         }
       },
       itemBuilder: (_) => [
-        const PopupMenuItem(value: 'file', child: Text('파일 보내기')),
-        if (poll) const PopupMenuItem(value: 'poll', child: Text('투표')),
+        PopupMenuItem(value: 'file', child: Text(tr('파일 보내기'))),
+        if (poll) PopupMenuItem(value: 'poll', child: Text(tr('투표'))),
         if (mention)
-          const PopupMenuItem(
+          PopupMenuItem(
             key: ValueKey('chat-attach-mention'),
             value: 'mention',
-            child: Text('멘션 (@)'),
+            child: Text(tr('멘션 (@)')),
           ),
       ],
     );
@@ -902,11 +915,11 @@ class ChatInputBarState extends State<ChatInputBar> {
                 TextSpan(
                   children: [
                     TextSpan(
-                      text: _archived ? '보관된 토픽입니다.' : '읽기 전용 토픽입니다.',
+                      text: _archived ? tr('보관된 토픽입니다.') : tr('읽기 전용 토픽입니다.'),
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     TextSpan(text: constraints.maxWidth < 360 ? '\n' : ' '),
-                    const TextSpan(text: '토픽 관리자만 글을 쓸 수 있습니다.'),
+                    TextSpan(text: tr('토픽 관리자만 글을 쓸 수 있습니다.')),
                   ],
                 ),
                 style: TextStyle(
@@ -967,8 +980,8 @@ class ChatInputBarState extends State<ChatInputBar> {
                       Expanded(
                         child: Text(
                           _archived
-                              ? '보관된 토픽 — 토픽 관리자만 글을 쓸 수 있어요'
-                              : '읽기 전용 토픽 — 토픽 관리자만 글을 쓸 수 있어요',
+                              ? tr('보관된 토픽 — 토픽 관리자만 글을 쓸 수 있어요')
+                              : tr('읽기 전용 토픽 — 토픽 관리자만 글을 쓸 수 있어요'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: 12, color: hintColor),
@@ -1084,7 +1097,9 @@ class ChatInputBarState extends State<ChatInputBar> {
                             decoration: InputDecoration(
                               // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
                               // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
-                              hintText: _focusNode.hasFocus ? null : '메시지 입력',
+                              hintText: _focusNode.hasFocus
+                                  ? null
+                                  : tr('메시지 입력'),
                               border: _formatOpen
                                   ? InputBorder.none
                                   : const OutlineInputBorder(),
@@ -1136,7 +1151,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                         onPressed: _sending
                             ? null
                             : widget.onToggleStickerPicker,
-                        tooltip: '이모티콘',
+                        tooltip: tr('이모티콘'),
                       ),
                     ),
                     // 멘션 — 입력칸에 @를 넣어 대화 멤버 자동완성을 연다(비밀 대화는 지원하지 않는다).
@@ -1155,7 +1170,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                       IconButton(
                         icon: const Icon(Icons.attach_file),
                         onPressed: _sending ? null : _pickFile,
-                        tooltip: '파일 보내기',
+                        tooltip: tr('파일 보내기'),
                       ),
                     // 투표 만들기 — 비밀 대화에서는 서버가 막으니 단추 자체를 숨긴다.
                     if (_standaloneButtons(constraints.maxWidth).poll)
@@ -1164,7 +1179,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                         visualDensity: VisualDensity.compact,
                         icon: const Icon(Icons.poll_outlined),
                         onPressed: _sending ? null : _openPollCreator,
-                        tooltip: '투표',
+                        tooltip: tr('투표'),
                       ),
                     if (!widget.room.isSecret)
                       RichFormatToggleButton(
@@ -1179,17 +1194,17 @@ class ChatInputBarState extends State<ChatInputBar> {
                     if (AppPlatform.isWindows)
                       PopupMenuButton<bool>(
                         icon: const Icon(Icons.filter_center_focus),
-                        tooltip: '화면 캡처',
+                        tooltip: tr('화면 캡처'),
                         enabled: !_sending && !_capturing,
                         onSelected: _startCapture,
-                        itemBuilder: (_) => const [
+                        itemBuilder: (_) => [
                           PopupMenuItem(
                             value: true,
-                            child: Text('메신저 창 숨기고 캡처'),
+                            child: Text(tr('메신저 창 숨기고 캡처')),
                           ),
                           PopupMenuItem(
                             value: false,
-                            child: Text('메신저 창 포함하여 캡처'),
+                            child: Text(tr('메신저 창 포함하여 캡처')),
                           ),
                         ],
                       ),
@@ -1200,15 +1215,15 @@ class ChatInputBarState extends State<ChatInputBar> {
                       IconButton(
                         icon: const Icon(Icons.contact_support_outlined),
                         onPressed: _sending ? null : _showInquiryDialog,
-                        tooltip: '팀장에게 문의하기',
+                        tooltip: tr('팀장에게 문의하기'),
                       ),
                     // 줄바꿈/전송 키 안내는 PC(물리 키보드)에서만.
                     Expanded(
                       child: AppPlatform.isWindows
                           ? _SendKeyHint(
                               widget.session.settings.sendWithShiftEnter
-                                  ? 'Shift + Enter 로 전송'
-                                  : 'Shift + Enter 로 줄바꿈',
+                                  ? tr('Shift + Enter 로 전송')
+                                  : tr('Shift + Enter 로 줄바꿈'),
                             )
                           : const SizedBox.shrink(),
                     ),
@@ -1220,7 +1235,9 @@ class ChatInputBarState extends State<ChatInputBar> {
                         onPressed: _sending || uploading
                             ? null
                             : _openScheduleEditor,
-                        tooltip: uploading ? '업로드가 끝나면 예약할 수 있어요' : '메시지 예약',
+                        tooltip: uploading
+                            ? tr('업로드가 끝나면 예약할 수 있어요')
+                            : tr('메시지 예약'),
                       ),
                     if (_sending)
                       const Padding(
@@ -1235,7 +1252,9 @@ class ChatInputBarState extends State<ChatInputBar> {
                       IconButton(
                         icon: const Icon(Icons.send),
                         onPressed: uploading ? null : _send,
-                        tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '보내기',
+                        tooltip: uploading
+                            ? tr('업로드가 끝나면 보낼 수 있어요')
+                            : tr('보내기'),
                       ),
                   ],
                 ),

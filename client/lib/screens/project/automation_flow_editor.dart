@@ -13,6 +13,7 @@ import '../../widgets/app_toast.dart';
 import '../../widgets/grab_cursors.dart';
 import '../../widgets/user_avatar.dart';
 import 'filter_controls.dart';
+import '../../l10n/tr.dart';
 
 /// 자동화 규칙 편집기(전체 화면). 저장하면 true.
 Future<bool> showAutomationFlowEditor(
@@ -70,9 +71,9 @@ Color _kindColor(String kind) => switch (kind) {
 };
 
 String _kindLabel(String kind) => switch (kind) {
-  'trigger' => '트리거',
-  'condition' => '조건',
-  _ => '액션',
+  'trigger' => tr('트리거'),
+  'condition' => tr('조건'),
+  _ => tr('액션'),
 };
 
 IconData _typeIcon(String type) => switch (type) {
@@ -89,18 +90,18 @@ IconData _typeIcon(String type) => switch (type) {
 
 String _typeLabel(String kind, String type) => switch (kind) {
   'trigger' => automationTriggerLabels[type] ?? type,
-  'condition' => 'IF 조건',
+  'condition' => tr('IF 조건'),
   _ => automationActionLabels[type] ?? type,
 };
 
 /// 옵션이 없는 노드의 몸통에 쓰는 설명.
-const _typeHints = {
-  'task_created': '새 업무가 생성되면 실행',
-  'task_deleted': '업무가 삭제되면 실행',
-  'task_archived': '업무가 보관되면 실행',
-  'comment_added': '댓글이 추가되면 실행',
-  'checklist_completed': '체크리스트를 모두 완료하면 실행',
-  'archive_task': '이 업무를 보관 처리',
+final _typeHints = {
+  'task_created': tr('새 업무가 생성되면 실행'),
+  'task_deleted': tr('업무가 삭제되면 실행'),
+  'task_archived': tr('업무가 보관되면 실행'),
+  'comment_added': tr('댓글이 추가되면 실행'),
+  'checklist_completed': tr('체크리스트를 모두 완료하면 실행'),
+  'archive_task': tr('이 업무를 보관 처리'),
 };
 
 /// IF 조건·필드 변경 액션이 다루는 기본 필드.
@@ -121,10 +122,10 @@ const _maxTextLength = 500;
 
 /// 업무 생성 제목·채팅방 알림 메시지에 넣는 변수 — (칩 이름표 키, 변수, 화면 이름). 실행할 때 서버가
 /// 규칙을 부른 업무의 값으로 바꾼다. 적힌 그대로 글자 수에 들어간다.
-const _templateTokens = [
-  ('title', '{{task.title}}', '업무 제목'),
-  ('key', '{{task.key}}', '업무 번호'),
-  ('assignee', '{{task.assignee}}', '담당자'),
+final _templateTokens = [
+  ('title', '{{task.title}}', tr('업무 제목')),
+  ('key', '{{task.key}}', tr('업무 번호')),
+  ('assignee', '{{task.assignee}}', tr('담당자')),
 ];
 
 final _templateTokenPattern = RegExp(
@@ -192,11 +193,23 @@ String _dayValue(DateTime d) =>
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
-const _weekdayNames = ['일', '월', '화', '수', '목', '금', '토'];
+final _weekdayNames = [
+  tr('일'),
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+];
 
 /// 노드 카드에 보여줄 날 — "2026년 10월 1일 (목)".
-String _dayLabel(DateTime d) =>
-    '${d.year}년 ${d.month}월 ${d.day}일 (${_weekdayNames[d.weekday % 7]})';
+String _dayLabel(DateTime d) => tr('{d.year}년 {d.month}월 {d.day}일 ({p0})', {
+  'd.year': d.year,
+  'd.month': d.month,
+  'd.day': d.day,
+  'p0': _weekdayNames[d.weekday % 7],
+});
 
 double? _numberOf(Object? v) {
   final n = v is num ? v.toDouble() : double.tryParse(_str(v)?.trim() ?? '');
@@ -329,7 +342,7 @@ class _EditorData {
   String fieldLabel(String field) =>
       automationFieldLabels[field] ??
       customField(field)?.name ??
-      (field.startsWith('field:') ? '(삭제된 필드)' : field);
+      (field.startsWith('field:') ? tr('(삭제된 필드)') : field);
 
   /// 사용자 정의 필드를 가리키는데 그 필드가 지워졌는지.
   bool fieldGone(String field) =>
@@ -338,13 +351,13 @@ class _EditorData {
   /// [field]의 값 [value](비어 있지 않음)가 가리키는 대상이 이 프로젝트에 더 없으면 그 이름('상태' 등).
   /// 저장된 규칙은 상태·구성원 등이 지워져도 그대로 남아서, 서버가 저장을 거절하기 전에 여기서 찾는다.
   String? goneValue(String field, Object? value) => switch (field) {
-    'status' => status(value) == null ? '상태' : null,
-    'priority' => priority(value) == null ? '우선순위' : null,
-    'type' => type(value) == null ? '유형' : null,
-    'assignee' => member(value) == null ? '구성원' : null,
+    'status' => status(value) == null ? tr('상태') : null,
+    'priority' => priority(value) == null ? tr('우선순위') : null,
+    'type' => type(value) == null ? tr('유형') : null,
+    'assignee' => member(value) == null ? tr('구성원') : null,
     _ => switch (customField(field)) {
       final f? when f.hasOptions =>
-        f.options.contains(value?.toString().trim()) ? null : '선택지',
+        f.options.contains(value?.toString().trim()) ? null : tr('선택지'),
       _ => null,
     },
   };
@@ -653,7 +666,10 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
     final end = sel.isValid ? sel.end : value.text.length;
     final text = value.text.replaceRange(start, end, token);
     if (text.trim().length > maxLength) {
-      showAppToast(context, '$maxLength자를 넘어서 더 넣을 수 없습니다.');
+      showAppToast(
+        context,
+        tr('{maxLength}자를 넘어서 더 넣을 수 없습니다.', {'maxLength': maxLength}),
+      );
       return;
     }
     t.value = TextEditingValue(
@@ -751,7 +767,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
     final d = _data;
     if (d == null) return;
     if (item.kind == 'trigger' && _graph.trigger != null) {
-      showAppToast(context, '트리거는 하나만 둘 수 있습니다.');
+      showAppToast(context, tr('트리거는 하나만 둘 수 있습니다.'));
       return;
     }
     final pos = _toCanvas(_toLocal(globalTopLeft));
@@ -829,10 +845,12 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
   /// 자동화 제목의 문제 — 노드 검사보다 먼저 본다(저장하면 제목 칸으로 커서를 옮긴다).
   String? _titleProblem() {
     final name = _name.text.trim();
-    if (name.isEmpty) return '자동화 제목을 입력하세요.';
+    if (name.isEmpty) return tr('자동화 제목을 입력하세요.');
     // 입력 칸의 글자 수 제한은 이모지를 한 글자로 세서, 서버처럼 UTF-16 길이로 다시 본다.
     if (name.length > _maxNameLength) {
-      return '자동화 제목은 $_maxNameLength자 이내로 입력하세요.';
+      return tr('자동화 제목은 {_maxNameLength}자 이내로 입력하세요.', {
+        '_maxNameLength': _maxNameLength,
+      });
     }
     return null;
   }
@@ -841,18 +859,21 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
   ({String message, String? nodeId})? _validate() {
     final d = _data;
     if (d == null) {
-      return (message: '프로젝트 정보를 불러오는 중입니다.', nodeId: null);
+      return (message: tr('프로젝트 정보를 불러오는 중입니다.'), nodeId: null);
     }
     final triggers = _graph.nodes.where((n) => n.kind == 'trigger').toList();
     if (triggers.isEmpty) {
-      return (message: '트리거를 하나 놓아 주세요.', nodeId: null);
+      return (message: tr('트리거를 하나 놓아 주세요.'), nodeId: null);
     }
     if (triggers.length > 1) {
-      return (message: '트리거는 하나만 둘 수 있습니다.', nodeId: triggers.last.id);
+      return (message: tr('트리거는 하나만 둘 수 있습니다.'), nodeId: triggers.last.id);
     }
     final reach = _reachableFrom(triggers.single.id);
     if (!_graph.nodes.any((n) => n.kind == 'action' && reach.contains(n.id))) {
-      return (message: '트리거에 연결된 액션이 하나 이상 필요합니다.', nodeId: triggers.single.id);
+      return (
+        message: tr('트리거에 연결된 액션이 하나 이상 필요합니다.'),
+        nodeId: triggers.single.id,
+      );
     }
     for (final n in _graph.nodes) {
       if (_nodeProblem(n, d) case final message?) {
@@ -865,71 +886,79 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
   /// 노드 한 개의 설정 문제 — 빠진 값, 지워진 상태·구성원·채팅방 등, 글자 수.
   String? _nodeProblem(AutomationNode n, _EditorData d) {
     final c = n.config;
-    String gone(String what) => '삭제된 $what입니다. 다시 선택하세요.';
+    String gone(String what) => tr('삭제된 {what}입니다. 다시 선택하세요.', {'what': what});
     // 서버는 앞뒤 공백을 뺀 뒤 String.length로 센다.
     int length(Object? v) => _str(v)?.trim().length ?? 0;
     switch (n.type) {
       case 'field_changed':
         final watched = automationTriggerFields(c);
-        if (watched.isEmpty) return '감지할 필드를 하나 이상 선택하세요.';
-        if (watched.any(d.fieldGone)) return gone('필드');
+        if (watched.isEmpty) return tr('감지할 필드를 하나 이상 선택하세요.');
+        if (watched.any(d.fieldGone)) return gone(tr('필드'));
       case 'if':
         final field = _str(c['field']) ?? 'status';
-        if (d.fieldGone(field)) return gone('필드');
+        if (d.fieldGone(field)) return gone(tr('필드'));
         if (!_needsValue(_str(c['op']) ?? 'eq')) return null;
         final value = c['value'];
-        if (_blank(value)) return 'IF 조건의 값을 선택하세요.';
+        if (_blank(value)) return tr('IF 조건의 값을 선택하세요.');
         if (d.goneValue(field, value) case final what?) return gone(what);
         final custom = d.customField(field);
         switch (custom?.kind) {
           case 'date':
-            if (_parseDay(value) == null) return '비교할 날짜를 다시 선택하세요.';
+            if (_parseDay(value) == null) return tr('비교할 날짜를 다시 선택하세요.');
           case 'number':
             if (_numberOf(value) == null) {
-              return '"${custom!.name}" 값은 숫자로 입력하세요.';
+              return tr('"{p0}" 값은 숫자로 입력하세요.', {'p0': custom!.name});
             }
           case 'progress':
             final v = _numberOf(value);
             if (v == null || v < 0 || v > 100) {
-              return '"${custom!.name}" 값은 0~100 사이의 숫자로 입력하세요.';
+              return tr('"{p0}" 값은 0~100 사이의 숫자로 입력하세요.', {'p0': custom!.name});
             }
         }
         if (length(value) > _maxTextLength) {
-          return '조건 값은 $_maxTextLength자 이내로 입력하세요.';
+          return tr('조건 값은 {_maxTextLength}자 이내로 입력하세요.', {
+            '_maxTextLength': _maxTextLength,
+          });
         }
       case 'set_field':
         final field = _str(c['field']);
-        if (field == null) return '변경할 필드를 선택하세요.';
+        if (field == null) return tr('변경할 필드를 선택하세요.');
         final value = c['value'];
         if ((field == 'status' || field == 'priority') && value == null) {
-          return '변경할 값을 선택하세요.';
+          return tr('변경할 값을 선택하세요.');
         }
         if (value != null) {
           if (d.goneValue(field, value) case final what?) return gone(what);
         }
       case 'create_task':
-        if (_blank(c['title'])) return '만들 업무의 제목을 입력하세요.';
+        if (_blank(c['title'])) return tr('만들 업무의 제목을 입력하세요.');
         if (length(c['title']) > _maxTitleLength) {
-          return '업무 제목은 $_maxTitleLength자 이내로 입력하세요.';
+          return tr('업무 제목은 {_maxTitleLength}자 이내로 입력하세요.', {
+            '_maxTitleLength': _maxTitleLength,
+          });
         }
         final statusId = c['statusId'];
-        if (statusId != null && d.status(statusId) == null) return gone('상태');
+        if (statusId != null && d.status(statusId) == null) {
+          return gone(tr('상태'));
+        }
         final assignee = c['assignee'];
         if (assignee != null &&
             assignee != 'current_assignee' &&
             d.member(assignee) == null) {
-          return gone('구성원');
+          return gone(tr('구성원'));
         }
       case 'chat_message':
         final roomId = c['roomId'];
-        if (roomId == null) return '알림을 보낼 채팅방을 선택하세요.';
+        if (roomId == null) return tr('알림을 보낼 채팅방을 선택하세요.');
         // 고를 수 있는 방 = 이 팀의 비밀이 아닌, 내가 들어가 있는 방(서버도 같은 기준으로 받는다).
         if (d.room(roomId) == null) {
-          return '삭제되었거나 참여 중이 아닌 채팅방입니다. 다시 선택하세요.';
+          return tr('삭제되었거나 참여 중이 아닌 채팅방입니다. 다시 선택하세요.');
         }
-        if (_blank(c['text'])) return '보낼 메시지를 입력하세요.';
+        if (_blank(c['text'])) return tr('보낼 메시지를 입력하세요.');
         if (length(c['text']) > _maxTextLength) {
-          return '채팅방에 보낼 내용은 $_maxTextLength자 이내로 입력하세요.';
+          return tr('채팅방에 보낼 내용은 {_maxTextLength}자 이내로 입력하세요.', {
+            '_maxTextLength': _maxTextLength,
+          });
         }
     }
     return null;
@@ -982,7 +1011,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      showAppToast(context, '저장하지 못했습니다: $e');
+      showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -990,15 +1019,15 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
     final leave = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        content: const Text('저장하지 않은 변경 사항이 있습니다. 나갈까요?'),
+        content: Text(tr('저장하지 않은 변경 사항이 있습니다. 나갈까요?')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('나가기'),
+            child: Text(tr('나가기')),
           ),
         ],
       ),
@@ -1094,7 +1123,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
       child: Row(
         children: [
           IconButton(
-            tooltip: '뒤로',
+            tooltip: tr('뒤로'),
             icon: const Icon(Icons.chevron_left),
             onPressed: _saving ? null : () => Navigator.of(context).maybePop(),
           ),
@@ -1117,7 +1146,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
                   ),
                   // 누르면 안내 문구는 사라지고 커서만 깜빡이게 — 힌트는 포커스가 없을 때만.
                   decoration: InputDecoration.collapsed(
-                    hintText: _nameFocus.hasFocus ? null : '자동화 제목을 입력하세요',
+                    hintText: _nameFocus.hasFocus ? null : tr('자동화 제목을 입력하세요'),
                   ),
                   onChanged: (_) => setState(() => _dirty = true),
                 ),
@@ -1132,7 +1161,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
           const SizedBox(width: 12),
           FilledButton(
             onPressed: _saving || _data == null ? null : _save,
-            child: const Text('저장'),
+            child: Text(tr('저장')),
           ),
           const SizedBox(width: 8),
         ],
@@ -1147,14 +1176,17 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('불러오지 못했습니다: $error', style: TextStyle(color: theme.hintColor)),
+          Text(
+            tr('불러오지 못했습니다: {error}', {'error': error}),
+            style: TextStyle(color: theme.hintColor),
+          ),
           const SizedBox(height: 12),
           OutlinedButton(
             onPressed: () {
               setState(() => _loadError = null);
               _load();
             },
-            child: const Text('다시 시도'),
+            child: Text(tr('다시 시도')),
           ),
         ],
       ),
@@ -1427,11 +1459,11 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
     if (_blank(value)) {
       return nullLabel != null
           ? _ValueChip(nullLabel)
-          : const _ValueChip('값 선택', placeholder: true);
+          : _ValueChip(tr('값 선택'), placeholder: true);
     }
     // 지워진 상태·구성원·선택지 등은 기본값처럼 보이지 않게 따로 표시한다(저장 전 검사도 막는다).
     if (d.goneValue(field, value) case final what?) {
-      return _ValueChip('(삭제된 $what)', placeholder: true);
+      return _ValueChip(tr('(삭제된 {what})', {'what': what}), placeholder: true);
     }
     switch (field) {
       case 'status':
@@ -1454,7 +1486,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
           case 'date':
             final day = _parseDay(value);
             return day == null
-                ? const _ValueChip('(잘못된 날짜)', placeholder: true)
+                ? _ValueChip(tr('(잘못된 날짜)'), placeholder: true)
                 : _ValueChip(
                     _dayLabel(day),
                     leading: Icon(
@@ -1478,9 +1510,9 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         final watched = automationTriggerFields(c);
         return [
           _row(
-            '필드',
+            tr('필드'),
             watched.isEmpty
-                ? const _ValueChip('필드 선택', placeholder: true)
+                ? _ValueChip(tr('필드 선택'), placeholder: true)
                 : _ValueChip(
                     watched.contains('any')
                         ? d.fieldLabel('any')
@@ -1525,7 +1557,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         final field = _str(c['field']);
         return [
           field == null
-              ? _row('필드', const _ValueChip('필드 선택', placeholder: true))
+              ? _row(tr('필드'), _ValueChip(tr('필드 선택'), placeholder: true))
               : _row(
                   d.fieldLabel(field),
                   _valueChip(
@@ -1533,8 +1565,8 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
                     field,
                     c['value'],
                     nullLabel: switch (field) {
-                      'assignee' => '미배정',
-                      'type' => '없음',
+                      'assignee' => tr('미배정'),
+                      'type' => tr('없음'),
                       _ => null,
                     },
                   ),
@@ -1548,16 +1580,16 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         final assignee = _str(c['assignee']);
         return [
           _row(
-            '제목',
+            tr('제목'),
             title.isEmpty
-                ? const _ValueChip('제목 입력', placeholder: true)
+                ? _ValueChip(tr('제목 입력'), placeholder: true)
                 : _ValueChip(title, template: true),
           ),
           _row(
-            '상태',
+            tr('상태'),
             status == null
                 ? _ValueChip(
-                    statusId == null ? '상태 없음' : '(삭제된 상태)',
+                    statusId == null ? tr('상태 없음') : tr('(삭제된 상태)'),
                     placeholder: true,
                   )
                 : _ValueChip(
@@ -1566,13 +1598,13 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
                   ),
           ),
           _row(
-            '담당자',
+            tr('담당자'),
             assignee == 'current_assignee'
                 ? _ValueChip(
-                    '현재 담당자',
+                    tr('현재 담당자'),
                     leading: Icon(Icons.person_outline, size: 13, color: hint),
                   )
-                : _valueChip(d, 'assignee', assignee, nullLabel: '없음'),
+                : _valueChip(d, 'assignee', assignee, nullLabel: tr('없음')),
           ),
         ];
       case 'chat_message':
@@ -1580,20 +1612,20 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         final text = _str(c['text'])?.trim() ?? '';
         return [
           _row(
-            '채팅방',
+            tr('채팅방'),
             c['roomId'] == null
-                ? const _ValueChip('채팅방 선택', placeholder: true)
+                ? _ValueChip(tr('채팅방 선택'), placeholder: true)
                 : room == null
-                ? const _ValueChip('(삭제된 채팅방)', placeholder: true)
+                ? _ValueChip(tr('(삭제된 채팅방)'), placeholder: true)
                 : _ValueChip(
                     room.displayName(d.myUserId),
                     leading: Icon(_roomIcon(room), size: 13, color: hint),
                   ),
           ),
           _row(
-            '메시지',
+            tr('메시지'),
             text.isEmpty
-                ? const _ValueChip('메시지 입력', placeholder: true)
+                ? _ValueChip(tr('메시지 입력'), placeholder: true)
                 : _ValueChip(text.replaceAll('\n', ' '), template: true),
           ),
         ];
@@ -1665,7 +1697,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Text('변수 넣기', style: TextStyle(fontSize: 11, color: hint)),
+            Text(tr('변수 넣기'), style: TextStyle(fontSize: 11, color: hint)),
             for (final (name, token, label) in _templateTokens)
               _TokenChip(
                 key: ValueKey('token-$slot-$name'),
@@ -1743,8 +1775,8 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
           custom?.kind == 'progress'
               ? '0~100'
               : numeric
-              ? '숫자 입력'
-              : '값 입력',
+              ? tr('숫자 입력')
+              : tr('값 입력'),
         ),
         onChanged: (v) => _edit(() => c['value'] = v),
       );
@@ -1753,7 +1785,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
       key: const ValueKey('pick-value'),
       value: _str(c['value']),
       options: _valueOptions(d, field),
-      placeholder: '값 선택',
+      placeholder: tr('값 선택'),
       onChanged: (v) => _edit(() => c['value'] = v),
     );
   }
@@ -1771,7 +1803,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         ];
         fields.add(
           _section(
-            '감지할 필드',
+            tr('감지할 필드'),
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1797,7 +1829,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         );
         fields.add(
           Text(
-            '여러 개를 고르면 그중 하나라도 바뀔 때 실행합니다.',
+            tr('여러 개를 고르면 그중 하나라도 바뀔 때 실행합니다.'),
             style: TextStyle(fontSize: 11, color: hint),
           ),
         );
@@ -1806,7 +1838,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         final op = _str(c['op']) ?? 'eq';
         fields.add(
           _section(
-            '필드',
+            tr('필드'),
             _Pick<String>(
               key: const ValueKey('pick-field'),
               value: field,
@@ -1826,7 +1858,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         );
         fields.add(
           _section(
-            '비교',
+            tr('비교'),
             _Pick<String>(
               key: const ValueKey('pick-op'),
               value: op,
@@ -1845,17 +1877,17 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
           ),
         );
         if (_needsValue(op)) {
-          fields.add(_section('값', _conditionValue(n, d, field)));
+          fields.add(_section(tr('값'), _conditionValue(n, d, field)));
         }
       case 'set_field':
         final field = _str(c['field']);
         fields.add(
           _section(
-            '필드',
+            tr('필드'),
             _Pick<String?>(
               key: const ValueKey('pick-field'),
               value: field,
-              placeholder: '필드 선택',
+              placeholder: tr('필드 선택'),
               options: [
                 for (final k in _basicFields)
                   _Opt(k, automationFieldLabels[k]!),
@@ -1870,15 +1902,15 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         if (field != null) {
           fields.add(
             _section(
-              '값',
+              tr('값'),
               _Pick<String?>(
                 key: const ValueKey('pick-value'),
                 value: _str(c['value']),
-                placeholder: '값 선택',
+                placeholder: tr('값 선택'),
                 options: [
                   // 담당자·유형은 비우는 것도 값이다(상태·우선순위는 꼭 있어야 한다).
-                  if (field == 'assignee') const _Opt(null, '미배정'),
-                  if (field == 'type') const _Opt(null, '없음'),
+                  if (field == 'assignee') _Opt(null, tr('미배정')),
+                  if (field == 'type') _Opt(null, tr('없음')),
                   ..._valueOptions(d, field),
                 ],
                 onChanged: (v) => _edit(() => c['value'] = v),
@@ -1889,7 +1921,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
       case 'create_task':
         fields.add(
           _section(
-            '제목',
+            tr('제목'),
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1898,7 +1930,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
                   controller: _textFor(n, 'title', _str(c['title']) ?? ''),
                   focusNode: _focusFor(n, 'title'),
                   maxLength: _maxTitleLength,
-                  decoration: _inputDeco('업무 제목'),
+                  decoration: _inputDeco(tr('업무 제목')),
                   onChanged: (v) => _edit(() => c['title'] = v),
                 ),
                 _tokenChips(n, 'title', 'title', _maxTitleLength, hint),
@@ -1908,11 +1940,11 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         );
         fields.add(
           _section(
-            '상태',
+            tr('상태'),
             _Pick<String?>(
               key: const ValueKey('pick-status'),
               value: _str(c['statusId']) ?? d.defaultStatus?.id,
-              placeholder: '상태 선택',
+              placeholder: tr('상태 선택'),
               options: _valueOptions(d, 'status'),
               onChanged: (v) => _edit(() => c['statusId'] = v),
             ),
@@ -1920,15 +1952,15 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         );
         fields.add(
           _section(
-            '담당자',
+            tr('담당자'),
             _Pick<String?>(
               key: const ValueKey('pick-assignee'),
               value: _str(c['assignee']),
               options: [
-                const _Opt(null, '없음'),
+                _Opt(null, tr('없음')),
                 _Opt(
                   'current_assignee',
-                  '현재 담당자',
+                  tr('현재 담당자'),
                   leading: Icon(Icons.person_outline, size: 16, color: hint),
                 ),
                 ..._valueOptions(d, 'assignee'),
@@ -1940,16 +1972,16 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
       case 'chat_message':
         fields.add(
           _section(
-            '채팅방',
+            tr('채팅방'),
             d.rooms.isEmpty && c['roomId'] == null
                 ? Text(
-                    '보낼 수 있는 채팅방이 없습니다.',
+                    tr('보낼 수 있는 채팅방이 없습니다.'),
                     style: TextStyle(fontSize: 12, color: hint),
                   )
                 : _Pick<String?>(
                     key: const ValueKey('pick-room'),
                     value: _str(c['roomId']),
-                    placeholder: '채팅방 선택',
+                    placeholder: tr('채팅방 선택'),
                     options: [
                       for (final r in d.rooms)
                         _Opt(
@@ -1964,7 +1996,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         );
         fields.add(
           _section(
-            '메시지',
+            tr('메시지'),
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1975,7 +2007,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
                   minLines: 4,
                   maxLines: 8,
                   maxLength: _maxTextLength,
-                  decoration: _inputDeco('보낼 내용을 입력하세요'),
+                  decoration: _inputDeco(tr('보낼 내용을 입력하세요')),
                   onChanged: (v) => _edit(() => c['text'] = v),
                 ),
                 _tokenChips(n, 'text', 'text', _maxTextLength, hint),
@@ -1985,9 +2017,9 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         );
         fields.add(
           Text(
-            "'자동화'가 보낸 메시지로 올라가 안읽음·알림이 갑니다. "
-            '메시지 앞에 [규칙 이름]과 업무 번호·제목이, 끝에 (실행한 사람: 이름)이 붙습니다. '
-            '이 규칙을 저장한 사람이 그 대화방·프로젝트 권한을 잃으면 규칙이 저절로 꺼집니다.',
+            tr(
+              '\'자동화\'가 보낸 메시지로 올라가 안읽음·알림이 갑니다. 메시지 앞에 [규칙 이름]과 업무 번호·제목이, 끝에 (실행한 사람: 이름)이 붙습니다. 이 규칙을 저장한 사람이 그 대화방·프로젝트 권한을 잃으면 규칙이 저절로 꺼집니다.',
+            ),
             style: TextStyle(fontSize: 11, color: hint),
           ),
         );
@@ -2020,7 +2052,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         ),
         const SizedBox(height: 16),
         if (fields.isEmpty)
-          Text('옵션이 없습니다.', style: TextStyle(color: hint))
+          Text(tr('옵션이 없습니다.'), style: TextStyle(color: hint))
         else
           ...fields,
       ],
@@ -2029,7 +2061,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
 
   Widget _edgeForm(AutomationEdge e, ThemeData theme) {
     String name(AutomationNode? n) =>
-        n == null ? '(없는 노드)' : _typeLabel(n.kind, n.type);
+        n == null ? tr('(없는 노드)') : _typeLabel(n.kind, n.type);
     final branch = switch (e.port) {
       'yes' => ' (Yes)',
       'no' => ' (No)',
@@ -2038,8 +2070,8 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          '연결',
+        Text(
+          tr('연결'),
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
@@ -2052,7 +2084,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
           style: _dangerStyle,
           onPressed: () => _deleteEdge(e),
           icon: const Icon(Icons.link_off, size: 18),
-          label: const Text('연결 삭제'),
+          label: Text(tr('연결 삭제')),
         ),
       ],
     );
@@ -2062,8 +2094,8 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
   Widget _buildPanel(_EditorData d, ThemeData theme, {bool overlay = false}) {
     final node = _selectedNode;
     final edge = _selectedEdge;
-    const title = Text(
-      '노드 설정',
+    final title = Text(
+      tr('노드 설정'),
       style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
     );
     return Container(
@@ -2081,9 +2113,9 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
               padding: const EdgeInsets.fromLTRB(16, 6, 6, 2),
               child: Row(
                 children: [
-                  const Expanded(child: title),
+                  Expanded(child: title),
                   IconButton(
-                    tooltip: '닫기',
+                    tooltip: tr('닫기'),
                     icon: const Icon(Icons.close, size: 18),
                     onPressed: () => setState(() {
                       _selectedId = null;
@@ -2094,10 +2126,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
               ),
             )
           else
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 12),
-              child: title,
-            ),
+            Padding(padding: EdgeInsets.fromLTRB(16, 16, 16, 12), child: title),
           const Divider(height: 1),
           Expanded(
             child: SingleChildScrollView(
@@ -2110,7 +2139,10 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
                     )
                   : edge != null
                   ? _edgeForm(edge, theme)
-                  : Text('옵션이 없습니다.', style: TextStyle(color: theme.hintColor)),
+                  : Text(
+                      tr('옵션이 없습니다.'),
+                      style: TextStyle(color: theme.hintColor),
+                    ),
             ),
           ),
           if (node != null)
@@ -2120,7 +2152,7 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
                 style: _dangerStyle,
                 onPressed: () => _deleteNode(node.id),
                 icon: const Icon(Icons.delete_outline, size: 18),
-                label: const Text('노드 삭제'),
+                label: Text(tr('노드 삭제')),
               ),
             ),
         ],
@@ -2155,7 +2187,7 @@ class _ActiveToggle extends StatelessWidget {
     final label = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 7),
       child: Text(
-        value ? '활성' : '비활성',
+        value ? tr('활성') : tr('비활성'),
         style: TextStyle(
           color: textColor,
           fontSize: 12,
@@ -2538,9 +2570,9 @@ class _EmptyHint extends StatelessWidget {
           Icon(Icons.touch_app_outlined, size: 16, color: theme.hintColor),
           const SizedBox(width: 6),
           // 좁은 캔버스에서는 넘치지 않고 줄을 바꾼다.
-          const Flexible(
+          Flexible(
             child: Text(
-              '왼쪽에서 트리거를 끌어다 놓아 시작하세요',
+              tr('왼쪽에서 트리거를 끌어다 놓아 시작하세요'),
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13),
             ),
@@ -2579,9 +2611,9 @@ class _ZoomControls extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _button(Icons.add, '확대', onZoomIn),
+          _button(Icons.add, tr('확대'), onZoomIn),
           SizedBox(width: 32, child: Divider(height: 1, color: line)),
-          _button(Icons.remove, '축소', onZoomOut),
+          _button(Icons.remove, tr('축소'), onZoomOut),
         ],
       ),
     );
@@ -2619,13 +2651,13 @@ class _Palette extends StatelessWidget {
                 ],
               ]
             : [
-                const _PaletteHeader('트리거', '(언제 실행할지)'),
+                _PaletteHeader(tr('트리거'), tr('(언제 실행할지)')),
                 for (final item in _triggerItems) _PaletteTile(item),
                 const SizedBox(height: 12),
-                const _PaletteHeader('조건', '(어떤 경우에만)'),
+                _PaletteHeader(tr('조건'), tr('(어떤 경우에만)')),
                 for (final item in _conditionItems) _PaletteTile(item),
                 const SizedBox(height: 12),
-                const _PaletteHeader('액션', '(무엇을 할지)'),
+                _PaletteHeader(tr('액션'), tr('(무엇을 할지)')),
                 for (final item in _actionItems) _PaletteTile(item),
               ],
       ),
@@ -2853,7 +2885,7 @@ class _Pick<T> extends StatelessWidget {
                 ],
                 Expanded(
                   child: Text(
-                    current?.label ?? placeholder,
+                    current?.label ?? tr(placeholder),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -2883,7 +2915,7 @@ class _Pick<T> extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.all(12),
                   child: Text(
-                    '항목이 없습니다.',
+                    tr('항목이 없습니다.'),
                     style: TextStyle(fontSize: 13, color: hint),
                   ),
                 ),

@@ -11,6 +11,7 @@ import '../../models/project.dart';
 import '../../services/app_links.dart';
 import '../../widgets/rich_text_format.dart';
 import 'note_markdown.dart' show notePlainLinkText;
+import '../../l10n/tr.dart';
 
 // 노트 편집기의 "/" 업무 링크.
 //
@@ -588,10 +589,10 @@ class _NoteTaskLinkMenuState extends State<NoteTaskLinkMenu> {
     final Widget body;
     if (_tasks == null) {
       body = _loadFailed
-          ? message('업무를 불러오지 못했습니다.')
-          : message('업무를 불러오는 중...', busy: true);
+          ? message(tr('업무를 불러오지 못했습니다.'))
+          : message(tr('업무를 불러오는 중...'), busy: true);
     } else if (items.isEmpty) {
-      body = message('일치하는 업무가 없습니다.');
+      body = message(tr('일치하는 업무가 없습니다.'));
     } else {
       final selected = _index.clamp(0, items.length - 1);
       body = ListView.builder(
@@ -679,7 +680,7 @@ class _NoteTaskLinkMenuState extends State<NoteTaskLinkMenu> {
               child: Row(
                 children: [
                   Text(
-                    '업무 링크',
+                    tr('업무 링크'),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -709,7 +710,7 @@ class _NoteTaskLinkMenuState extends State<NoteTaskLinkMenu> {
                   vertical: 6,
                 ),
                 child: Text(
-                  '↑↓ 이동 · Enter 넣기 · Esc 닫기',
+                  tr('↑↓ 이동 · Enter 넣기 · Esc 닫기'),
                   style: TextStyle(fontSize: 11, color: hint),
                 ),
               ),

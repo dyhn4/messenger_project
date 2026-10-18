@@ -14,6 +14,7 @@ import 'leave_tab.dart';
 import 'resource_tab.dart';
 import 'survey_tab.dart';
 import 'work_report_tab.dart';
+import '../../l10n/tr.dart';
 
 /// 그룹웨어 화면을 연다 — PC·모바일 모두 전체 화면.
 Future<void> openGroupwareScreen(BuildContext context, Session session) {
@@ -87,14 +88,14 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
     final ctx = _ctx;
     if (ctx == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('그룹웨어')),
+        appBar: AppBar(title: Text(tr('그룹웨어'))),
         body: Center(
           child: _error != null
               ? Padding(
                   padding: const EdgeInsets.all(24),
                   child: Text(
                     _error!.contains('Cannot') || _error!.contains('요청이 실패')
-                        ? '이 서버 버전은 그룹웨어를 지원하지 않습니다. 서버를 업데이트하세요.'
+                        ? tr('이 서버 버전은 그룹웨어를 지원하지 않습니다. 서버를 업데이트하세요.')
                         : _error!,
                     textAlign: TextAlign.center,
                   ),
@@ -105,7 +106,11 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
     }
     final tabs = <(String, Widget)>[
       (
-        ctx.pendingForMe > 0 ? '결재 ${ctx.pendingForMe}' : '결재',
+        ctx.pendingForMe > 0
+            ? tr('결재 {ctx.pendingForMe}', {
+                'ctx.pendingForMe': ctx.pendingForMe,
+              })
+            : tr('결재'),
         ApprovalTab(
           api: _api,
           ctx: ctx,
@@ -114,7 +119,7 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
         ),
       ),
       (
-        '휴가',
+        tr('휴가'),
         LeaveTab(
           api: _api,
           ctx: ctx,
@@ -123,7 +128,7 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
         ),
       ),
       (
-        '지출',
+        tr('지출'),
         ExpenseTab(
           api: _api,
           ctx: ctx,
@@ -132,7 +137,7 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
         ),
       ),
       (
-        '출퇴근',
+        tr('출퇴근'),
         AttendanceTab(
           api: _api,
           ctx: ctx,
@@ -141,7 +146,7 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
         ),
       ),
       (
-        '예약',
+        tr('예약'),
         ResourceTab(
           api: _api,
           ctx: ctx,
@@ -151,7 +156,7 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
       ),
       // 설문(여러 문항)과 업무일지(일일·주간 업무보고) — survey_tab.dart·work_report_tab.dart.
       (
-        '설문',
+        tr('설문'),
         SurveyTab(
           api: _api,
           ctx: ctx,
@@ -160,7 +165,7 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
         ),
       ),
       (
-        '업무일지',
+        tr('업무일지'),
         WorkReportTab(
           api: _api,
           ctx: ctx,
@@ -170,7 +175,7 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
       ),
       if (ctx.isManager)
         (
-          '관리',
+          tr('관리'),
           GroupwareAdminTab(
             api: _api,
             ctx: ctx,
@@ -184,7 +189,9 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
       length: tabs.length,
       child: Scaffold(
         appBar: AppBar(
-          title: Text('그룹웨어 · ${ctx.scopeLabel}'),
+          title: Text(
+            tr('그룹웨어 · {ctx.scopeLabel}', {'ctx.scopeLabel': ctx.scopeLabel}),
+          ),
           bottom: TabBar(
             isScrollable: true,
             tabAlignment: TabAlignment.start,
@@ -278,7 +285,10 @@ class ApprovalDocumentTile extends StatelessWidget {
           doc.authorName,
           doc.summary(ctx),
           if (doc.createdAt != null) formatDateTime(doc.createdAt!),
-          if (current != null) '${current.approverName} 결재 차례',
+          if (current != null)
+            tr('{current.approverName} 결재 차례', {
+              'current.approverName': current.approverName,
+            }),
         ].join(' · '),
         style: TextStyle(color: hint),
         maxLines: 2,

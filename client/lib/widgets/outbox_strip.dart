@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/message_outbox.dart';
 import '../services/session.dart';
+import '../l10n/tr.dart';
 
 /// 대화방 아래(입력칸 바로 위)의 보내기 대기열 — 아직 서버에 닿지 않은 내 메시지를 오른쪽 말풍선으로 보여 준다. 보내는 중·연결을
 /// 기다림(붙으면 보냄)·실패(서버가 거절 — 이유와 다시 보내기·지우기). 서버에 닿으면 대화 목록에 진짜 메시지로 나타나고 여기서 사라진다.
@@ -56,9 +57,9 @@ class _OutboxBubble extends StatelessWidget {
     final theme = Theme.of(context);
     final failed = item.state == OutboxState.failed;
     final status = switch (item.state) {
-      OutboxState.sending => '보내는 중…',
-      OutboxState.waiting => '연결되면 보냅니다',
-      OutboxState.failed => item.error ?? '보내지 못했습니다',
+      OutboxState.sending => tr('보내는 중…'),
+      OutboxState.waiting => tr('연결되면 보냅니다'),
+      OutboxState.failed => item.error ?? tr('보내지 못했습니다'),
     };
     return Padding(
       key: ValueKey('outbox-${item.clientId}'),
@@ -120,7 +121,7 @@ class _OutboxBubble extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                   ),
                   onPressed: onRetry,
-                  child: const Text('다시 보내기'),
+                  child: Text(tr('다시 보내기')),
                 ),
                 TextButton(
                   key: ValueKey('outbox-discard-${item.clientId}'),
@@ -128,7 +129,7 @@ class _OutboxBubble extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                   ),
                   onPressed: onDiscard,
-                  child: const Text('지우기'),
+                  child: Text(tr('지우기')),
                 ),
               ] else if (item.state == OutboxState.waiting)
                 TextButton(
@@ -137,7 +138,7 @@ class _OutboxBubble extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                   ),
                   onPressed: onDiscard,
-                  child: const Text('취소'),
+                  child: Text(tr('취소')),
                 ),
             ],
           ),
@@ -174,7 +175,9 @@ class ConnectionLostBanner extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '서버와 연결이 끊겼습니다 — 다시 연결하는 중입니다. 이 기기에 저장해 둔 대화를 보여 주고, 보내는 메시지는 연결되면 보냅니다.',
+                    tr(
+                      '서버와 연결이 끊겼습니다 — 다시 연결하는 중입니다. 이 기기에 저장해 둔 대화를 보여 주고, 보내는 메시지는 연결되면 보냅니다.',
+                    ),
                     style: TextStyle(
                       fontSize: 12,
                       color: theme.colorScheme.onErrorContainer,

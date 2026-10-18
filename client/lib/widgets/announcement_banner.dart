@@ -10,6 +10,7 @@ import '../services/time_format.dart';
 import 'pill_tag.dart';
 import 'user_avatar.dart';
 import 'retrying_network_image.dart';
+import '../l10n/tr.dart';
 
 /// 공지바 폭이 이보다 좁으면(폰 세로 화면 등) 작성자 이름을 빼고 시각을 짧게("27분 전"/"2026/09/30") 쓴다.
 const double _compactWidth = 460;
@@ -150,11 +151,11 @@ class _AnnouncementBannerState extends State<AnnouncementBanner> {
                 final showTime = width >= _tinyWidth;
                 return Row(
                   children: [
-                    const PillTag(
+                    PillTag(
                       key: ValueKey('announcement-tag'),
                       icon: Icons.campaign,
-                      label: '공지',
-                      tooltip: '고정된 공지',
+                      label: tr('공지'),
+                      tooltip: tr('고정된 공지'),
                     ),
                     const SizedBox(width: 8),
                     if (announcement.hasImage) ...[
@@ -193,7 +194,7 @@ class _AnnouncementBannerState extends State<AnnouncementBanner> {
                     if (commentCount > 0) ...[
                       const SizedBox(width: 10),
                       Tooltip(
-                        message: '댓글',
+                        message: tr('댓글'),
                         child: Row(
                           key: const ValueKey('announcement-comments'),
                           mainAxisSize: MainAxisSize.min,
@@ -243,7 +244,7 @@ class _AnnouncementBannerState extends State<AnnouncementBanner> {
                     IconButton(
                       key: const ValueKey('announcement-hide'),
                       icon: Icon(Icons.close, size: 18, color: hint),
-                      tooltip: '이번 공지 숨기기 (나에게만)',
+                      tooltip: tr('이번 공지 숨기기 (나에게만)'),
                       visualDensity: VisualDensity.compact,
                       onPressed: () => _hide(announcement.id),
                     ),

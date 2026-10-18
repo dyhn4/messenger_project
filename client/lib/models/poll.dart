@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart' show StringCharacters;
+import '../l10n/tr.dart';
 
 /// 투표 제목·설명·보기 한도 — 서버 polls 라우트가 같은 값으로 다시 검사한다.
 const pollTitleMaxLength = 100;
@@ -281,9 +282,11 @@ PollDraftCheck checkPollDraft({
   final current = now ?? DateTime.now();
   final trimmedTitle = title.trim();
   final titleError = trimmedTitle.isEmpty
-      ? '투표 제목을 입력하세요.'
+      ? tr('투표 제목을 입력하세요.')
       : _graphemeLength(trimmedTitle) > pollTitleMaxLength
-      ? '투표 제목은 $pollTitleMaxLength자까지 쓸 수 있습니다.'
+      ? tr('투표 제목은 {pollTitleMaxLength}자까지 쓸 수 있습니다.', {
+          'pollTitleMaxLength': pollTitleMaxLength,
+        })
       : null;
 
   final seen = <String>{};
@@ -297,26 +300,34 @@ PollDraftCheck checkPollDraft({
     }
     filled++;
     if (_graphemeLength(text) > pollOptionMaxLength) {
-      errors.add('보기는 $pollOptionMaxLength자까지 쓸 수 있습니다.');
+      errors.add(
+        tr('보기는 {pollOptionMaxLength}자까지 쓸 수 있습니다.', {
+          'pollOptionMaxLength': pollOptionMaxLength,
+        }),
+      );
     } else if (!seen.add(text)) {
-      errors.add('같은 보기가 있습니다.');
+      errors.add(tr('같은 보기가 있습니다.'));
     } else {
       errors.add(null);
     }
   }
   final optionsError = filled < pollOptionsMinCount
-      ? '보기를 $pollOptionsMinCount개 이상 입력하세요.'
+      ? tr('보기를 {pollOptionsMinCount}개 이상 입력하세요.', {
+          'pollOptionsMinCount': pollOptionsMinCount,
+        })
       : null;
 
   String? closesAtError;
   if (closesAt == null) {
-    closesAtError = '마감 시각을 선택하세요.';
+    closesAtError = tr('마감 시각을 선택하세요.');
   } else if (!closesAt.isAfter(current)) {
-    closesAtError = '마감 시각은 지금보다 늦어야 합니다.';
+    closesAtError = tr('마감 시각은 지금보다 늦어야 합니다.');
   } else if (closesAt.isAfter(
     current.add(const Duration(days: pollMaxDaysAhead)),
   )) {
-    closesAtError = '마감 시각은 지금부터 $pollMaxDaysAhead일 안이어야 합니다.';
+    closesAtError = tr('마감 시각은 지금부터 {pollMaxDaysAhead}일 안이어야 합니다.', {
+      'pollMaxDaysAhead': pollMaxDaysAhead,
+    });
   }
   return PollDraftCheck(
     titleError: titleError,
@@ -330,7 +341,7 @@ PollDraftCheck checkPollDraft({
 int _graphemeLength(String s) => s.characters.length;
 
 /// 방 목록·알림·검색 결과에 쓰는 한 줄 미리보기 — 서버 push.js·rooms.js와 같은 "[투표] 제목".
-String pollPreviewText(String? title) => '[투표] ${title ?? ''}';
+String pollPreviewText(String? title) => tr('[투표] {p0}', {'p0': title ?? ''});
 
 /// "5월 30일 오후 6:00" — 마감 시각 표시. 올해가 아니면 연도를 붙인다. intl 로케일 초기화에
 /// 기대지 않고(위젯 테스트·백그라운드에서도 같은 결과) 직접 만든다.
@@ -338,8 +349,20 @@ String formatPollTime(DateTime t, {DateTime? now}) {
   final local = t.toLocal();
   final year = (now ?? DateTime.now()).year;
   final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
-  final meridiem = local.hour < 12 ? '오전' : '오후';
+  final meridiem = local.hour < 12 ? tr('오전') : tr('오후');
   final minute = local.minute.toString().padLeft(2, '0');
-  final prefix = local.year == year ? '' : '${local.year}년 ';
-  return '$prefix${local.month}월 ${local.day}일 $meridiem $hour12:$minute';
+  final prefix = local.year == year
+      ? ''
+      : tr('{local.year}년 ', {'local.year': local.year});
+  return tr(
+    '{prefix}{local.month}월 {local.day}일 {meridiem} {hour12}:{minute}',
+    {
+      'prefix': prefix,
+      'local.month': local.month,
+      'local.day': local.day,
+      'meridiem': meridiem,
+      'hour12': hour12,
+      'minute': minute,
+    },
+  );
 }

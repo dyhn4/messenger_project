@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../services/main_window_methods.dart';
 import '../../services/screen_capture.dart';
+import '../../l10n/tr.dart';
 
 /// 창 생성 인자(JSON)의 "type" 값(main.dart가 이걸 보고 어느 서브 창 진입점을 탈지 정한다).
 const kCaptureWindowType = 'capture';
@@ -100,7 +101,7 @@ Future<CaptureOutcome?> startScreenCapture({
       Future<void>.delayed(
         hideMessenger ? const Duration(milliseconds: 60) : Duration.zero,
       ).then((_) => captureVirtualScreenTo(geo)).catchError((Object e) {
-        _log('화면 찍기 실패: $e');
+        _log(tr('화면 찍기 실패: {e}', {'e': e}));
         if (!completer.isCompleted) completer.complete(null);
       }),
     );
@@ -117,7 +118,7 @@ Future<CaptureOutcome?> startScreenCapture({
 
     var overlayId = await _beginOnExistingOverlay(payload);
     if (overlayId != null) {
-      _log('오버레이 재사용 ${ms()}ms');
+      _log(tr('오버레이 재사용 {p0}ms', {'p0': ms()}));
     } else {
       final overlay = await WindowController.create(
         WindowConfiguration(
@@ -126,7 +127,7 @@ Future<CaptureOutcome?> startScreenCapture({
       );
       overlayId = overlay.windowId;
       _liveOverlayWindowId = overlayId;
-      _log('오버레이 새로 생성 ${ms()}ms');
+      _log(tr('오버레이 새로 생성 {p0}ms', {'p0': ms()}));
     }
 
     // 오버레이가 결과를 알리지 못하고 닫혀버린 경우(Alt+F4 등)에도 기다림이 끝나도록.
@@ -169,7 +170,7 @@ Future<String?> _beginOnExistingOverlay(Map<String, dynamic> payload) async {
     ).invokeMethod(_kBeginMethod, payload).timeout(const Duration(seconds: 3));
     return id;
   } catch (e) {
-    _log('오버레이 재사용 실패(새로 만듭니다): $e');
+    _log(tr('오버레이 재사용 실패(새로 만듭니다): {e}', {'e': e}));
     _liveOverlayWindowId = null;
     return null;
   }
@@ -245,14 +246,14 @@ Future<void> _prepareSession(Map<String, dynamic> args) async {
   final w = args['width'] as int;
   final h = args['height'] as int;
   final mainId = args['mainWindowId'] as String;
-  _log('캡처 준비 시작 ${w}x$h @($x,$y)');
+  _log(tr('캡처 준비 시작 {w}x{h} @({x},{y})', {'w': w, 'h': h, 'x': x, 'y': y}));
 
   // 화면을 찍는 쪽(메인 창)이 아직 파일을 다 쓰지 못했을 수 있다 — 나타날 때까지 기다린다.
   final waitStart = DateTime.now();
   while (!File(rawPath).existsSync()) {
     if (DateTime.now().difference(waitStart) > const Duration(seconds: 10)) {
-      _log('화면 파일을 기다리다 시간 초과');
-      await _reportAndHide(mainId, 'cancel', null, error: '화면을 찍지 못했습니다.');
+      _log(tr('화면 파일을 기다리다 시간 초과'));
+      await _reportAndHide(mainId, 'cancel', null, error: tr('화면을 찍지 못했습니다.'));
       return;
     }
     await Future<void>.delayed(const Duration(milliseconds: 1));
@@ -262,7 +263,7 @@ Future<void> _prepareSession(Map<String, dynamic> args) async {
   try {
     image = await _decodeBgra(await File(rawPath).readAsBytes(), w, h);
   } catch (e) {
-    _log('화면 이미지 준비 실패: $e');
+    _log(tr('화면 이미지 준비 실패: {e}', {'e': e}));
     await _reportAndHide(mainId, 'cancel', null, error: '$e');
     return;
   }
@@ -291,7 +292,7 @@ Future<void> _prepareSession(Map<String, dynamic> args) async {
   // 숨겨둔 창이 프레임을 그리지 않아 첫 프레임 콜백이 안 오는 경우를 대비한 안전장치.
   Future<void>.delayed(const Duration(milliseconds: 400), () {
     if (_shownSeq != seq) {
-      _log('첫 프레임 콜백이 없어 직접 표시');
+      _log(tr('첫 프레임 콜백이 없어 직접 표시'));
       _showOverlayWindow();
     }
   });
@@ -299,7 +300,11 @@ Future<void> _prepareSession(Map<String, dynamic> args) async {
   if (previous != null) {
     Future<void>.delayed(const Duration(seconds: 1), previous.image.dispose);
   }
-  _log('이미지 준비 완료 ${DateTime.now().difference(t0).inMilliseconds}ms');
+  _log(
+    tr('이미지 준비 완료 {p0}ms', {
+      'p0': DateTime.now().difference(t0).inMilliseconds,
+    }),
+  );
 }
 
 /// 창을 숨기고 메인 창에 결과를 알린다(캡처를 시작하지도 못한 경우 포함).
@@ -319,7 +324,7 @@ Future<void> _reportAndHide(
         })
         .timeout(const Duration(seconds: 5));
   } catch (e) {
-    _log('메인 창에 결과 전달 실패: $e');
+    _log(tr('메인 창에 결과 전달 실패: {e}', {'e': e}));
   }
 }
 
@@ -328,7 +333,14 @@ Future<ui.Image> _decodeBgra(Uint8List bytes, int w, int h) async {
   // 엔진이 버퍼 밖을 읽어서 앱이 그대로 죽는다. 여기서 먼저 막고 예외로 바꾼다.
   final needed = w * h * 4;
   if (w <= 0 || h <= 0 || bytes.length < needed) {
-    throw StateError('화면 이미지 크기가 맞지 않습니다(${bytes.length} < $needed, $w x $h).');
+    throw StateError(
+      tr('화면 이미지 크기가 맞지 않습니다({bytes.length} < {needed}, {w} x {h}).', {
+        'bytes.length': bytes.length,
+        'needed': needed,
+        'w': w,
+        'h': h,
+      }),
+    );
   }
   final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
   final descriptor = ui.ImageDescriptor.raw(
@@ -578,7 +590,7 @@ class _CaptureOverlayState extends State<_CaptureOverlay> {
       if (_overlayHwnd == 0) return;
       _showOverlayWindow();
       windowManager.focus();
-      _log('오버레이 표시');
+      _log(tr('오버레이 표시'));
     });
   }
 
@@ -807,13 +819,13 @@ class _CaptureOverlayState extends State<_CaptureOverlay> {
     if (_finishing) return;
     if (_textAt != null) _commitText();
     _finishing = true;
-    _log('finish($action) 시작');
+    _log(tr('finish({action}) 시작', {'action': action}));
     String? path;
     if (action != 'cancel') {
       try {
         path = (await _exportSelection()).path;
       } catch (e) {
-        _log('내보내기 실패: $e');
+        _log(tr('내보내기 실패: {e}', {'e': e}));
         action = 'cancel';
       }
     }
@@ -1013,25 +1025,25 @@ class _CaptureOverlayState extends State<_CaptureOverlay> {
               _group([
                 _iconBtn(
                   Icons.open_with,
-                  '선택 (그림을 골라 이동, Delete로 삭제)',
+                  tr('선택 (그림을 골라 이동, Delete로 삭제)'),
                   () => _pickTool(_Tool.select),
                   active: _tool == _Tool.select,
                 ),
                 _iconBtn(
                   Icons.crop_square,
-                  '도형 삽입',
+                  tr('도형 삽입'),
                   () => _pickTool(_Tool.shape),
                   active: _tool == _Tool.shape,
                 ),
                 _iconBtn(
                   Icons.title,
-                  '글쓰기',
+                  tr('글쓰기'),
                   () => _pickTool(_Tool.text),
                   active: _tool == _Tool.text,
                 ),
                 _iconBtn(
                   Icons.edit_outlined,
-                  '그리기',
+                  tr('그리기'),
                   () => _pickTool(_Tool.pen),
                   active: _tool == _Tool.pen,
                 ),
@@ -1040,18 +1052,18 @@ class _CaptureOverlayState extends State<_CaptureOverlay> {
               _group([
                 _iconBtn(
                   Icons.close,
-                  '취소',
+                  tr('취소'),
                   () => _finish('cancel'),
                   color: const Color(0xFFE53935),
                 ),
                 _iconBtn(
                   Icons.file_download_outlined,
-                  '저장',
+                  tr('저장'),
                   () => _finish('save'),
                 ),
                 _iconBtn(
                   Icons.check,
-                  '파일 업로드',
+                  tr('파일 업로드'),
                   () => _finish('dialog'),
                   color: const Color(0xFF1E88E5),
                 ),
@@ -1289,21 +1301,21 @@ class _HintBanner extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(20, 12, 8, 12),
         child: Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Ctrl + 드래그 : 파일 업로드 창 열기', style: style),
-                  Text('Ctrl + Shift + 드래그 : 바로 업로드하고 보내기', style: style),
-                  Text('드래그 : 편집(그리기)·저장·업로드 선택', style: style),
+                  Text(tr('Ctrl + 드래그 : 파일 업로드 창 열기'), style: style),
+                  Text(tr('Ctrl + Shift + 드래그 : 바로 업로드하고 보내기'), style: style),
+                  Text(tr('드래그 : 편집(그리기)·저장·업로드 선택'), style: style),
                 ],
               ),
             ),
             IconButton(
               icon: const Icon(Icons.close, color: Colors.white70, size: 18),
               onPressed: onClose,
-              tooltip: '안내 닫기',
+              tooltip: tr('안내 닫기'),
             ),
           ],
         ),

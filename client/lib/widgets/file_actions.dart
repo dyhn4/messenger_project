@@ -13,18 +13,19 @@ import 'app_toast.dart';
 import 'attachment_widgets.dart';
 import 'data_usage_warning.dart';
 import 'message_actions.dart' show pushMessageForwardScreen;
+import '../l10n/tr.dart';
 
 /// "이 파일을 삭제할까요?" 확인 대화상자 — 삭제하겠다고 하면 true. 파일을 지워도 그 파일에 달린 댓글은 남는다.
 Future<bool> confirmDeleteFile(BuildContext context) async {
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('파일 삭제'),
-      content: const Text('이 파일을 삭제할까요? 파일에 달린 댓글은 남아 있습니다.'),
+      title: Text(tr('파일 삭제')),
+      content: Text(tr('이 파일을 삭제할까요? 파일에 달린 댓글은 남아 있습니다.')),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('confirm-delete-file'),
@@ -32,7 +33,7 @@ Future<bool> confirmDeleteFile(BuildContext context) async {
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
           onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('삭제'),
+          child: Text(tr('삭제')),
         ),
       ],
     ),
@@ -70,29 +71,37 @@ Future<void> showFileActionSheet(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            tile(Icons.send_outlined, '파일 전달', () => actions.forward(context)),
+            tile(
+              Icons.send_outlined,
+              tr('파일 전달'),
+              () => actions.forward(context),
+            ),
             tile(
               Icons.download_outlined,
-              '다운로드',
+              tr('다운로드'),
               () => actions.download(context),
             ),
             tile(
               favorited ? Icons.star : Icons.star_border,
-              favorited ? '즐겨찾기 빼기' : '즐겨찾기',
+              favorited ? tr('즐겨찾기 빼기') : tr('즐겨찾기'),
               onToggleFavorite ?? () => actions.toggleFavorite(context),
             ),
             if (isImage && canCopyImageToClipboard)
-              tile(Icons.copy_outlined, '복사', () => actions.copyImage(context)),
+              tile(
+                Icons.copy_outlined,
+                tr('복사'),
+                () => actions.copyImage(context),
+              ),
             if (isImage)
               tile(
                 Icons.image_outlined,
-                '원본 파일 보기',
+                tr('원본 파일 보기'),
                 () => actions.openOriginal(context),
               ),
             if (actions.canDelete)
               tile(
                 Icons.delete_outline,
-                '삭제',
+                tr('삭제'),
                 () => actions.deleteFile(context),
                 color: Theme.of(sheetContext).colorScheme.error,
               ),
@@ -156,13 +165,15 @@ class FileActions {
         attachmentId ?? message.id,
       );
     } catch (e) {
-      if (context.mounted) showAppToast(context, '파일을 삭제하지 못했습니다: $e');
+      if (context.mounted) {
+        showAppToast(context, tr('파일을 삭제하지 못했습니다: {e}', {'e': e}));
+      }
       return false;
     }
     // 서버가 이 파일의 즐겨찾기 항목을 정리했으니 즐겨찾기 화면은 다음에 보일 때 다시 받는다.
     session.favorites.invalidate();
     onDeleted?.call();
-    if (context.mounted) showAppToast(context, '파일을 삭제했습니다.');
+    if (context.mounted) showAppToast(context, tr('파일을 삭제했습니다.'));
     return true;
   }
 
@@ -197,12 +208,15 @@ class FileActions {
         attachmentNonce: attachmentNonce,
       );
       if (!context.mounted || savedPath == null) return;
-      showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
+      showAppToast(
+        context,
+        tr('다운로드 완료: {p0}', {'p0': displayDownloadPath(savedPath)}),
+      );
     } on DownloadCancelled catch (e) {
       // 진행 카드의 X로 멈췄다.
       if (context.mounted) showAppToast(context, '$e');
     } catch (e) {
-      if (context.mounted) showAppToast(context, '다운로드 실패: $e');
+      if (context.mounted) showAppToast(context, tr('다운로드 실패: {e}', {'e': e}));
     }
   }
 
@@ -211,9 +225,11 @@ class FileActions {
   Future<void> copyImage(BuildContext context) async {
     try {
       await copyImageToClipboard(_bytes());
-      if (context.mounted) showAppToast(context, '이미지를 복사했습니다.');
+      if (context.mounted) showAppToast(context, tr('이미지를 복사했습니다.'));
     } catch (e) {
-      if (context.mounted) showAppToast(context, '이미지를 복사하지 못했습니다: $e');
+      if (context.mounted) {
+        showAppToast(context, tr('이미지를 복사하지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 
@@ -226,11 +242,13 @@ class FileActions {
         fileName: fileName,
       );
       if (context.mounted) {
-        showAppToast(context, on ? '즐겨찾기에 담았습니다.' : '즐겨찾기에서 뺐습니다.');
+        showAppToast(context, on ? tr('즐겨찾기에 담았습니다.') : tr('즐겨찾기에서 뺐습니다.'));
       }
       return on;
     } catch (e) {
-      if (context.mounted) showAppToast(context, '즐겨찾기에 담지 못했습니다: $e');
+      if (context.mounted) {
+        showAppToast(context, tr('즐겨찾기에 담지 못했습니다: {e}', {'e': e}));
+      }
       return null;
     }
   }
@@ -262,7 +280,9 @@ class FileActions {
         showAppToast(context, notice, duration: const Duration(seconds: 4));
       }
     } catch (e) {
-      if (context.mounted) showAppToast(context, '원본을 열지 못했습니다: $e');
+      if (context.mounted) {
+        showAppToast(context, tr('원본을 열지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 
@@ -286,7 +306,9 @@ class FileActions {
         },
       );
     } catch (e) {
-      if (context.mounted) showAppToast(context, '인쇄하지 못했습니다: $e');
+      if (context.mounted) {
+        showAppToast(context, tr('인쇄하지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 }

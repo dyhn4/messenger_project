@@ -10,12 +10,13 @@ import '../../services/session.dart';
 import '../../services/wiki_doc.dart';
 import '../../widgets/app_toast.dart';
 import '../project/note_markdown.dart' show NoteBody;
+import '../../l10n/tr.dart';
 
 /// 팀 위키 열기 — 지금 팀의 위키(서버 wiki.js).
 Future<void> openWikiScreen(BuildContext context, Session session) {
   final team = session.currentTeam;
   if (team == null) {
-    showAppToast(context, '팀을 먼저 고르세요.');
+    showAppToast(context, tr('팀을 먼저 고르세요.'));
     return Future.value();
   }
   return Navigator.of(context).push(
@@ -119,8 +120,8 @@ class _WikiScreenState extends State<WikiScreen> {
   Future<void> _newPage({String? parentId}) async {
     final title = await _askText(
       context,
-      parentId == null ? '새 페이지' : '하위 페이지',
-      action: '만들기',
+      parentId == null ? tr('새 페이지') : tr('하위 페이지'),
+      action: tr('만들기'),
     );
     if (title == null || title.isEmpty) return;
     try {
@@ -162,28 +163,28 @@ class _WikiScreenState extends State<WikiScreen> {
           padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
           child: Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
-                  '페이지',
+                  tr('페이지'),
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
               IconButton(
                 key: const ValueKey('wiki-search'),
-                tooltip: '찾기',
+                tooltip: tr('찾기'),
                 onPressed: _search,
                 icon: const Icon(Icons.search, size: 20),
               ),
               IconButton(
                 key: const ValueKey('wiki-trash'),
-                tooltip: '휴지통',
+                tooltip: tr('휴지통'),
                 onPressed: _trash,
                 icon: const Icon(Icons.delete_outline, size: 20),
               ),
               if (tree?.canEdit ?? false)
                 IconButton(
                   key: const ValueKey('wiki-new-page'),
-                  tooltip: '새 페이지',
+                  tooltip: tr('새 페이지'),
                   onPressed: () => _newPage(),
                   icon: const Icon(Icons.note_add_outlined, size: 20),
                 ),
@@ -203,8 +204,8 @@ class _WikiScreenState extends State<WikiScreen> {
                   padding: const EdgeInsets.all(24),
                   child: Text(
                     tree.canEdit
-                        ? '아직 페이지가 없습니다. 위의 + 로 첫 페이지를 만드세요.'
-                        : '아직 페이지가 없습니다.',
+                        ? tr('아직 페이지가 없습니다. 위의 + 로 첫 페이지를 만드세요.')
+                        : tr('아직 페이지가 없습니다.'),
                     style: TextStyle(color: hint),
                   ),
                 )
@@ -244,7 +245,7 @@ class _WikiScreenState extends State<WikiScreen> {
     if (id == null) {
       return Center(
         child: Text(
-          '왼쪽에서 페이지를 고르세요.',
+          tr('왼쪽에서 페이지를 고르세요.'),
           style: TextStyle(color: Theme.of(context).hintColor),
         ),
       );
@@ -272,7 +273,13 @@ class _WikiScreenState extends State<WikiScreen> {
         final wide = constraints.maxWidth >= 800;
         if (wide) {
           return Scaffold(
-            appBar: AppBar(title: Text('위키 · ${widget.teamName}')),
+            appBar: AppBar(
+              title: Text(
+                tr('위키 · {widget.teamName}', {
+                  'widget.teamName': widget.teamName,
+                }),
+              ),
+            ),
             body: Row(
               children: [
                 SizedBox(width: 280, child: _treePane()),
@@ -290,11 +297,15 @@ class _WikiScreenState extends State<WikiScreen> {
           },
           child: Scaffold(
             appBar: AppBar(
-              title: Text('위키 · ${widget.teamName}'),
+              title: Text(
+                tr('위키 · {widget.teamName}', {
+                  'widget.teamName': widget.teamName,
+                }),
+              ),
               leading: _selected == null
                   ? null
                   : IconButton(
-                      tooltip: '페이지 목록',
+                      tooltip: tr('페이지 목록'),
                       onPressed: () => setState(() => _selected = null),
                       icon: const Icon(Icons.arrow_back),
                     ),
@@ -388,13 +399,13 @@ class WikiPagePaneState extends State<WikiPagePane> {
     if (!mounted) return;
     if (doc.removed && !_closed) {
       _closed = true;
-      showAppToast(context, '이 페이지가 휴지통으로 옮겨졌습니다.');
+      showAppToast(context, tr('이 페이지가 휴지통으로 옮겨졌습니다.'));
       widget.onClosed();
       return;
     }
     if (doc.lostLocalEdits && !_toldLost) {
       _toldLost = true;
-      showAppToast(context, '연결이 끊긴 동안 많이 바뀌어 내 마지막 수정 일부가 반영되지 못했습니다.');
+      showAppToast(context, tr('연결이 끊긴 동안 많이 바뀌어 내 마지막 수정 일부가 반영되지 못했습니다.'));
     }
     // 들어간 직후 — 편집 중이면 입력칸을 문서 글로 맞춘다.
     if (_editing &&
@@ -479,9 +490,9 @@ class WikiPagePaneState extends State<WikiPagePane> {
         case 'rename':
           final title = await _askText(
             context,
-            '제목 바꾸기',
+            tr('제목 바꾸기'),
             initial: doc.title,
-            action: '바꾸기',
+            action: tr('바꾸기'),
           );
           if (title == null || title.isEmpty || title == doc.title) return;
           await _api.updateWikiPage(widget.pageId, title: title);
@@ -513,17 +524,21 @@ class WikiPagePaneState extends State<WikiPagePane> {
           final ok = await showDialog<bool>(
             context: context,
             builder: (c) => AlertDialog(
-              title: const Text('페이지 삭제'),
-              content: Text("'${doc.title}'과(와) 그 아래 페이지를 휴지통으로 옮길까요?"),
+              title: Text(tr('페이지 삭제')),
+              content: Text(
+                tr('\'{doc.title}\'과(와) 그 아래 페이지를 휴지통으로 옮길까요?', {
+                  'doc.title': doc.title,
+                }),
+              ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(c).pop(false),
-                  child: const Text('취소'),
+                  child: Text(tr('취소')),
                 ),
                 TextButton(
                   key: const ValueKey('wiki-delete-ok'),
                   onPressed: () => Navigator.of(c).pop(true),
-                  child: const Text('휴지통으로'),
+                  child: Text(tr('휴지통으로')),
                 ),
               ],
             ),
@@ -558,7 +573,7 @@ class WikiPagePaneState extends State<WikiPagePane> {
         runSpacing: 4,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Text('함께 보는 중', style: TextStyle(fontSize: 12, color: hint)),
+          Text(tr('함께 보는 중'), style: TextStyle(fontSize: 12, color: hint)),
           for (final e in others)
             Chip(
               visualDensity: VisualDensity.compact,
@@ -572,7 +587,10 @@ class WikiPagePaneState extends State<WikiPagePane> {
               label: Text(
                 doc.cursors[e.userId] == null
                     ? e.name
-                    : '${e.name} · ${_lineOf(doc.cursors[e.userId]!.head)}행',
+                    : tr('{e.name} · {p0}행', {
+                        'e.name': e.name,
+                        'p0': _lineOf(doc.cursors[e.userId]!.head),
+                      }),
                 style: const TextStyle(fontSize: 12),
               ),
               side: BorderSide(color: _hexColor(e.color)),
@@ -641,7 +659,7 @@ class WikiPagePaneState extends State<WikiPagePane> {
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: Text(
-                        '저장 중…',
+                        tr('저장 중…'),
                         key: const ValueKey('wiki-saving'),
                         style: TextStyle(fontSize: 12, color: hint),
                       ),
@@ -656,32 +674,29 @@ class WikiPagePaneState extends State<WikiPagePane> {
                             : Icons.edit_outlined,
                         size: 18,
                       ),
-                      label: Text(_editing ? '보기' : '편집'),
+                      label: Text(_editing ? tr('보기') : tr('편집')),
                     ),
                   PopupMenuButton<String>(
                     key: const ValueKey('wiki-menu'),
-                    tooltip: '더보기',
+                    tooltip: tr('더보기'),
                     onSelected: _action,
                     itemBuilder: (_) => [
                       if (canEdit) ...[
-                        const PopupMenuItem(
+                        PopupMenuItem(
                           value: 'child',
-                          child: Text('하위 페이지 만들기'),
+                          child: Text(tr('하위 페이지 만들기')),
                         ),
-                        const PopupMenuItem(
+                        PopupMenuItem(
                           value: 'rename',
-                          child: Text('제목 바꾸기'),
+                          child: Text(tr('제목 바꾸기')),
                         ),
-                        const PopupMenuItem(value: 'move', child: Text('옮기기')),
+                        PopupMenuItem(value: 'move', child: Text(tr('옮기기'))),
                       ],
-                      const PopupMenuItem(
-                        value: 'versions',
-                        child: Text('판 기록'),
-                      ),
+                      PopupMenuItem(value: 'versions', child: Text(tr('판 기록'))),
                       if (page?.canRemove ?? false)
-                        const PopupMenuItem(
+                        PopupMenuItem(
                           value: 'delete',
-                          child: Text('휴지통으로'),
+                          child: Text(tr('휴지통으로')),
                         ),
                     ],
                   ),
@@ -699,7 +714,9 @@ class WikiPagePaneState extends State<WikiPagePane> {
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
-                    '함께 편집하려면 연결이 필요합니다 — ${doc.error}',
+                    tr('함께 편집하려면 연결이 필요합니다 — {doc.error}', {
+                      'doc.error': doc.error,
+                    }),
                     style: TextStyle(
                       fontSize: 12,
                       color: theme.colorScheme.error,
@@ -728,9 +745,10 @@ class WikiPagePaneState extends State<WikiPagePane> {
                       height: 1.5,
                       fontFamilyFallback: ['D2Coding', 'monospace'],
                     ),
-                    decoration: const InputDecoration(
-                      hintText:
-                          '마크다운으로 쓰세요 — # 제목, - 목록, **굵게**, [링크](https://…)',
+                    decoration: InputDecoration(
+                      hintText: tr(
+                        '마크다운으로 쓰세요 — # 제목, - 목록, **굵게**, [링크](https://…)',
+                      ),
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -740,7 +758,9 @@ class WikiPagePaneState extends State<WikiPagePane> {
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
                   child: body.trim().isEmpty
                       ? Text(
-                          canEdit ? '비어 있습니다. "편집"을 눌러 쓰세요.' : '비어 있습니다.',
+                          canEdit
+                              ? tr('비어 있습니다. "편집"을 눌러 쓰세요.')
+                              : tr('비어 있습니다.'),
                           style: TextStyle(color: hint),
                         )
                       : NoteBody(body, resolveUrl: widget.session.resolveUrl),
@@ -798,12 +818,12 @@ class _TextDialogState extends State<_TextDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('취소'),
+        child: Text(tr('취소')),
       ),
       FilledButton(
         key: const ValueKey('wiki-text-ok'),
         onPressed: () => Navigator.of(context).pop(_c.text.trim()),
-        child: Text(widget.action),
+        child: Text(tr(widget.action)),
       ),
     ],
   );
@@ -830,7 +850,7 @@ class _MoveDialog extends StatelessWidget {
       }
     }
     return AlertDialog(
-      title: const Text('옮길 곳'),
+      title: Text(tr('옮길 곳')),
       content: SizedBox(
         width: 360,
         height: 360,
@@ -840,7 +860,7 @@ class _MoveDialog extends StatelessWidget {
               key: const ValueKey('wiki-move-root'),
               dense: true,
               leading: const Icon(Icons.vertical_align_top),
-              title: const Text('맨 위로'),
+              title: Text(tr('맨 위로')),
               onTap: () => Navigator.of(context).pop((id: null)),
             ),
             for (final p in pages)
@@ -858,7 +878,7 @@ class _MoveDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
       ],
     );
@@ -911,7 +931,7 @@ class _VersionsDialogState extends State<_VersionsDialog> {
     try {
       await widget.api.restoreWikiVersion(widget.pageId, v.id);
       if (!mounted) return;
-      showAppToast(context, '그 판으로 되돌렸습니다.');
+      showAppToast(context, tr('그 판으로 되돌렸습니다.'));
       Navigator.of(context).pop();
     } catch (e) {
       if (mounted) showAppToast(context, '$e');
@@ -923,7 +943,11 @@ class _VersionsDialogState extends State<_VersionsDialog> {
     final open = _open;
     final hint = Theme.of(context).hintColor;
     return AlertDialog(
-      title: Text(open == null ? '판 기록' : '판 — ${_date(open.createdAt)}'),
+      title: Text(
+        open == null
+            ? tr('판 기록')
+            : tr('판 — {p0}', {'p0': _date(open.createdAt)}),
+      ),
       content: SizedBox(
         width: 520,
         height: 440,
@@ -938,7 +962,7 @@ class _VersionsDialogState extends State<_VersionsDialog> {
             : _versions!.isEmpty
             ? Center(
                 child: Text(
-                  '아직 남은 판이 없습니다. 편집하는 동안 10분마다, 모두 나가면 판이 남습니다.',
+                  tr('아직 남은 판이 없습니다. 편집하는 동안 10분마다, 모두 나가면 판이 남습니다.'),
                   style: TextStyle(color: hint),
                 ),
               )
@@ -952,7 +976,7 @@ class _VersionsDialogState extends State<_VersionsDialog> {
                       subtitle: Text(
                         [
                           if (v.editorNames != null) v.editorNames!,
-                          '${v.size}자',
+                          tr('{v.size}자', {'v.size': v.size}),
                         ].join(' · '),
                       ),
                       onTap: () => _show(v),
@@ -964,18 +988,18 @@ class _VersionsDialogState extends State<_VersionsDialog> {
         if (open != null) ...[
           TextButton(
             onPressed: () => setState(() => _open = null),
-            child: const Text('목록'),
+            child: Text(tr('목록')),
           ),
           if (widget.canEdit)
             FilledButton(
               key: const ValueKey('wiki-version-restore'),
               onPressed: () => _restore(open),
-              child: const Text('이 판으로 되돌리기'),
+              child: Text(tr('이 판으로 되돌리기')),
             ),
         ],
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );
@@ -1020,7 +1044,7 @@ class _SearchDialogState extends State<_SearchDialog> {
     final hint = Theme.of(context).hintColor;
     final hits = _hits;
     return AlertDialog(
-      title: const Text('위키에서 찾기'),
+      title: Text(tr('위키에서 찾기')),
       content: SizedBox(
         width: 460,
         height: 420,
@@ -1029,9 +1053,9 @@ class _SearchDialogState extends State<_SearchDialog> {
             TextField(
               key: const ValueKey('wiki-search-input'),
               autofocus: true,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 prefixIcon: Icon(Icons.search),
-                hintText: '제목·본문',
+                hintText: tr('제목·본문'),
               ),
               onChanged: _changed,
             ),
@@ -1041,7 +1065,7 @@ class _SearchDialogState extends State<_SearchDialog> {
                   : hits.isEmpty
                   ? Center(
                       child: Text(
-                        '찾는 페이지가 없습니다.',
+                        tr('찾는 페이지가 없습니다.'),
                         style: TextStyle(color: hint),
                       ),
                     )
@@ -1070,7 +1094,7 @@ class _SearchDialogState extends State<_SearchDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );
@@ -1106,7 +1130,7 @@ class _TrashDialogState extends State<_TrashDialog> {
   Widget build(BuildContext context) {
     final rows = _rows;
     return AlertDialog(
-      title: const Text('위키 휴지통'),
+      title: Text(tr('위키 휴지통')),
       content: SizedBox(
         width: 420,
         height: 360,
@@ -1115,7 +1139,7 @@ class _TrashDialogState extends State<_TrashDialog> {
             : rows.isEmpty
             ? Center(
                 child: Text(
-                  '휴지통이 비어 있습니다.',
+                  tr('휴지통이 비어 있습니다.'),
                   style: TextStyle(color: Theme.of(context).hintColor),
                 ),
               )
@@ -1125,7 +1149,7 @@ class _TrashDialogState extends State<_TrashDialog> {
                     ListTile(
                       key: ValueKey('wiki-trash-${r.id}'),
                       title: Text(r.title),
-                      subtitle: Text('${_date(r.deletedAt)} 삭제'),
+                      subtitle: Text(tr('{p0} 삭제', {'p0': _date(r.deletedAt)})),
                       trailing: r.canRemove
                           ? TextButton(
                               key: ValueKey('wiki-restore-${r.id}'),
@@ -1139,7 +1163,7 @@ class _TrashDialogState extends State<_TrashDialog> {
                                   }
                                 }
                               },
-                              child: const Text('되살리기'),
+                              child: Text(tr('되살리기')),
                             )
                           : null,
                     ),
@@ -1149,7 +1173,7 @@ class _TrashDialogState extends State<_TrashDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );

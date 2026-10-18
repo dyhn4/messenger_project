@@ -6,6 +6,7 @@ import '../../models/groupware.dart';
 import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
+import '../../l10n/tr.dart';
 
 /// 결재선 — 결재자(순서대로)·결재자마다의 역할(결재·합의·전결)과 참조자. 신청 창과 결재선 선택기([ApprovalLinePicker])가 같이 본다.
 class ApprovalLineController extends ChangeNotifier {
@@ -172,7 +173,7 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
     for (final c in _candidates ?? const <ApprovalCandidate>[]) {
       if (c.id == id) return c.name;
     }
-    return '(알 수 없음)';
+    return tr('(알 수 없음)');
   }
 
   Future<String?> _pickPerson({
@@ -194,12 +195,12 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
   Future<void> _saveLine() async {
     final c = widget.controller;
     if (c.approverIds.isEmpty) {
-      showAppToast(context, '결재자를 먼저 고르세요.');
+      showAppToast(context, tr('결재자를 먼저 고르세요.'));
       return;
     }
     final name = await showDialog<String>(
       context: context,
-      builder: (_) => const _NameDialog(title: '결재선 저장', label: '결재선 이름'),
+      builder: (_) => _NameDialog(title: tr('결재선 저장'), label: tr('결재선 이름')),
     );
     if (name == null || name.trim().isEmpty || !mounted) return;
     try {
@@ -211,9 +212,9 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
       );
       if (!mounted) return;
       setState(() => _lines = [line, ..._lines]);
-      showAppToast(context, '결재선을 저장했습니다.');
+      showAppToast(context, tr('결재선을 저장했습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -224,7 +225,7 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
         setState(() => _lines = _lines.where((l) => l.id != line.id).toList());
       }
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -255,12 +256,12 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
       children: [
         Row(
           children: [
-            Text('결재선', style: theme.textTheme.titleSmall),
+            Text(tr('결재선'), style: theme.textTheme.titleSmall),
             const Spacer(),
             if (_lines.isNotEmpty)
               PopupMenuButton<ApprovalLine>(
                 key: const ValueKey('approval-line-load'),
-                tooltip: '저장한 결재선',
+                tooltip: tr('저장한 결재선'),
                 onSelected: (line) =>
                     c.setLine(line.approverIds, line.ccIds, line.roles),
                 itemBuilder: (_) => [
@@ -271,7 +272,7 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
                         children: [
                           Expanded(child: Text(line.name)),
                           IconButton(
-                            tooltip: '지우기',
+                            tooltip: tr('지우기'),
                             icon: const Icon(Icons.close, size: 16),
                             onPressed: () {
                               Navigator.of(context).pop();
@@ -282,12 +283,12 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
                       ),
                     ),
                 ],
-                child: const Padding(
+                child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  child: Text('불러오기 ▾'),
+                  child: Text(tr('불러오기 ▾')),
                 ),
               ),
-            TextButton(onPressed: _saveLine, child: const Text('저장')),
+            TextButton(onPressed: _saveLine, child: Text(tr('저장'))),
           ],
         ),
         if (_orgPrefill != null && listEquals(_orgPrefill, c.approverIds))
@@ -295,7 +296,7 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
             key: const ValueKey('approval-line-org-hint'),
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Text(
-              '조직도의 상위자 순서로 결재자를 채웠습니다. 필요하면 빼거나 바꾸세요.',
+              tr('조직도의 상위자 순서로 결재자를 채웠습니다. 필요하면 빼거나 바꾸세요.'),
               style: TextStyle(fontSize: 12, color: hint),
             ),
           ),
@@ -303,8 +304,9 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Text(
-              '결재자를 순서대로 고르세요. 앞사람이 승인해야 다음 사람에게 넘어갑니다. 이름 옆 역할을 눌러 합의(이어진 합의는 동시에)·'
-              '전결(승인하면 남은 결재 생략)로 바꿀 수 있습니다.',
+              tr(
+                '결재자를 순서대로 고르세요. 앞사람이 승인해야 다음 사람에게 넘어갑니다. 이름 옆 역할을 눌러 합의(이어진 합의는 동시에)·전결(승인하면 남은 결재 생략)로 바꿀 수 있습니다.',
+              ),
               style: TextStyle(fontSize: 12, color: hint),
             ),
           ),
@@ -324,7 +326,7 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
               ActionChip(
                 key: ValueKey('approval-line-role-$id'),
                 visualDensity: VisualDensity.compact,
-                tooltip: '역할 바꾸기(결재 → 합의 → 전결)',
+                tooltip: tr('역할 바꾸기(결재 → 합의 → 전결)'),
                 label: Text(
                   c.roleOf(id).label,
                   style: TextStyle(
@@ -337,13 +339,13 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
                 onPressed: () => c.cycleRole(id),
               ),
               IconButton(
-                tooltip: '위로',
+                tooltip: tr('위로'),
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.arrow_upward, size: 16),
                 onPressed: i == 0 ? null : () => c.moveApprover(i, -1),
               ),
               IconButton(
-                tooltip: '아래로',
+                tooltip: tr('아래로'),
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.arrow_downward, size: 16),
                 onPressed: i == c.approverIds.length - 1
@@ -351,7 +353,7 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
                     : () => c.moveApprover(i, 1),
               ),
               IconButton(
-                tooltip: '빼기',
+                tooltip: tr('빼기'),
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.close, size: 16),
                 onPressed: () => c.removeApprover(id),
@@ -366,14 +368,17 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
                 ? null
                 : () async {
                     final id = await _pickPerson(
-                      title: '결재자 추가',
+                      title: tr('결재자 추가'),
                       exclude: taken,
                     );
                     if (id != null) c.addApprover(id);
                   },
             icon: const Icon(Icons.person_add_alt, size: 18),
             label: Text(
-              '결재자 추가 (${c.approverIds.length}/${widget.ctx.approversMax})',
+              tr('결재자 추가 ({c.approverIds.length}/{widget.ctx.approversMax})', {
+                'c.approverIds.length': c.approverIds.length,
+                'widget.ctx.approversMax': widget.ctx.approversMax,
+              }),
             ),
           ),
         ),
@@ -383,7 +388,7 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
           runSpacing: 4,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Text('참조', style: TextStyle(color: hint)),
+            Text(tr('참조'), style: TextStyle(color: hint)),
             for (final id in c.ccIds)
               InputChip(
                 label: Text(_nameOf(id)),
@@ -391,12 +396,12 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
               ),
             ActionChip(
               avatar: const Icon(Icons.add, size: 16),
-              label: const Text('참조자'),
+              label: Text(tr('참조자')),
               onPressed: c.ccIds.length >= widget.ctx.ccMax
                   ? null
                   : () async {
                       final id = await _pickPerson(
-                        title: '참조자 추가',
+                        title: tr('참조자 추가'),
                         exclude: taken,
                       );
                       if (id != null) c.toggleCc(id);
@@ -440,9 +445,9 @@ class _PersonPickerDialogState extends State<_PersonPickerDialog> {
           children: [
             TextField(
               autofocus: true,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 prefixIcon: Icon(Icons.search),
-                hintText: '이름·아이디로 찾기',
+                hintText: tr('이름·아이디로 찾기'),
               ),
               onChanged: (v) => setState(() => _query = v),
             ),
@@ -451,7 +456,7 @@ class _PersonPickerDialogState extends State<_PersonPickerDialog> {
               child: shown.isEmpty
                   ? Center(
                       child: Text(
-                        '고를 수 있는 사람이 없습니다(정회원 이상만 결재선에 넣을 수 있습니다).',
+                        tr('고를 수 있는 사람이 없습니다(정회원 이상만 결재선에 넣을 수 있습니다).'),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Theme.of(context).hintColor),
                       ),
@@ -474,7 +479,7 @@ class _PersonPickerDialogState extends State<_PersonPickerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );
@@ -512,11 +517,11 @@ class _NameDialogState extends State<_NameDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('취소'),
+        child: Text(tr('취소')),
       ),
       FilledButton(
         onPressed: () => Navigator.of(context).pop(_text.text),
-        child: const Text('확인'),
+        child: Text(tr('확인')),
       ),
     ],
   );
@@ -581,7 +586,7 @@ class _ApprovalRequestDialogState extends State<ApprovalRequestDialog> {
       return;
     }
     if (_line.approverIds.isEmpty) {
-      setState(() => _error = '결재자를 한 명 이상 고르세요.');
+      setState(() => _error = tr('결재자를 한 명 이상 고르세요.'));
       return;
     }
     setState(() {
@@ -625,7 +630,7 @@ class _ApprovalRequestDialogState extends State<ApprovalRequestDialog> {
                   maxLines: 5,
                   maxLength: 2000,
                   decoration: InputDecoration(
-                    labelText: widget.bodyLabel,
+                    labelText: tr(widget.bodyLabel),
                     border: const OutlineInputBorder(),
                   ),
                 ),
@@ -646,7 +651,7 @@ class _ApprovalRequestDialogState extends State<ApprovalRequestDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('approval-request-submit'),
@@ -657,7 +662,7 @@ class _ApprovalRequestDialogState extends State<ApprovalRequestDialog> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('결재 올리기'),
+              : Text(tr('결재 올리기')),
         ),
       ],
     );
@@ -713,7 +718,7 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
   return showDialog<ApprovalDocument>(
     context: context,
     builder: (_) => ApprovalRequestDialog(
-      title: '휴가 신청',
+      title: tr('휴가 신청'),
       api: api,
       ctx: ctx,
       fields: (setState) {
@@ -722,9 +727,18 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
           if (balance != null)
             Text(
               balance.known
-                  ? '남은 연차 ${halfDaysText((balance.remainingHalfDays ?? 0) - balance.pendingHalfDays)}'
-                        '${balance.pendingHalfDays > 0 ? ' (결재 중 ${halfDaysText(balance.pendingHalfDays)} 제외)' : ''}'
-                  : '입사일이 등록되지 않아 남은 연차를 계산할 수 없습니다(관리자에게 등록을 요청하세요).',
+                  ? tr('남은 연차 {p0}{p1}', {
+                      'p0': halfDaysText(
+                        (balance.remainingHalfDays ?? 0) -
+                            balance.pendingHalfDays,
+                      ),
+                      'p1': balance.pendingHalfDays > 0
+                          ? tr(' (결재 중 {p0} 제외)', {
+                              'p0': halfDaysText(balance.pendingHalfDays),
+                            })
+                          : '',
+                    })
+                  : tr('입사일이 등록되지 않아 남은 연차를 계산할 수 없습니다(관리자에게 등록을 요청하세요).'),
               style: TextStyle(
                 fontSize: 12,
                 color: Theme.of(context).hintColor,
@@ -734,15 +748,19 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
           DropdownButtonFormField<String>(
             key: const ValueKey('leave-type'),
             initialValue: type,
-            decoration: const InputDecoration(
-              labelText: '휴가 종류',
+            decoration: InputDecoration(
+              labelText: tr('휴가 종류'),
               border: OutlineInputBorder(),
             ),
             items: [
               for (final t in types)
                 DropdownMenuItem(
                   value: t.key,
-                  child: Text(t.deducts ? t.label : '${t.label} (연차 차감 없음)'),
+                  child: Text(
+                    t.deducts
+                        ? t.label
+                        : tr('{t.label} (연차 차감 없음)', {'t.label': t.label}),
+                  ),
                 ),
             ],
             onChanged: (v) => setState(() {
@@ -755,7 +773,7 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
             spacing: 8,
             children: [
               ApprovalDateField(
-                label: info?.half ?? false ? '날짜' : '시작',
+                label: info?.half ?? false ? tr('날짜') : tr('시작'),
                 value: start,
                 onChanged: (v) => setState(() {
                   start = v;
@@ -768,7 +786,7 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
               ),
               if (!(info?.half ?? false))
                 ApprovalDateField(
-                  label: '끝',
+                  label: tr('끝'),
                   value: end,
                   onChanged: (v) => setState(() => end = v),
                 ),
@@ -776,15 +794,15 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
           ),
           const SizedBox(height: 4),
           Text(
-            '주말·공휴일은 빼고 근무일만 셉니다.',
+            tr('주말·공휴일은 빼고 근무일만 셉니다.'),
             style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
           ),
         ];
       },
       validate: () {
-        if (start == null) return '휴가 날짜를 고르세요.';
+        if (start == null) return tr('휴가 날짜를 고르세요.');
         if (end != null && end!.compareTo(start!) < 0) {
-          return '끝나는 날이 시작하는 날보다 앞입니다.';
+          return tr('끝나는 날이 시작하는 날보다 앞입니다.');
         }
         return null;
       },
@@ -821,23 +839,23 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
   final title = TextEditingController();
   var category = ctx.expenseCategories.isNotEmpty
       ? ctx.expenseCategories.first
-      : '기타';
+      : tr('기타');
   var spentOn = ctx.today;
   final receipts = <({String url, String name, int size, String? mimeType})>[];
   var uploading = false;
   return showDialog<ApprovalDocument>(
     context: context,
     builder: (dialogContext) => ApprovalRequestDialog(
-      title: '지출 결재',
+      title: tr('지출 결재'),
       api: api,
       ctx: ctx,
-      bodyLabel: '내용(어디에 무엇을)',
+      bodyLabel: tr('내용(어디에 무엇을)'),
       fields: (setState) => [
         TextField(
           controller: title,
           maxLength: 100,
-          decoration: const InputDecoration(
-            labelText: '제목(비우면 자동)',
+          decoration: InputDecoration(
+            labelText: tr('제목(비우면 자동)'),
             border: OutlineInputBorder(),
           ),
         ),
@@ -846,10 +864,10 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
           key: const ValueKey('expense-amount'),
           controller: amount,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: '금액(원)',
+          decoration: InputDecoration(
+            labelText: tr('금액(원)'),
             border: OutlineInputBorder(),
-            suffixText: '원',
+            suffixText: tr('원'),
           ),
         ),
         const SizedBox(height: 8),
@@ -858,8 +876,8 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
             Expanded(
               child: DropdownButtonFormField<String>(
                 initialValue: category,
-                decoration: const InputDecoration(
-                  labelText: '분류',
+                decoration: InputDecoration(
+                  labelText: tr('분류'),
                   border: OutlineInputBorder(),
                 ),
                 items: [
@@ -871,7 +889,7 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
             ),
             const SizedBox(width: 8),
             ApprovalDateField(
-              label: '쓴 날',
+              label: tr('쓴 날'),
               value: spentOn,
               lastDate: DateTime.now(),
               onChanged: (v) => setState(() => spentOn = v),
@@ -897,7 +915,12 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.attach_file, size: 16),
-              label: Text('영수증 첨부 (${receipts.length}/${ctx.attachmentsMax})'),
+              label: Text(
+                tr('영수증 첨부 ({receipts.length}/{ctx.attachmentsMax})', {
+                  'receipts.length': receipts.length,
+                  'ctx.attachmentsMax': ctx.attachmentsMax,
+                }),
+              ),
               onPressed: uploading || receipts.length >= ctx.attachmentsMax
                   ? null
                   : () async {
@@ -924,7 +947,10 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
                         }
                       } catch (e) {
                         if (dialogContext.mounted) {
-                          showAppToast(dialogContext, '첨부 실패: $e');
+                          showAppToast(
+                            dialogContext,
+                            tr('첨부 실패: {e}', {'e': e}),
+                          );
                         }
                       } finally {
                         setState(() => uploading = false);
@@ -936,8 +962,8 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
       ],
       validate: () {
         final value = int.tryParse(amount.text.replaceAll(',', '').trim());
-        if (value == null || value <= 0) return '금액을 원 단위 숫자로 넣으세요.';
-        if (uploading) return '영수증을 올리는 중입니다. 잠시 뒤 다시 누르세요.';
+        if (value == null || value <= 0) return tr('금액을 원 단위 숫자로 넣으세요.');
+        if (uploading) return tr('영수증을 올리는 중입니다. 잠시 뒤 다시 누르세요.');
         return null;
       },
       submit:
@@ -1004,14 +1030,17 @@ Future<ApprovalDocument?> showAttendanceCorrectionDialog(
   return showDialog<ApprovalDocument>(
     context: context,
     builder: (_) => ApprovalRequestDialog(
-      title: '근태 수정 (${shortDateText(workDate)})',
+      title: tr('근태 수정 ({p0})', {'p0': shortDateText(workDate)}),
       api: api,
       ctx: ctx,
       fields: (setState) => [
         Text(
           record == null
-              ? '이날은 출퇴근 기록이 없습니다. 실제 출근·퇴근 시각을 넣으세요.'
-              : '지금 기록: 출근 ${clockText(record.clockInAt)} · 퇴근 ${clockText(record.clockOutAt)}',
+              ? tr('이날은 출퇴근 기록이 없습니다. 실제 출근·퇴근 시각을 넣으세요.')
+              : tr('지금 기록: 출근 {p0} · 퇴근 {p1}', {
+                  'p0': clockText(record.clockInAt),
+                  'p1': clockText(record.clockOutAt),
+                }),
           style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
         ),
         const SizedBox(height: 8),
@@ -1021,8 +1050,8 @@ Future<ApprovalDocument?> showAttendanceCorrectionDialog(
               child: TextField(
                 key: const ValueKey('attendance-fix-in'),
                 controller: clockIn,
-                decoration: const InputDecoration(
-                  labelText: '출근 (HH:MM)',
+                decoration: InputDecoration(
+                  labelText: tr('출근 (HH:MM)'),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -1032,8 +1061,8 @@ Future<ApprovalDocument?> showAttendanceCorrectionDialog(
               child: TextField(
                 key: const ValueKey('attendance-fix-out'),
                 controller: clockOut,
-                decoration: const InputDecoration(
-                  labelText: '퇴근 (HH:MM, 비우면 그대로)',
+                decoration: InputDecoration(
+                  labelText: tr('퇴근 (HH:MM, 비우면 그대로)'),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -1042,9 +1071,11 @@ Future<ApprovalDocument?> showAttendanceCorrectionDialog(
         ),
       ],
       validate: () {
-        if (!isHmText(clockIn.text)) return '출근 시각을 HH:MM으로 넣으세요(예: 09:00).';
+        if (!isHmText(clockIn.text)) {
+          return tr('출근 시각을 HH:MM으로 넣으세요(예: 09:00).');
+        }
         if (clockOut.text.trim().isNotEmpty && !isHmText(clockOut.text)) {
-          return '퇴근 시각을 HH:MM으로 넣으세요.';
+          return tr('퇴근 시각을 HH:MM으로 넣으세요.');
         }
         return null;
       },
@@ -1081,6 +1112,8 @@ void toastSubmitted(BuildContext context, ApprovalDocument? doc) {
   final first = doc.currentStep?.approverName;
   showAppToast(
     context,
-    first == null ? '결재를 올렸습니다.' : '결재를 올렸습니다. $first님이 결재할 차례입니다.',
+    first == null
+        ? tr('결재를 올렸습니다.')
+        : tr('결재를 올렸습니다. {first}님이 결재할 차례입니다.', {'first': first}),
   );
 }

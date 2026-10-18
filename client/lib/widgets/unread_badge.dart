@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
 /// 방 목록에서 안 읽은 메시지 수를 보여주는 빨간 원형 뱃지.
 /// 그 방에 내가 안 읽은 멘션이 있으면 그 옆에 [MentionMarker]가 붙는다.
@@ -63,7 +64,7 @@ class DraftMarker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: '임시 저장된 글',
+      message: tr('임시 저장된 글'),
       child: Icon(
         Icons.edit_outlined,
         key: const ValueKey('draft-marker'),

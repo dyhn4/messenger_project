@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/call_whiteboard.dart';
 import 'call_stage.dart' show callTileColor;
+import '../../l10n/tr.dart';
 
 /// 펜 색 — 흰 판 위에서 잘 보이는 것들.
 const whiteboardColors = <int>[
@@ -104,18 +105,18 @@ class _CallWhiteboardViewState extends State<CallWhiteboardView> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('화이트보드 지우기'),
-        content: const Text('모든 참가자의 화이트보드에서 그린 내용을 모두 지웁니다.'),
+        title: Text(tr('화이트보드 지우기')),
+        content: Text(tr('모든 참가자의 화이트보드에서 그린 내용을 모두 지웁니다.')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           TextButton(
             key: const ValueKey('whiteboard-clear-confirm'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text(
-              '모두 지우기',
+            child: Text(
+              tr('모두 지우기'),
               style: TextStyle(color: Colors.redAccent),
             ),
           ),
@@ -201,14 +202,14 @@ class _CallWhiteboardViewState extends State<CallWhiteboardView> {
               toolButton(
                 'whiteboard-pen',
                 Icons.edit,
-                '펜',
+                tr('펜'),
                 _tool == _Tool.pen,
                 () => setState(() => _tool = _Tool.pen),
               ),
               toolButton(
                 'whiteboard-eraser',
                 Icons.auto_fix_normal,
-                '지우개(닿은 획을 지웁니다)',
+                tr('지우개(닿은 획을 지웁니다)'),
                 _tool == _Tool.eraser,
                 () => setState(() => _tool = _Tool.eraser),
               ),
@@ -238,14 +239,14 @@ class _CallWhiteboardViewState extends State<CallWhiteboardView> {
               toolButton(
                 'whiteboard-undo',
                 Icons.undo,
-                '내가 마지막으로 그린 획 지우기',
+                tr('내가 마지막으로 그린 획 지우기'),
                 false,
                 widget.board.canUndo ? widget.board.undo : null,
               ),
               toolButton(
                 'whiteboard-clear',
                 Icons.delete_sweep_outlined,
-                '모두 지우기',
+                tr('모두 지우기'),
                 false,
                 widget.board.book.isEmpty ? null : _confirmClear,
               ),
@@ -253,7 +254,7 @@ class _CallWhiteboardViewState extends State<CallWhiteboardView> {
               toolButton(
                 'whiteboard-close',
                 Icons.close,
-                '화이트보드 닫기(내용은 그대로 남습니다)',
+                tr('화이트보드 닫기(내용은 그대로 남습니다)'),
                 false,
                 widget.onClose,
               ),

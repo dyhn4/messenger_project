@@ -10,6 +10,7 @@ import '../widgets/floating_dialog.dart';
 import '../widgets/invite_link_detail.dart';
 import '../widgets/invite_mail_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
+import '../l10n/tr.dart';
 
 /// "설치→가입" 초대 링크 관리 화면. 서버 운영자·계정 등급 관리자·팀 소유자에게만
 /// 열려 있다(session.canCreateInviteLink — 서버도 만들 때마다 다시 확인한다. 목록·취소는
@@ -80,9 +81,9 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
       );
       if (mounted) setState(() => _links = [link, ...?_links]);
       // 만들기만 하고 클립보드에는 넣지 않는다 — 보낼 때는 목록 줄의 복사 단추로.
-      _toast('초대링크를 생성했습니다.');
+      _toast(tr('초대링크를 생성했습니다.'));
     } catch (e) {
-      _toast('초대 링크 생성 실패: $e');
+      _toast(tr('초대 링크 생성 실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _creating = false);
     }
@@ -99,28 +100,30 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
         ),
       ),
     );
-    _toast('링크를 복사했습니다. 원하는 곳에 붙여넣어 보내세요.');
+    _toast(tr('링크를 복사했습니다. 원하는 곳에 붙여넣어 보내세요.'));
   }
 
   Future<void> _revoke(InviteLink link) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('초대 링크 취소'),
+        title: Text(tr('초대 링크 취소')),
         content: SizedBox(
           width: 320,
           child: Text(
-            '${link.label ?? '이'} 링크를 취소할까요? 이미 보낸 링크로는 더 이상 가입하거나 설치·연결할 수 없게 됩니다.',
+            tr('{p0} 링크를 취소할까요? 이미 보낸 링크로는 더 이상 가입하거나 설치·연결할 수 없게 됩니다.', {
+              'p0': link.label ?? tr('이'),
+            }),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('링크 취소하기'),
+            child: Text(tr('링크 취소하기')),
           ),
         ],
       ),
@@ -137,14 +140,14 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
         _links = list;
       });
     } catch (e) {
-      _toast('실패: $e');
+      _toast(tr('실패: {e}', {'e': e}));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return FloatingDialog(
-      title: '초대 링크',
+      title: tr('초대 링크'),
       maxWidth: 480,
       maxHeight: 640,
       child: Column(
@@ -152,8 +155,9 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '링크를 열면 설치 파일을 받고 이 서버에 연결할 수 있습니다. 팀 합류는 포함되지 않으니, '
-            '가입한 뒤에는 팀 설정 → 팀원 추가에서 직접 넣어주세요.',
+            tr(
+              '링크를 열면 설치 파일을 받고 이 서버에 연결할 수 있습니다. 팀 합류는 포함되지 않으니, 가입한 뒤에는 팀 설정 → 팀원 추가에서 직접 넣어주세요.',
+            ),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
@@ -170,7 +174,7 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.add_link),
-              label: const Text('초대 링크 만들기'),
+              label: Text(tr('초대 링크 만들기')),
             ),
           ),
           const SizedBox(height: 16),
@@ -185,11 +189,14 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
     final link = _opened;
     if (link == null) return null;
     return InviteLinkDetail(
-      title: link.label?.isNotEmpty == true ? link.label! : '초대 링크',
+      title: link.label?.isNotEmpty == true ? link.label! : tr('초대 링크'),
       infoLines: [
         '${link.statusLabel} · ${link.usageLabel}',
-        '${link.createdByName} · ${formatDateTime(link.createdAt)} 생성',
-        '${formatDateTime(link.expiresAt)} 만료',
+        tr('{link.createdByName} · {p0} 생성', {
+          'link.createdByName': link.createdByName,
+          'p0': formatDateTime(link.createdAt),
+        }),
+        tr('{p0} 만료', {'p0': formatDateTime(link.expiresAt)}),
       ],
       url: link.url,
       externalUrl: link.externalUrl,
@@ -218,7 +225,7 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
         padding: const EdgeInsets.symmetric(vertical: 20),
         child: Center(
           child: Text(
-            '아직 만든 초대 링크가 없습니다.',
+            tr('아직 만든 초대 링크가 없습니다.'),
             style: TextStyle(color: Theme.of(context).hintColor),
           ),
         ),
@@ -239,7 +246,7 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
                   context,
                   linkTitle: links[i].label?.isNotEmpty == true
                       ? links[i].label!
-                      : '초대 링크',
+                      : tr('초대 링크'),
                   send: (emails) => widget.session.api!.sendInviteLinkEmails(
                     links[i].id,
                     emails,
@@ -277,11 +284,15 @@ class _InviteLinkRow extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       onTap: onOpen,
       title: Text(
-        link.label?.isNotEmpty == true ? link.label! : '초대 링크',
+        link.label?.isNotEmpty == true ? link.label! : tr('초대 링크'),
         style: TextStyle(color: inactive ? hint : null),
       ),
       subtitle: Text(
-        '${link.statusLabel} · ${link.usageLabel} · ${formatDateTime(link.createdAt)} 생성',
+        tr('{link.statusLabel} · {link.usageLabel} · {p0} 생성', {
+          'link.statusLabel': link.statusLabel,
+          'link.usageLabel': link.usageLabel,
+          'p0': formatDateTime(link.createdAt),
+        }),
         style: TextStyle(color: hint),
       ),
       trailing: Row(
@@ -290,21 +301,21 @@ class _InviteLinkRow extends StatelessWidget {
           // 복사는 새로 가입시킬 수 있을 때만 — 인원이 다 찬 링크를 새 사람에게 보내면 밖에서 가입이 안 된다.
           if (link.valid)
             IconButton(
-              tooltip: '링크 복사',
+              tooltip: tr('링크 복사'),
               icon: const Icon(Icons.copy_outlined, size: 20),
               onPressed: onCopy,
             ),
           if (link.valid && onMail != null)
             IconButton(
               key: ValueKey('invite-mail-${link.id}'),
-              tooltip: '메일로 보내기',
+              tooltip: tr('메일로 보내기'),
               icon: const Icon(Icons.forward_to_inbox_outlined, size: 20),
               onPressed: onMail,
             ),
           // 취소는 만료 전이면 인원이 다 찼어도 둔다 — 그 링크로 아직 연결·설치가 되기 때문이다.
           if (link.isOpen)
             IconButton(
-              tooltip: '링크 취소',
+              tooltip: tr('링크 취소'),
               icon: const Icon(Icons.link_off, size: 20),
               onPressed: onRevoke,
             ),
@@ -344,16 +355,16 @@ class _CreateInviteLinkDialogState extends State<_CreateInviteLinkDialog> {
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
     return AlertDialog(
-      title: const Text('초대 링크 만들기'),
+      title: Text(tr('초대 링크 만들기')),
       content: SizedBox(
         width: 340,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('발급하면 7일간 유효합니다.', style: TextStyle(color: hint)),
+            Text(tr('발급하면 7일간 유효합니다.'), style: TextStyle(color: hint)),
             const SizedBox(height: 16),
-            Text('가입 인원', style: Theme.of(context).textTheme.labelMedium),
+            Text(tr('가입 인원'), style: Theme.of(context).textTheme.labelMedium),
             const SizedBox(height: 4),
             // 링크가 다른 데로 새도 정한 인원만 가입할 수 있다 — 사내 와이파이 밖에서는 초대 링크가
             // 곧 가입 자격이라서(server/src/auth.js). 사내에서는 링크 없이도 가입된다.
@@ -363,7 +374,7 @@ class _CreateInviteLinkDialogState extends State<_CreateInviteLinkDialog> {
               children: [
                 for (final n in inviteMaxUsesOptions)
                   ChoiceChip(
-                    label: Text('$n명'),
+                    label: Text(tr('{n}명', {'n': n})),
                     selected: _maxUses == n,
                     onSelected: (_) => setState(() => _maxUses = n),
                   ),
@@ -372,8 +383,9 @@ class _CreateInviteLinkDialogState extends State<_CreateInviteLinkDialog> {
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
-                '다 차면 사내 와이파이 밖에서는 이 링크로 가입할 수 없습니다. 이미 가입한 사람은 '
-                '남은 기간 동안 이 링크로 다른 기기를 연결할 수 있습니다.',
+                tr(
+                  '다 차면 사내 와이파이 밖에서는 이 링크로 가입할 수 없습니다. 이미 가입한 사람은 남은 기간 동안 이 링크로 다른 기기를 연결할 수 있습니다.',
+                ),
                 style: TextStyle(fontSize: 12, color: hint),
               ),
             ),
@@ -381,9 +393,9 @@ class _CreateInviteLinkDialogState extends State<_CreateInviteLinkDialog> {
             TextField(
               controller: _label,
               maxLength: 30,
-              decoration: const InputDecoration(
-                labelText: '메모 (선택)',
-                hintText: '예: 9월 신입',
+              decoration: InputDecoration(
+                labelText: tr('메모 (선택)'),
+                hintText: tr('예: 9월 신입'),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -393,7 +405,7 @@ class _CreateInviteLinkDialogState extends State<_CreateInviteLinkDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(
@@ -402,7 +414,7 @@ class _CreateInviteLinkDialogState extends State<_CreateInviteLinkDialog> {
               maxUses: _maxUses,
             ),
           ),
-          child: const Text('만들기'),
+          child: Text(tr('만들기')),
         ),
       ],
     );

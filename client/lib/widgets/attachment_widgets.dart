@@ -24,6 +24,7 @@ import 'download_progress_card.dart' show DownloadProgressPill;
 import 'file_actions.dart';
 import 'hover_toolbar.dart';
 import 'retrying_network_image.dart';
+import '../l10n/tr.dart';
 
 /// 파일명을 눌렀을 때 메신저 창 안에서 바로 열어 보여줄 수 있는 확장자인지 — 그 외(워드/엑셀/
 /// 파워포인트 등)는 지금처럼 OS 기본 프로그램으로 연다. Flutter 생태계에 오피스 문서를 원본
@@ -66,7 +67,11 @@ Future<Uint8List> fetchAttachmentBytes({
       }
     }
     if (res.statusCode >= 400) {
-      throw Exception('다운로드에 실패했습니다. (HTTP ${res.statusCode})');
+      throw Exception(
+        tr('다운로드에 실패했습니다. (HTTP {res.statusCode})', {
+          'res.statusCode': res.statusCode,
+        }),
+      );
     }
     if (attachmentKey == null || attachmentNonce == null) return res.bodyBytes;
 
@@ -75,7 +80,7 @@ Future<Uint8List> fetchAttachmentBytes({
       keyBase64: attachmentKey,
       nonceBase64: attachmentNonce,
     );
-    if (plain == null) throw Exception('첨부를 복호화할 수 없습니다.');
+    if (plain == null) throw Exception(tr('첨부를 복호화할 수 없습니다.'));
     return plain;
   } finally {
     task?.fileFinished();
@@ -261,7 +266,7 @@ Future<({int count, String folder})?> saveAllAttachments({
 
   // 받는 동안 진행 카드에 "파일 N개"와 몇 번째·받은 양이 보인다.
   final count = await trackDownload(
-    label: '파일 ${items.length}개',
+    label: tr('파일 {items.length}개', {'items.length': items.length}),
     fileCount: items.length,
     task: task,
     body: () async {
@@ -324,7 +329,9 @@ class _AllDownloadBarState extends State<AllDownloadBar> {
       );
       if (!ok || !mounted) return;
       final task = DownloadTask(
-        '파일 ${widget.items.length}개',
+        tr('파일 {widget.items.length}개', {
+          'widget.items.length': widget.items.length,
+        }),
         fileCount: widget.items.length,
         inline: true,
       );
@@ -340,8 +347,11 @@ class _AllDownloadBarState extends State<AllDownloadBar> {
       showAppToast(
         context,
         result.folder.isEmpty
-            ? '${result.count}개를 다운로드했습니다.'
-            : '${result.count}개를 다운로드했습니다: ${displayDownloadPath(result.folder)}',
+            ? tr('{result.count}개를 다운로드했습니다.', {'result.count': result.count})
+            : tr('{result.count}개를 다운로드했습니다: {p0}', {
+                'result.count': result.count,
+                'p0': displayDownloadPath(result.folder),
+              }),
       );
     } on DownloadCancelled {
       // 그 전까지 받은 파일은 폴더에 남는다.
@@ -349,11 +359,13 @@ class _AllDownloadBarState extends State<AllDownloadBar> {
       if (mounted) {
         showAppToast(
           context,
-          done > 0 ? '다운로드를 취소했습니다. ($done개는 받았습니다)' : '다운로드를 취소했습니다.',
+          done > 0
+              ? tr('다운로드를 취소했습니다. ({done}개는 받았습니다)', {'done': done})
+              : tr('다운로드를 취소했습니다.'),
         );
       }
     } catch (e) {
-      if (mounted) showAppToast(context, '다운로드 실패: $e');
+      if (mounted) showAppToast(context, tr('다운로드 실패: {e}', {'e': e}));
     } finally {
       if (mounted) {
         setState(() {
@@ -406,7 +418,11 @@ class _AllDownloadBarState extends State<AllDownloadBar> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.download_outlined, size: 16),
-                label: Text('전체 다운로드 (${widget.items.length})'),
+                label: Text(
+                  tr('전체 다운로드 ({widget.items.length})', {
+                    'widget.items.length': widget.items.length,
+                  }),
+                ),
               ),
             ),
           ],
@@ -458,7 +474,7 @@ class ChatFileAttachments extends StatelessWidget {
                 DownloadableFile(
                   session: session,
                   url: session.resolveUrl(attachments[i].fileUrl),
-                  fileName: attachments[i].fileName ?? '파일',
+                  fileName: attachments[i].fileName ?? tr('파일'),
                   message: message,
                   attachmentId: attachments[i].id,
                   attachmentKey: attachmentKey,
@@ -477,7 +493,7 @@ class ChatFileAttachments extends StatelessWidget {
                     if (!a.deleted)
                       (
                         url: session.resolveUrl(a.fileUrl),
-                        fileName: a.fileName ?? '파일',
+                        fileName: a.fileName ?? tr('파일'),
                       ),
                 ],
                 attachmentKey: attachmentKey,
@@ -617,13 +633,16 @@ class _DownloadableImageState extends State<DownloadableImage> {
       );
       if (!mounted) return;
       if (savedPath != null) {
-        showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
+        showAppToast(
+          context,
+          tr('다운로드 완료: {p0}', {'p0': displayDownloadPath(savedPath)}),
+        );
       }
     } on DownloadCancelled catch (e) {
       if (mounted) showAppToast(context, '$e');
     } catch (e) {
       if (!mounted) return;
-      showAppToast(context, '다운로드 실패: $e');
+      showAppToast(context, tr('다운로드 실패: {e}', {'e': e}));
     } finally {
       if (mounted) {
         setState(() {
@@ -669,13 +688,13 @@ class _DownloadableImageState extends State<DownloadableImage> {
           HoverToolbarButton(
             icon: widget.favorited ? Icons.star : Icons.star_border,
             color: widget.favorited ? Colors.amber : null,
-            tooltip: widget.favorited ? '즐겨찾기 빼기' : '즐겨찾기',
+            tooltip: widget.favorited ? tr('즐겨찾기 빼기') : tr('즐겨찾기'),
             onPressed: widget.onToggleFavorite,
           ),
           if (show)
             HoverToolbarButton(
               icon: Icons.more_vert,
-              tooltip: '더보기',
+              tooltip: tr('더보기'),
               onMenuOpenChanged: (v) => setState(() => _menuOpen = v),
               menuChildren: fileActionMenuItems(
                 context,
@@ -773,7 +792,7 @@ class _DownloadableImageState extends State<DownloadableImage> {
                       children: [
                         HoverToolbarButton(
                           icon: Icons.download_outlined,
-                          tooltip: '다운로드',
+                          tooltip: tr('다운로드'),
                           busy: _downloading,
                           onPressed: _download,
                         ),
@@ -1192,13 +1211,16 @@ class _ChatImageTileState extends State<_ChatImageTile> {
       );
       if (!mounted) return;
       if (savedPath != null) {
-        showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
+        showAppToast(
+          context,
+          tr('다운로드 완료: {p0}', {'p0': displayDownloadPath(savedPath)}),
+        );
       }
     } on DownloadCancelled catch (e) {
       if (mounted) showAppToast(context, '$e');
     } catch (e) {
       if (!mounted) return;
-      showAppToast(context, '다운로드 실패: $e');
+      showAppToast(context, tr('다운로드 실패: {e}', {'e': e}));
     } finally {
       if (mounted) {
         setState(() {
@@ -1318,19 +1340,19 @@ class _ChatImageTileState extends State<_ChatImageTile> {
                         if (widget.onComment != null)
                           HoverToolbarButton(
                             icon: Icons.mode_comment_outlined,
-                            tooltip: '댓글',
+                            tooltip: tr('댓글'),
                             onPressed: widget.onComment,
                           ),
                         HoverToolbarButton(
                           icon: Icons.download_outlined,
-                          tooltip: '다운로드',
+                          tooltip: tr('다운로드'),
                           busy: _downloading,
                           onPressed: _download,
                         ),
                         if (widget.message != null)
                           HoverToolbarButton(
                             icon: Icons.more_vert,
-                            tooltip: '더보기',
+                            tooltip: tr('더보기'),
                             onMenuOpenChanged: (v) =>
                                 setState(() => _menuOpen = v),
                             menuChildren: imageActionMenuItems(
@@ -1357,28 +1379,28 @@ List<Widget> imageActionMenuItems(BuildContext context, FileActions actions) =>
     [
       hoverMenuItem(
         icon: Icons.send_outlined,
-        label: '파일 전달',
+        label: tr('파일 전달'),
         onPressed: () => actions.forward(context),
       ),
       hoverMenuItem(
         icon: Icons.print_outlined,
-        label: '인쇄',
+        label: tr('인쇄'),
         onPressed: () => actions.printImage(context),
       ),
       hoverMenuItem(
         icon: Icons.star_border,
-        label: '즐겨찾기',
+        label: tr('즐겨찾기'),
         onPressed: () => actions.toggleFavorite(context),
       ),
       if (canCopyImageToClipboard)
         hoverMenuItem(
           icon: Icons.copy_outlined,
-          label: '복사',
+          label: tr('복사'),
           onPressed: () => actions.copyImage(context),
         ),
       hoverMenuItem(
         icon: Icons.image_outlined,
-        label: '원본 파일 보기',
+        label: tr('원본 파일 보기'),
         onPressed: () => actions.openOriginal(context),
       ),
       // 올린 본인과 팀 관리자에게만 — 파일만 지우고 메시지와 댓글은 남는다.
@@ -1386,7 +1408,7 @@ List<Widget> imageActionMenuItems(BuildContext context, FileActions actions) =>
         hoverMenuDivider(),
         hoverMenuItem(
           icon: Icons.delete_outline,
-          label: '삭제',
+          label: tr('삭제'),
           color: Theme.of(context).colorScheme.error,
           onPressed: () => actions.deleteFile(context),
         ),
@@ -1406,29 +1428,29 @@ List<Widget> fileActionMenuItems(
 }) => [
   hoverMenuItem(
     icon: Icons.send_outlined,
-    label: '파일 전달',
+    label: tr('파일 전달'),
     onPressed: () => actions.forward(context),
   ),
   hoverMenuItem(
     icon: Icons.download_outlined,
-    label: '다운로드',
+    label: tr('다운로드'),
     onPressed: () => actions.download(context),
   ),
   hoverMenuItem(
     icon: favorited ? Icons.star : Icons.star_border,
-    label: favorited ? '즐겨찾기 빼기' : '즐겨찾기',
+    label: favorited ? tr('즐겨찾기 빼기') : tr('즐겨찾기'),
     onPressed: onToggleFavorite ?? () => actions.toggleFavorite(context),
   ),
   if (isImage && canCopyImageToClipboard)
     hoverMenuItem(
       icon: Icons.copy_outlined,
-      label: '복사',
+      label: tr('복사'),
       onPressed: () => actions.copyImage(context),
     ),
   if (isImage)
     hoverMenuItem(
       icon: Icons.image_outlined,
-      label: '원본 파일 보기',
+      label: tr('원본 파일 보기'),
       onPressed: () => actions.openOriginal(context),
     ),
   // 올린 본인과 팀 관리자에게만 — 파일만 지우고 메시지와 댓글은 남는다.
@@ -1436,7 +1458,7 @@ List<Widget> fileActionMenuItems(
     hoverMenuDivider(),
     hoverMenuItem(
       icon: Icons.delete_outline,
-      label: '삭제',
+      label: tr('삭제'),
       color: Theme.of(context).colorScheme.error,
       onPressed: () => actions.deleteFile(context),
     ),
@@ -1530,13 +1552,16 @@ class _DownloadableFileState extends State<DownloadableFile> {
       );
       if (!mounted) return;
       if (savedPath != null) {
-        showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
+        showAppToast(
+          context,
+          tr('다운로드 완료: {p0}', {'p0': displayDownloadPath(savedPath)}),
+        );
       }
     } on DownloadCancelled catch (e) {
       if (mounted) showAppToast(context, '$e');
     } catch (e) {
       if (!mounted) return;
-      showAppToast(context, '다운로드 실패: $e');
+      showAppToast(context, tr('다운로드 실패: {e}', {'e': e}));
     } finally {
       if (mounted) {
         setState(() {
@@ -1610,7 +1635,7 @@ class _DownloadableFileState extends State<DownloadableFile> {
       }
     } catch (e) {
       if (!mounted) return;
-      showAppToast(context, '열기 실패: $e');
+      showAppToast(context, tr('열기 실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _opening = false);
     }
@@ -1621,14 +1646,14 @@ class _DownloadableFileState extends State<DownloadableFile> {
     children: [
       HoverToolbarButton(
         icon: Icons.download_outlined,
-        tooltip: '다운로드',
+        tooltip: tr('다운로드'),
         busy: _downloading,
         onPressed: _download,
       ),
       if (widget.message != null)
         HoverToolbarButton(
           icon: Icons.more_vert,
-          tooltip: '더보기',
+          tooltip: tr('더보기'),
           onMenuOpenChanged: (v) => setState(() => _menuOpen = v),
           menuChildren: fileActionMenuItems(
             context,
@@ -1659,10 +1684,7 @@ class _DownloadableFileState extends State<DownloadableFile> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Flexible(
-            child: GestureDetector(
-              onTap: _opening ? null : _open,
-              child: card,
-            ),
+            child: GestureDetector(onTap: _opening ? null : _open, child: card),
           ),
           const SizedBox(width: 4),
           SizedBox(
@@ -2020,7 +2042,7 @@ class DropZoneOverlay extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            '파일을 이곳에 드래그 & 드롭하여 업로드하세요',
+            tr('파일을 이곳에 드래그 & 드롭하여 업로드하세요'),
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,

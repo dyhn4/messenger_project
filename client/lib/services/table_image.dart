@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/painting.dart';
 
 import 'table_paste.dart';
+import '../l10n/tr.dart';
 
 /// 표를 그리는 모양 — 글자 크기·여백·선 굵기와 색. 흰 바탕에 얇은 테두리만 있는 단순한 표다(엑셀식 A·B·C / 1·2·3
 /// 머리글 칸이 없다). 머리글 `<th>`가 있으면 첫 행만 옅은 바탕에 굵게 그린다.
@@ -174,7 +175,10 @@ Future<Uint8List> renderTablePng(
       if (table.hasHeader && r == 0) {
         canvas.drawRect(cell, Paint()..color = style.headerBackground);
       }
-      canvas.drawRect(cell.deflate(0.5), grid); // 바깥 테두리가 그림 밖으로 잘리지 않게 반 픽셀 안쪽에 긋는다.
+      canvas.drawRect(
+        cell.deflate(0.5),
+        grid,
+      ); // 바깥 테두리가 그림 밖으로 잘리지 않게 반 픽셀 안쪽에 긋는다.
       layout.painters[r][c].paint(
         canvas,
         Offset(x + style.cellPaddingX, y + style.cellPaddingY),
@@ -188,7 +192,7 @@ Future<Uint8List> renderTablePng(
   final image = await picture.toImage(size.width, size.height);
   try {
     final data = await image.toByteData(format: ui.ImageByteFormat.png);
-    if (data == null) throw StateError('표 이미지를 만들지 못했습니다.');
+    if (data == null) throw StateError(tr('표 이미지를 만들지 못했습니다.'));
     return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
   } finally {
     image.dispose();

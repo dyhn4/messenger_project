@@ -13,6 +13,7 @@ import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
 import '../widgets/sticker_view.dart';
 import '../widgets/xfile_image.dart';
+import '../l10n/tr.dart';
 
 /// 올릴 수 있는 그림 확장자(server/src/stickers.js의 STICKER_MIME과 같다).
 const _imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
@@ -169,13 +170,16 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
         showAppToast(
           context,
           files.isEmpty
-              ? '"$name" 세트를 만들었습니다.'
-              : '"$name" 세트를 만들고 ${files.length}개를 올렸습니다.',
+              ? tr('"{name}" 세트를 만들었습니다.', {'name': name})
+              : tr('"{name}" 세트를 만들고 {files.length}개를 올렸습니다.', {
+                  'name': name,
+                  'files.length': files.length,
+                }),
         );
       }
       await _changed();
     } catch (e) {
-      if (mounted) showAppToast(context, '세트를 만들지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('세트를 만들지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _uploadingPackId = null);
     }
@@ -183,17 +187,25 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
 
   /// 그림 여러 장을 골라 세트 맨 뒤에 올린다 — 파일 이름 순서(1, 2, … 10)대로 붙는다.
   Future<void> _upload(ServerStickerPack pack) async {
-    final files = await _pickImages('"${pack.name}"에 올릴 그림 선택');
+    final files = await _pickImages(
+      tr('"{pack.name}"에 올릴 그림 선택', {'pack.name': pack.name}),
+    );
     if (files.isEmpty) return;
     setState(() => _uploadingPackId = pack.id);
     try {
       await widget.session.api!.uploadStickers(pack.id, files);
       if (mounted) {
-        showAppToast(context, '"${pack.name}"에 ${files.length}개를 올렸습니다.');
+        showAppToast(
+          context,
+          tr('"{pack.name}"에 {files.length}개를 올렸습니다.', {
+            'pack.name': pack.name,
+            'files.length': files.length,
+          }),
+        );
       }
       await _changed();
     } catch (e) {
-      if (mounted) showAppToast(context, '올리지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('올리지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _uploadingPackId = null);
     }
@@ -204,7 +216,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
     final name = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('세트 이름 바꾸기'),
+        title: Text(tr('세트 이름 바꾸기')),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -213,11 +225,11 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(c).pop(controller.text.trim()),
-            child: const Text('저장'),
+            child: Text(tr('저장')),
           ),
         ],
       ),
@@ -227,7 +239,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
       await widget.session.api!.updateStickerPack(pack.id, name: name);
       await _changed();
     } catch (e) {
-      if (mounted) showAppToast(context, '이름을 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('이름을 바꾸지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -239,7 +251,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
       );
       await _changed();
     } catch (e) {
-      if (mounted) showAppToast(context, '바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('바꾸지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -247,24 +259,27 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('세트 삭제'),
+        title: Text(tr('세트 삭제')),
         content: Text(
           _isCharacter
-              ? '"${pack.name}" 세트를 삭제할까요?\n'
-                    '"캐릭터 선택하기"와 이 목록에서 사라집니다. 이미 이 세트의 그림을 프로필 '
-                    '사진으로 고른 사람은 그대로 유지됩니다.'
-              : '"${pack.name}" 세트를 삭제할까요?\n'
-                    '이모티콘 선택창과 이 목록에서 사라집니다. 이미 보낸 메시지의 이모티콘은 그대로 보입니다.',
+              ? tr(
+                  '"{pack.name}" 세트를 삭제할까요?\n"캐릭터 선택하기"와 이 목록에서 사라집니다. 이미 이 세트의 그림을 프로필 사진으로 고른 사람은 그대로 유지됩니다.',
+                  {'pack.name': pack.name},
+                )
+              : tr(
+                  '"{pack.name}" 세트를 삭제할까요?\n이모티콘 선택창과 이 목록에서 사라집니다. 이미 보낸 메시지의 이모티콘은 그대로 보입니다.',
+                  {'pack.name': pack.name},
+                ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       ),
@@ -273,10 +288,15 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
     try {
       await widget.session.api!.deleteStickerPack(pack.id);
       if (_openPackId == pack.id) setState(() => _openPackId = null);
-      if (mounted) showAppToast(context, '"${pack.name}" 세트를 삭제했습니다.');
+      if (mounted) {
+        showAppToast(
+          context,
+          tr('"{pack.name}" 세트를 삭제했습니다.', {'pack.name': pack.name}),
+        );
+      }
       await _changed();
     } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -302,28 +322,37 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
         if (_selected.contains(s.id)) s.id,
     ];
     if (ids.isEmpty) return;
-    final what = _isCharacter ? '캐릭터' : '이모티콘';
+    final what = _isCharacter ? tr('캐릭터') : tr('이모티콘');
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text('$what ${ids.length}개 삭제'),
+        title: Text(
+          tr('{what} {ids.length}개 삭제', {
+            'what': what,
+            'ids.length': ids.length,
+          }),
+        ),
         content: Text(
           _isCharacter
-              ? '고른 캐릭터 ${ids.length}개를 삭제할까요?\n'
-                    '"캐릭터 선택하기"와 이 목록에서 사라집니다. 이미 프로필 사진으로 고른 사람은 그대로 유지됩니다.'
-              : '고른 이모티콘 ${ids.length}개를 삭제할까요?\n'
-                    '이모티콘 선택창과 이 목록에서 사라집니다. 이미 보낸 메시지의 이모티콘은 그대로 보입니다.',
+              ? tr(
+                  '고른 캐릭터 {ids.length}개를 삭제할까요?\n"캐릭터 선택하기"와 이 목록에서 사라집니다. 이미 프로필 사진으로 고른 사람은 그대로 유지됩니다.',
+                  {'ids.length': ids.length},
+                )
+              : tr(
+                  '고른 이모티콘 {ids.length}개를 삭제할까요?\n이모티콘 선택창과 이 목록에서 사라집니다. 이미 보낸 메시지의 이모티콘은 그대로 보입니다.',
+                  {'ids.length': ids.length},
+                ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('sticker-delete-confirm'),
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       ),
@@ -334,10 +363,10 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
       final n = await widget.session.api!.deleteStickers(pack.id, ids);
       if (!mounted) return;
       setState(_endSelecting);
-      showAppToast(context, '$what $n개를 삭제했습니다.');
+      showAppToast(context, tr('{what} {n}개를 삭제했습니다.', {'what': what, 'n': n}));
       await _changed();
     } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _deleting = false);
     }
@@ -352,7 +381,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
       );
       await _changed();
     } catch (e) {
-      if (mounted) showAppToast(context, '바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('바꾸지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -360,32 +389,32 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
   List<Widget> _packMenu(ServerStickerPack pack) => [
     hoverMenuItem(
       icon: Icons.upload_outlined,
-      label: '그림 올리기',
+      label: tr('그림 올리기'),
       onPressed: () => _upload(pack),
     ),
     hoverMenuItem(
       icon: Icons.edit_outlined,
-      label: '이름 바꾸기',
+      label: tr('이름 바꾸기'),
       onPressed: () => _rename(pack),
     ),
     hoverMenuItem(
       icon: pack.hidden
           ? Icons.visibility_outlined
           : Icons.visibility_off_outlined,
-      label: pack.hidden ? '세트 다시 보이기' : '세트 숨기기',
+      label: pack.hidden ? tr('세트 다시 보이기') : tr('세트 숨기기'),
       onPressed: () => _togglePack(pack),
     ),
     // 세트 안의 그림을 여러 장 골라 지운다 — 그림이 있을 때만.
     if (pack.stickers.isNotEmpty)
       hoverMenuItem(
         icon: Icons.checklist_rounded,
-        label: '개별 삭제',
+        label: tr('개별 삭제'),
         color: Colors.redAccent,
         onPressed: () => _startSelecting(pack),
       ),
     hoverMenuItem(
       icon: Icons.delete_outline,
-      label: '세트 삭제',
+      label: tr('세트 삭제'),
       color: Colors.redAccent,
       onPressed: () => _deletePack(pack),
     ),
@@ -436,15 +465,15 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
 
   /// 이모티콘(채팅용) / 캐릭터(프로필 사진용) 세그먼트 — 바꾸면 목록으로 돌아가 그 kind만 받는다.
   Widget _kindSwitch(BuildContext context) => SegmentedButton<String>(
-    segments: const [
+    segments: [
       ButtonSegment(
         value: 'sticker',
-        label: Text('이모티콘'),
+        label: Text(tr('이모티콘')),
         icon: Icon(Icons.emoji_emotions_outlined, size: 16),
       ),
       ButtonSegment(
         value: 'character',
-        label: Text('캐릭터'),
+        label: Text(tr('캐릭터')),
         icon: Icon(Icons.face_outlined, size: 16),
       ),
     ],
@@ -466,12 +495,12 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
             Expanded(
               child: Text(
                 _isCharacter
-                    ? '캐릭터 세트를 만들고 그림(PNG·JPG·GIF·WEBP, 한 장 5MB 이하)을 올리면 앱을 '
-                          '새로 배포하지 않아도 모든 사람의 "캐릭터 선택하기"(프로필 사진 편집)에 '
-                          '바로 나옵니다. 대표 이미지를 누르면 세트 모음을 봅니다.'
-                    : '그림 이모티콘 세트를 만들고 그림(PNG·JPG·GIF·WEBP, 한 장 5MB 이하)을 올리면 앱을 '
-                          '새로 배포하지 않아도 모든 사람의 이모티콘 선택창에 바로 나옵니다. 대표 이미지를 '
-                          '누르면 이모티콘 모음을 봅니다.',
+                    ? tr(
+                        '캐릭터 세트를 만들고 그림(PNG·JPG·GIF·WEBP, 한 장 5MB 이하)을 올리면 앱을 새로 배포하지 않아도 모든 사람의 "캐릭터 선택하기"(프로필 사진 편집)에 바로 나옵니다. 대표 이미지를 누르면 세트 모음을 봅니다.',
+                      )
+                    : tr(
+                        '그림 이모티콘 세트를 만들고 그림(PNG·JPG·GIF·WEBP, 한 장 5MB 이하)을 올리면 앱을 새로 배포하지 않아도 모든 사람의 이모티콘 선택창에 바로 나옵니다. 대표 이미지를 누르면 이모티콘 모음을 봅니다.',
+                      ),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.hintColor,
                 ),
@@ -481,7 +510,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
             FilledButton.icon(
               onPressed: _uploadingPackId != null ? null : _createPack,
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('새 세트'),
+              label: Text(tr('새 세트')),
             ),
           ],
         ),
@@ -491,8 +520,8 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
               ? Center(
                   child: Text(
                     _isCharacter
-                        ? '아직 캐릭터 세트가 없습니다. "새 세트"로 만들어 보세요.'
-                        : '아직 이모티콘 세트가 없습니다. "새 세트"로 만들어 보세요.',
+                        ? tr('아직 캐릭터 세트가 없습니다. "새 세트"로 만들어 보세요.')
+                        : tr('아직 이모티콘 세트가 없습니다. "새 세트"로 만들어 보세요.'),
                   ),
                 )
               : LayoutBuilder(
@@ -560,7 +589,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
           children: [
             IconButton(
               icon: const Icon(Icons.arrow_back),
-              tooltip: '세트 목록',
+              tooltip: tr('세트 목록'),
               onPressed: () => setState(() {
                 _openPackId = null;
                 _endSelecting();
@@ -611,7 +640,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
                 style: const ButtonStyle(
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                tooltip: '더보기',
+                tooltip: tr('더보기'),
                 onPressed: () =>
                     controller.isOpen ? controller.close() : controller.open(),
               ),
@@ -625,10 +654,12 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
             child: Text(
               _isCharacter
-                  ? '그림을 누르면 숨기거나 다시 보이게 합니다(숨긴 그림은 "캐릭터 선택하기"에서만 '
-                        '빠지고, 이미 프로필 사진으로 고른 사람에게는 그대로 보입니다).'
-                  : '그림을 누르면 숨기거나 다시 보이게 합니다(숨긴 그림은 선택창에서만 빠지고, 이미 보낸 '
-                        '메시지에서는 그대로 보입니다).',
+                  ? tr(
+                      '그림을 누르면 숨기거나 다시 보이게 합니다(숨긴 그림은 "캐릭터 선택하기"에서만 빠지고, 이미 프로필 사진으로 고른 사람에게는 그대로 보입니다).',
+                    )
+                  : tr(
+                      '그림을 누르면 숨기거나 다시 보이게 합니다(숨긴 그림은 선택창에서만 빠지고, 이미 보낸 메시지에서는 그대로 보입니다).',
+                    ),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
@@ -638,7 +669,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
           child: pack.stickers.isEmpty
               ? Center(
                   child: Text(
-                    '"그림 올리기"로 그림을 여러 장 한꺼번에 올릴 수 있습니다.',
+                    tr('"그림 올리기"로 그림을 여러 장 한꺼번에 올릴 수 있습니다.'),
                     style: TextStyle(color: theme.hintColor),
                   ),
                 )
@@ -674,7 +705,11 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
         children: [
           Expanded(
             child: Text(
-              _selected.isEmpty ? '지울 그림을 누르세요.' : '${_selected.length}개 선택됨',
+              _selected.isEmpty
+                  ? tr('지울 그림을 누르세요.')
+                  : tr('{_selected.length}개 선택됨', {
+                      '_selected.length': _selected.length,
+                    }),
               style: theme.textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
@@ -691,12 +726,12 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
                       _selected.addAll(pack.stickers.map((s) => s.id));
                     }
                   }),
-            child: Text(allSelected ? '전체 해제' : '전체 선택'),
+            child: Text(allSelected ? tr('전체 해제') : tr('전체 선택')),
           ),
           TextButton(
             key: const ValueKey('sticker-select-cancel'),
             onPressed: _deleting ? null : () => setState(_endSelecting),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           const SizedBox(width: 4),
           FilledButton.icon(
@@ -715,7 +750,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
                     ),
                   )
                 : const Icon(Icons.delete_outline, size: 18),
-            label: const Text('삭제'),
+            label: Text(tr('삭제')),
           ),
         ],
       ),
@@ -729,7 +764,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
     return Tooltip(
       message: _selecting
           ? (s.fileName ?? '')
-          : '${s.fileName ?? ''}\n${s.hidden ? '눌러서 다시 보이기' : '눌러서 숨기기'}',
+          : '${s.fileName ?? ''}\n${s.hidden ? tr('눌러서 다시 보이기') : tr('눌러서 숨기기')}',
       child: InkWell(
         key: ValueKey('sticker-tile-${s.id}'),
         borderRadius: BorderRadius.circular(10),
@@ -783,9 +818,10 @@ String _countLabel(ServerStickerPack pack, int shown) {
   final total = pack.stickers.length;
   final hiddenCount = total - shown;
   return [
-    '$total개',
-    if (hiddenCount > 0 && !pack.hidden) '숨김 $hiddenCount',
-    if (pack.hidden) '세트 숨김',
+    tr('{total}개', {'total': total}),
+    if (hiddenCount > 0 && !pack.hidden)
+      tr('숨김 {hiddenCount}', {'hiddenCount': hiddenCount}),
+    if (pack.hidden) tr('세트 숨김'),
   ].join(' · ');
 }
 
@@ -871,7 +907,7 @@ class _PackCardState extends State<_PackCard> {
                       children: [
                         HoverToolbarButton(
                           icon: Icons.more_vert,
-                          tooltip: '더보기',
+                          tooltip: tr('더보기'),
                           onMenuOpenChanged: (v) =>
                               setState(() => _menuOpen = v),
                           menuChildren: widget.menu,
@@ -923,7 +959,7 @@ class _NewPackDialogState extends State<_NewPackDialog> {
   }
 
   Future<void> _pick() async {
-    final files = await widget.pickImages('새 세트에 올릴 그림 선택');
+    final files = await widget.pickImages(tr('새 세트에 올릴 그림 선택'));
     if (files.isNotEmpty) setState(() => _files = files);
   }
 
@@ -937,7 +973,7 @@ class _NewPackDialogState extends State<_NewPackDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
-      title: Text(widget.isCharacter ? '새 캐릭터 세트' : '새 이모티콘 세트'),
+      title: Text(widget.isCharacter ? tr('새 캐릭터 세트') : tr('새 이모티콘 세트')),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -947,9 +983,9 @@ class _NewPackDialogState extends State<_NewPackDialog> {
             TextField(
               controller: _name,
               autofocus: true,
-              decoration: const InputDecoration(
-                labelText: '세트 이름',
-                hintText: '예: 리마인',
+              decoration: InputDecoration(
+                labelText: tr('세트 이름'),
+                hintText: tr('예: 리마인'),
               ),
               onChanged: (_) => setState(() {}),
               onSubmitted: (_) => _submit(),
@@ -960,14 +996,16 @@ class _NewPackDialogState extends State<_NewPackDialog> {
                 OutlinedButton.icon(
                   onPressed: _pick,
                   icon: const Icon(Icons.upload_outlined, size: 18),
-                  label: Text(_files.isEmpty ? '그림 올리기' : '다시 고르기'),
+                  label: Text(_files.isEmpty ? tr('그림 올리기') : tr('다시 고르기')),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     _files.isEmpty
-                        ? 'PNG·JPG·GIF·WEBP, 한 장 5MB 이하 · 여러 장 선택'
-                        : '${_files.length}장 선택됨 — 파일 이름 순서대로 붙습니다',
+                        ? tr('PNG·JPG·GIF·WEBP, 한 장 5MB 이하 · 여러 장 선택')
+                        : tr('{_files.length}장 선택됨 — 파일 이름 순서대로 붙습니다', {
+                            '_files.length': _files.length,
+                          }),
                     style: TextStyle(fontSize: 12, color: theme.hintColor),
                   ),
                 ),
@@ -1009,11 +1047,17 @@ class _NewPackDialogState extends State<_NewPackDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: _name.text.trim().isEmpty ? null : _submit,
-          child: Text(_files.isEmpty ? '만들기' : '만들고 ${_files.length}장 올리기'),
+          child: Text(
+            _files.isEmpty
+                ? tr('만들기')
+                : tr('만들고 {_files.length}장 올리기', {
+                    '_files.length': _files.length,
+                  }),
+          ),
         ),
       ],
     );

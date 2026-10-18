@@ -14,12 +14,13 @@ import '../../widgets/app_toast.dart';
 import '../../widgets/attachment_widgets.dart'
     show DropZoneOverlay, saveAttachment;
 import '../../widgets/dropped_files.dart';
+import '../../l10n/tr.dart';
 
 /// 팀 공유 드라이브 열기 — 지금 팀의 드라이브(서버 drive.js).
 Future<void> openDriveScreen(BuildContext context, Session session) {
   final team = session.currentTeam;
   if (team == null) {
-    showAppToast(context, '팀을 먼저 고르세요.');
+    showAppToast(context, tr('팀을 먼저 고르세요.'));
     return Future.value();
   }
   return Navigator.of(context).push(
@@ -148,7 +149,7 @@ class DriveScreenState extends State<DriveScreen> {
   }
 
   Future<void> _newFolder() async {
-    final name = await _askName('새 폴더', action: '만들기');
+    final name = await _askName(tr('새 폴더'), action: tr('만들기'));
     if (name == null || name.isEmpty) return;
     await _run(
       () => _api.createDriveFolder(widget.teamId, name, parentId: _folderId),
@@ -187,19 +188,22 @@ class DriveScreenState extends State<DriveScreen> {
           final asVersion = await showDialog<bool>(
             context: context,
             builder: (c) => AlertDialog(
-              title: const Text('같은 이름의 파일'),
+              title: Text(tr('같은 이름의 파일')),
               content: Text(
-                "'${existing.name}'이(가) 이미 있습니다. 새 판(판 ${existing.version + 1})으로 올릴까요?",
+                tr('\'{existing.name}\'이(가) 이미 있습니다. 새 판(판 {p0})으로 올릴까요?', {
+                  'existing.name': existing.name,
+                  'p0': existing.version + 1,
+                }),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(c).pop(false),
-                  child: const Text('건너뛰기'),
+                  child: Text(tr('건너뛰기')),
                 ),
                 FilledButton(
                   key: const ValueKey('drive-upload-as-version'),
                   onPressed: () => Navigator.of(c).pop(true),
-                  child: const Text('새 판으로 올리기'),
+                  child: Text(tr('새 판으로 올리기')),
                 ),
               ],
             ),
@@ -226,9 +230,9 @@ class DriveScreenState extends State<DriveScreen> {
         url: link,
         fileName: name ?? f.name,
       );
-      if (saved != null && mounted) showAppToast(context, '내려받았습니다.');
+      if (saved != null && mounted) showAppToast(context, tr('내려받았습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '내려받지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('내려받지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -247,9 +251,9 @@ class DriveScreenState extends State<DriveScreen> {
     switch (action) {
       case 'rename':
         final name = await _askName(
-          '폴더 이름 바꾸기',
+          tr('폴더 이름 바꾸기'),
           initial: f.name,
-          action: '바꾸기',
+          action: tr('바꾸기'),
         );
         if (name == null || name.isEmpty || name == f.name) return;
         await _run(() => _api.updateDriveFolder(f.id, name: name));
@@ -258,12 +262,12 @@ class DriveScreenState extends State<DriveScreen> {
         if (target == null) return;
         await _run(
           () => _api.updateDriveFolder(f.id, move: true, parentId: target.id),
-          done: '옮겼습니다.',
+          done: tr('옮겼습니다.'),
         );
       case 'delete':
         await _run(
           () => _api.deleteDriveFolder(widget.teamId, f.id),
-          done: "'${f.name}'을(를) 휴지통으로 옮겼습니다.",
+          done: tr('\'{f.name}\'을(를) 휴지통으로 옮겼습니다.', {'f.name': f.name}),
         );
     }
   }
@@ -319,7 +323,7 @@ class DriveScreenState extends State<DriveScreen> {
                 TextButton(
                   key: const ValueKey('drive-crumb-root'),
                   onPressed: listing.path.isEmpty ? null : () => _open(null),
-                  child: const Text('드라이브'),
+                  child: Text(tr('드라이브')),
                 ),
                 for (final p in listing.path) ...[
                   Icon(Icons.chevron_right, size: 16, color: hint),
@@ -340,13 +344,15 @@ class DriveScreenState extends State<DriveScreen> {
                 height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
-              title: Text('올리는 중: $name'),
+              title: Text(tr('올리는 중: {name}', {'name': name})),
             ),
           if (empty)
             Padding(
               padding: const EdgeInsets.all(40),
               child: Text(
-                listing.canWrite ? '비어 있습니다. 파일을 올리거나 폴더를 만드세요.' : '비어 있습니다.',
+                listing.canWrite
+                    ? tr('비어 있습니다. 파일을 올리거나 폴더를 만드세요.')
+                    : tr('비어 있습니다.'),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: hint),
               ),
@@ -361,19 +367,19 @@ class DriveScreenState extends State<DriveScreen> {
               trailing: !listing.canWrite
                   ? null
                   : PopupMenuButton<String>(
-                      tooltip: '더보기',
+                      tooltip: tr('더보기'),
                       onSelected: (a) => _folderAction(f, a),
                       itemBuilder: (_) => [
-                        const PopupMenuItem(
+                        PopupMenuItem(
                           value: 'rename',
-                          child: Text('이름 바꾸기'),
+                          child: Text(tr('이름 바꾸기')),
                         ),
-                        const PopupMenuItem(value: 'move', child: Text('옮기기')),
+                        PopupMenuItem(value: 'move', child: Text(tr('옮기기'))),
                         if (listing.isManager ||
                             f.createdBy == widget.session.userId)
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'delete',
-                            child: Text('휴지통으로'),
+                            child: Text(tr('휴지통으로')),
                           ),
                       ],
                     ),
@@ -388,7 +394,8 @@ class DriveScreenState extends State<DriveScreen> {
               title: Text(f.name, maxLines: 1, overflow: TextOverflow.ellipsis),
               subtitle: Text(
                 [
-                  if (f.version > 1) '판 ${f.version}',
+                  if (f.version > 1)
+                    tr('판 {f.version}', {'f.version': f.version}),
                   formatBytes(f.size),
                   if (f.updatedByName != null) f.updatedByName!,
                   _date(f.updatedAt),
@@ -396,7 +403,7 @@ class DriveScreenState extends State<DriveScreen> {
               ),
               onTap: () => _openFile(f),
               trailing: IconButton(
-                tooltip: '내려받기',
+                tooltip: tr('내려받기'),
                 onPressed: () => _download(f),
                 icon: const Icon(Icons.download_outlined),
               ),
@@ -404,7 +411,9 @@ class DriveScreenState extends State<DriveScreen> {
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
-              '드라이브 사용량 ${formatBytes(listing.usageBytes)}(판 기록 포함)',
+              tr('드라이브 사용량 {p0}(판 기록 포함)', {
+                'p0': formatBytes(listing.usageBytes),
+              }),
               key: const ValueKey('drive-usage'),
               style: TextStyle(fontSize: 12, color: hint),
             ),
@@ -419,24 +428,26 @@ class DriveScreenState extends State<DriveScreen> {
     final listing = _listing;
     final scaffold = Scaffold(
       appBar: AppBar(
-        title: Text('드라이브 · ${widget.teamName}'),
+        title: Text(
+          tr('드라이브 · {widget.teamName}', {'widget.teamName': widget.teamName}),
+        ),
         actions: [
           IconButton(
             key: const ValueKey('drive-search'),
-            tooltip: '찾기',
+            tooltip: tr('찾기'),
             onPressed: _search,
             icon: const Icon(Icons.search),
           ),
           IconButton(
             key: const ValueKey('drive-trash'),
-            tooltip: '휴지통',
+            tooltip: tr('휴지통'),
             onPressed: _openTrash,
             icon: const Icon(Icons.delete_outline),
           ),
           if (listing?.canWrite ?? false) ...[
             IconButton(
               key: const ValueKey('drive-new-folder'),
-              tooltip: '새 폴더',
+              tooltip: tr('새 폴더'),
               onPressed: _newFolder,
               icon: const Icon(Icons.create_new_folder_outlined),
             ),
@@ -446,7 +457,7 @@ class DriveScreenState extends State<DriveScreen> {
                 key: const ValueKey('drive-upload'),
                 onPressed: _pickAndUpload,
                 icon: const Icon(Icons.upload_file, size: 18),
-                label: const Text('올리기'),
+                label: Text(tr('올리기')),
               ),
             ),
           ],
@@ -553,15 +564,15 @@ class _FileDialogState extends State<_FileDialog> {
     await _do(() async {
       final upload = await widget.api.uploadFile(f.xFile);
       await widget.api.addDriveFileVersion(widget.fileId, upload);
-    }, done: '새 판을 올렸습니다.');
+    }, done: tr('새 판을 올렸습니다.'));
   }
 
   Future<void> _rename(DriveFile file) async {
     final name = await showDriveNameDialog(
       context,
-      '이름 바꾸기',
+      tr('이름 바꾸기'),
       initial: file.name,
-      action: '바꾸기',
+      action: tr('바꾸기'),
     );
     if (name == null || name.isEmpty || name == file.name) return;
     await _do(() => widget.api.updateDriveFile(file.id, name: name));
@@ -573,7 +584,7 @@ class _FileDialogState extends State<_FileDialog> {
     final hint = Theme.of(context).hintColor;
     return AlertDialog(
       title: Text(
-        d?.file.name ?? '파일',
+        d?.file.name ?? tr('파일'),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
@@ -590,7 +601,7 @@ class _FileDialogState extends State<_FileDialog> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    ['드라이브', ...d.path.map((p) => p.name)].join(' / '),
+                    [tr('드라이브'), ...d.path.map((p) => p.name)].join(' / '),
                     style: TextStyle(fontSize: 12, color: hint),
                   ),
                   const SizedBox(height: 8),
@@ -604,18 +615,18 @@ class _FileDialogState extends State<_FileDialog> {
                             ? null
                             : () => widget.onDownload(d.file.url!, d.file.name),
                         icon: const Icon(Icons.download, size: 18),
-                        label: const Text('내려받기'),
+                        label: Text(tr('내려받기')),
                       ),
                       if (d.canWrite) ...[
                         OutlinedButton.icon(
                           key: const ValueKey('drive-file-new-version'),
                           onPressed: _busy ? null : _newVersion,
                           icon: const Icon(Icons.upload, size: 18),
-                          label: const Text('새 판 올리기'),
+                          label: Text(tr('새 판 올리기')),
                         ),
                         TextButton(
                           onPressed: _busy ? null : () => _rename(d.file),
-                          child: const Text('이름 바꾸기'),
+                          child: Text(tr('이름 바꾸기')),
                         ),
                         TextButton(
                           key: const ValueKey('drive-file-move'),
@@ -630,11 +641,11 @@ class _FileDialogState extends State<_FileDialog> {
                                       move: true,
                                       folderId: target.id,
                                     ),
-                                    done: '옮겼습니다.',
+                                    done: tr('옮겼습니다.'),
                                     close: true,
                                   );
                                 },
-                          child: const Text('옮기기'),
+                          child: Text(tr('옮기기')),
                         ),
                       ],
                       if (d.canRemove)
@@ -647,16 +658,18 @@ class _FileDialogState extends State<_FileDialog> {
                                     widget.teamId,
                                     d.file.id,
                                   ),
-                                  done: '휴지통으로 옮겼습니다.',
+                                  done: tr('휴지통으로 옮겼습니다.'),
                                   close: true,
                                 ),
-                          child: const Text('휴지통으로'),
+                          child: Text(tr('휴지통으로')),
                         ),
                     ],
                   ),
                   const Divider(height: 20),
                   Text(
-                    '판 기록 ${d.versions.length}',
+                    tr('판 기록 {d.versions.length}', {
+                      'd.versions.length': d.versions.length,
+                    }),
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
                   Expanded(
@@ -691,7 +704,7 @@ class _FileDialogState extends State<_FileDialog> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
-                                  tooltip: '이 판 내려받기',
+                                  tooltip: tr('이 판 내려받기'),
                                   onPressed: v.url == null
                                       ? null
                                       : () => widget.onDownload(
@@ -708,7 +721,7 @@ class _FileDialogState extends State<_FileDialog> {
                                     key: ValueKey(
                                       'drive-version-restore-${v.version}',
                                     ),
-                                    tooltip: '이 판으로 되돌리기',
+                                    tooltip: tr('이 판으로 되돌리기'),
                                     onPressed: _busy
                                         ? null
                                         : () => _do(
@@ -717,7 +730,9 @@ class _FileDialogState extends State<_FileDialog> {
                                                   d.file.id,
                                                   v.version,
                                                 ),
-                                            done: '판 ${v.version}로 되돌렸습니다.',
+                                            done: tr('판 {v.version}로 되돌렸습니다.', {
+                                              'v.version': v.version,
+                                            }),
                                           ),
                                     icon: const Icon(Icons.restore, size: 18),
                                   ),
@@ -733,7 +748,7 @@ class _FileDialogState extends State<_FileDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );
@@ -785,7 +800,7 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
   Widget build(BuildContext context) {
     final l = _l;
     return AlertDialog(
-      title: const Text('옮길 곳'),
+      title: Text(tr('옮길 곳')),
       content: SizedBox(
         width: 360,
         height: 360,
@@ -793,12 +808,12 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
             ? const Center(child: CircularProgressIndicator())
             : ListView(
                 children: [
-                  Text(['드라이브', ...l.path.map((p) => p.name)].join(' / ')),
+                  Text([tr('드라이브'), ...l.path.map((p) => p.name)].join(' / ')),
                   if (_at != null)
                     ListTile(
                       dense: true,
                       leading: const Icon(Icons.arrow_upward),
-                      title: const Text('위 폴더로'),
+                      title: Text(tr('위 폴더로')),
                       onTap: () => _go(
                         l.path.length >= 2
                             ? l.path[l.path.length - 2].id
@@ -823,12 +838,12 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('drive-pick-here'),
           onPressed: () => Navigator.of(context).pop((id: _at)),
-          child: const Text('여기로 옮기기'),
+          child: Text(tr('여기로 옮기기')),
         ),
       ],
     );
@@ -876,7 +891,7 @@ class _SearchDialogState extends State<_SearchDialog> {
     final r = _r;
     final hint = Theme.of(context).hintColor;
     return AlertDialog(
-      title: const Text('드라이브에서 찾기'),
+      title: Text(tr('드라이브에서 찾기')),
       content: SizedBox(
         width: 420,
         height: 420,
@@ -885,9 +900,9 @@ class _SearchDialogState extends State<_SearchDialog> {
             TextField(
               key: const ValueKey('drive-search-input'),
               autofocus: true,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 prefixIcon: Icon(Icons.search),
-                hintText: '파일·폴더 이름',
+                hintText: tr('파일·폴더 이름'),
               ),
               onChanged: _changed,
             ),
@@ -897,7 +912,7 @@ class _SearchDialogState extends State<_SearchDialog> {
                   : r.folders.isEmpty && r.files.isEmpty
                   ? Center(
                       child: Text(
-                        '찾는 항목이 없습니다.',
+                        tr('찾는 항목이 없습니다.'),
                         style: TextStyle(color: hint),
                       ),
                     )
@@ -912,7 +927,7 @@ class _SearchDialogState extends State<_SearchDialog> {
                             ),
                             title: Text(f.name),
                             subtitle: Text(
-                              (f.path ?? '').isEmpty ? '드라이브' : f.path!,
+                              (f.path ?? '').isEmpty ? tr('드라이브') : f.path!,
                             ),
                             onTap: () => Navigator.of(
                               context,
@@ -925,7 +940,7 @@ class _SearchDialogState extends State<_SearchDialog> {
                             leading: Icon(driveFileIcon(f.name)),
                             title: Text(f.name),
                             subtitle: Text(
-                              (f.path ?? '').isEmpty ? '드라이브' : f.path!,
+                              (f.path ?? '').isEmpty ? tr('드라이브') : f.path!,
                             ),
                             onTap: () => Navigator.of(
                               context,
@@ -940,7 +955,7 @@ class _SearchDialogState extends State<_SearchDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );
@@ -979,7 +994,7 @@ class _TrashScreenState extends State<_TrashScreen> {
   Future<void> _restore(bool folder, String id) async {
     try {
       await widget.api.restoreDriveItem(folder: folder, id: id);
-      if (mounted) showAppToast(context, '되살렸습니다.');
+      if (mounted) showAppToast(context, tr('되살렸습니다.'));
       await _load();
     } catch (e) {
       if (mounted) showAppToast(context, '$e');
@@ -990,22 +1005,24 @@ class _TrashScreenState extends State<_TrashScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('영구 삭제'),
+        title: Text(tr('영구 삭제')),
         content: Text(
           folder
-              ? "'$name' 폴더와 그 안의 모든 파일을 영구 삭제할까요? 되돌릴 수 없습니다."
-              : "'$name'을(를) 영구 삭제할까요? 되돌릴 수 없습니다.",
+              ? tr('\'{name}\' 폴더와 그 안의 모든 파일을 영구 삭제할까요? 되돌릴 수 없습니다.', {
+                  'name': name,
+                })
+              : tr('\'{name}\'을(를) 영구 삭제할까요? 되돌릴 수 없습니다.', {'name': name}),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           TextButton(
             key: const ValueKey('drive-purge-ok'),
             onPressed: () => Navigator.of(c).pop(true),
             child: Text(
-              '영구 삭제',
+              tr('영구 삭제'),
               style: TextStyle(color: Theme.of(c).colorScheme.error),
             ),
           ),
@@ -1036,7 +1053,10 @@ class _TrashScreenState extends State<_TrashScreen> {
       ),
       title: Text(name),
       subtitle: Text(
-        '${(path ?? '').isEmpty ? '드라이브' : path} · ${_date(deletedAt)} 삭제',
+        tr('{p0} · {p1} 삭제', {
+          'p0': (path ?? '').isEmpty ? tr('드라이브') : path,
+          'p1': _date(deletedAt),
+        }),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1044,11 +1064,11 @@ class _TrashScreenState extends State<_TrashScreen> {
           TextButton(
             key: ValueKey('drive-restore-$id'),
             onPressed: () => _restore(folder, id),
-            child: const Text('되살리기'),
+            child: Text(tr('되살리기')),
           ),
           IconButton(
             key: ValueKey('drive-purge-$id'),
-            tooltip: '영구 삭제',
+            tooltip: tr('영구 삭제'),
             onPressed: () => _purge(folder, id, name),
             icon: const Icon(Icons.delete_forever_outlined),
           ),
@@ -1061,7 +1081,7 @@ class _TrashScreenState extends State<_TrashScreen> {
   Widget build(BuildContext context) {
     final t = _t;
     return Scaffold(
-      appBar: AppBar(title: const Text('드라이브 휴지통')),
+      appBar: AppBar(title: Text(tr('드라이브 휴지통'))),
       body: t == null
           ? Center(
               child: _error != null
@@ -1071,7 +1091,7 @@ class _TrashScreenState extends State<_TrashScreen> {
           : t.folders.isEmpty && t.files.isEmpty
           ? Center(
               child: Text(
-                '휴지통이 비어 있습니다.',
+                tr('휴지통이 비어 있습니다.'),
                 style: TextStyle(color: Theme.of(context).hintColor),
               ),
             )
@@ -1146,12 +1166,12 @@ class _NameDialogState extends State<_NameDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('취소'),
+        child: Text(tr('취소')),
       ),
       FilledButton(
         key: const ValueKey('drive-name-ok'),
         onPressed: () => Navigator.of(context).pop(_c.text.trim()),
-        child: Text(widget.action),
+        child: Text(tr(widget.action)),
       ),
     ],
   );

@@ -6,6 +6,7 @@ import '../../services/calendar_layout.dart' show weekStartOf;
 import '../../services/time_format.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/avatar_utils.dart' show parseHexColor;
+import '../../l10n/tr.dart';
 
 /// 캘린더 화면 전체가 같이 쓰는 작은 조각들 — 보기 종류, 색 팔레트, 날짜·기간 문구, 관리 훅.
 
@@ -16,8 +17,11 @@ enum CalendarViewMode {
   day('일간'),
   list('목록');
 
-  const CalendarViewMode(this.label);
-  final String label;
+  const CalendarViewMode(this._labelKo);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
 }
 
 /// 캘린더·일정 색 팔레트('#RRGGBB') — 캘린더 색 변경, 일정 색 고르기, 새 캘린더 만들기가 같이 쓴다.
@@ -58,7 +62,8 @@ const kSundayColor = Color(0xFFE53935);
 const kSaturdayColor = Color(0xFF1E88E5);
 
 /// "2026년 9월" (월간·목록 제목).
-String formatMonthTitle(DateTime d) => '${d.year}년 ${d.month}월';
+String formatMonthTitle(DateTime d) =>
+    tr('{d.year}년 {d.month}월', {'d.year': d.year, 'd.month': d.month});
 
 /// "9월 30일 (수)" — [formatScheduleDate]는 올해가 아니면 앞에 연도를 붙인다.
 String formatDayLabel(DateTime d) => formatScheduleDate(d);
@@ -73,13 +78,25 @@ String formatViewTitle(CalendarViewMode mode, DateTime focused) {
       final s = weekStartOf(focused);
       final e = addDays(s, 6);
       final endText = e.year != s.year
-          ? '${e.year}년 ${e.month}월 ${e.day}일'
+          ? tr('{e.year}년 {e.month}월 {e.day}일', {
+              'e.year': e.year,
+              'e.month': e.month,
+              'e.day': e.day,
+            })
           : e.month != s.month
-          ? '${e.month}월 ${e.day}일'
-          : '${e.day}일';
-      return '${s.year}년 ${s.month}월 ${s.day}일 – $endText';
+          ? tr('{e.month}월 {e.day}일', {'e.month': e.month, 'e.day': e.day})
+          : tr('{e.day}일', {'e.day': e.day});
+      return tr('{s.year}년 {s.month}월 {s.day}일 – {endText}', {
+        's.year': s.year,
+        's.month': s.month,
+        's.day': s.day,
+        'endText': endText,
+      });
     case CalendarViewMode.day:
-      return '${focused.year}년 ${formatScheduleDate(focused, now: focused)}';
+      return tr('{focused.year}년 {p0}', {
+        'focused.year': focused.year,
+        'p0': formatScheduleDate(focused, now: focused),
+      });
   }
 }
 
@@ -89,8 +106,11 @@ String formatEventPeriod(EventOccurrence e) {
   final last = e.lastDay;
   if (e.isHoliday || e.isBirthday) return formatDayLabel(first);
   if (e.allDay) {
-    if (!e.isMultiDay) return '${formatDayLabel(first)} · 종일';
-    return '${formatDayLabel(first)} – ${formatDayLabel(last)} · 종일';
+    if (!e.isMultiDay) return tr('{p0} · 종일', {'p0': formatDayLabel(first)});
+    return tr('{p0} – {p1} · 종일', {
+      'p0': formatDayLabel(first),
+      'p1': formatDayLabel(last),
+    });
   }
   final s = e.startTime;
   final en = e.endTime;
@@ -102,16 +122,16 @@ String formatEventPeriod(EventOccurrence e) {
 
 /// 목록·하루 일정 줄 앞에 붙는 시간 문구 — 종일/여러 날은 "종일", 시간 일정은 시작 시각.
 String formatEventTimeShort(EventOccurrence e, {DateTime? onDay}) {
-  if (e.allDay || e.isBirthday || e.isHoliday) return '종일';
+  if (e.allDay || e.isBirthday || e.isHoliday) return tr('종일');
   if (onDay != null && e.isMultiDay && !sameDay(e.firstDay, onDay)) {
-    return '계속';
+    return tr('계속');
   }
   return formatScheduleClock(e.startTime);
 }
 
 /// 보이는 제목 — 비공개는 서버가 이미 "비공개 일정"으로 바꿔 주지만, 혹시 비어 있으면 같은 문구로.
 String eventDisplayTitle(EventOccurrence e) =>
-    e.restricted && e.title.trim().isEmpty ? '비공개 일정' : e.title;
+    e.restricted && e.title.trim().isEmpty ? tr('비공개 일정') : e.title;
 
 /// 캘린더 관리 화면(새 캘린더·설정·멤버·구독 검색·삭제)을 붙이는 자리.
 ///
@@ -174,7 +194,7 @@ class CalendarManagementHooks {
 
   /// 연결 안 된 동작을 눌렀을 때의 안내.
   static void notConnected(BuildContext context, String what) =>
-      showAppToast(context, '$what 기능은 아직 연결되지 않았습니다.');
+      showAppToast(context, tr('{what} 기능은 아직 연결되지 않았습니다.', {'what': what}));
 }
 
 /// 색 고르기 — 팔레트를 격자로 보여 주고 고른 색('#RRGGBB')을 돌려준다. 취소하면 null.
@@ -197,7 +217,7 @@ Future<String?> showCalendarColorPicker(
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
       ],
     ),
@@ -227,7 +247,7 @@ class CalendarColorGrid extends StatelessWidget {
           Semantics(
             button: true,
             selected: sel == hex,
-            label: '색 $hex',
+            label: tr('색 {hex}', {'hex': hex}),
             child: InkWell(
               key: ValueKey('cal-color-$hex'),
               customBorder: const CircleBorder(),

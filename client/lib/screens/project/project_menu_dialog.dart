@@ -20,6 +20,7 @@ import 'task_config_manager.dart'
     show ProjectFieldEditor, ProjectPriorityEditor, ProjectStatusEditor;
 import 'task_type_manager.dart' show ProjectTypeEditor;
 import 'template_automation_manager.dart' show ProjectAutomationEditor;
+import '../../l10n/tr.dart';
 
 /// "프로젝트 메뉴"를 닫은 결과 — 내용이 바뀌었는지, 프로젝트가 지워졌는지.
 enum ProjectMenuResult { changed, deleted }
@@ -77,8 +78,8 @@ Future<bool> addMembersToProject(
     showAppToast(
       context,
       asOwner
-          ? '담당자로 지정할 수 있는 팀원이 없습니다. (준회원은 담당자가 될 수 없습니다.)'
-          : '추가할 수 있는 팀원이 없습니다. (준회원은 프로젝트에 참여할 수 없습니다.)',
+          ? tr('담당자로 지정할 수 있는 팀원이 없습니다. (준회원은 담당자가 될 수 없습니다.)')
+          : tr('추가할 수 있는 팀원이 없습니다. (준회원은 프로젝트에 참여할 수 없습니다.)'),
     );
     return false;
   }
@@ -87,7 +88,7 @@ Future<bool> addMembersToProject(
     builder: (_) => _MemberPickDialog(
       session: session,
       candidates: candidates,
-      title: asOwner ? '담당자 추가' : '멤버 초대하기',
+      title: asOwner ? tr('담당자 추가') : tr('멤버 초대하기'),
     ),
   );
   if (picked == null || picked.isEmpty || !context.mounted) return false;
@@ -104,7 +105,9 @@ Future<bool> addMembersToProject(
     }
     return true;
   } catch (e) {
-    if (context.mounted) showAppToast(context, '구성원을 추가하지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('구성원을 추가하지 못했습니다: {e}', {'e': e}));
+    }
     return false;
   }
 }
@@ -120,13 +123,13 @@ enum _Section {
 }
 
 String _sectionLabel(_Section s) => switch (s) {
-  _Section.basic => '기본 정보',
-  _Section.fields => '필드 / 상태',
-  _Section.members => '멤버',
-  _Section.notifications => '알림',
-  _Section.automation => '자동화',
-  _Section.notes => '노트',
-  _Section.danger => '삭제',
+  _Section.basic => tr('기본 정보'),
+  _Section.fields => tr('필드 / 상태'),
+  _Section.members => tr('멤버'),
+  _Section.notifications => tr('알림'),
+  _Section.automation => tr('자동화'),
+  _Section.notes => tr('노트'),
+  _Section.danger => tr('삭제'),
 };
 
 IconData _sectionIcon(_Section s) => switch (s) {
@@ -201,7 +204,7 @@ class _ProjectMenuDialogState extends State<_ProjectMenuDialog> {
         if (!didPop) _close();
       },
       child: FloatingDialog(
-        title: '프로젝트 설정',
+        title: tr('프로젝트 설정'),
         maxWidth: 1000,
         maxHeight: 700,
         child: _error != null
@@ -267,7 +270,7 @@ class _ProjectMenuDialogState extends State<_ProjectMenuDialog> {
         );
       case _Section.notifications:
         return _Pane(
-          title: '알림',
+          title: tr('알림'),
           // 알림 화면은 목록이 스스로 스크롤한다 — 여기서 또 감싸면 높이가 무한이 되어
           // 아무것도 안 그려진다.
           scrollable: false,
@@ -279,7 +282,7 @@ class _ProjectMenuDialogState extends State<_ProjectMenuDialog> {
         );
       case _Section.automation:
         return _Pane(
-          title: '자동화',
+          title: tr('자동화'),
           scrollable: false,
           child: ProjectAutomationEditor(
             key: ValueKey('automations-${project.id}'),
@@ -494,7 +497,7 @@ class _BasicPaneState extends State<_BasicPane> {
   Future<void> _save() async {
     final name = _name.text.trim();
     if (name.isEmpty) {
-      showAppToast(context, '프로젝트 이름을 입력하세요.');
+      showAppToast(context, tr('프로젝트 이름을 입력하세요.'));
       return;
     }
     setState(() => _saving = true);
@@ -506,10 +509,10 @@ class _BasicPaneState extends State<_BasicPane> {
         color: _color,
         isPublic: _isPublic,
       );
-      if (mounted) showAppToast(context, '저장했습니다.');
+      if (mounted) showAppToast(context, tr('저장했습니다.'));
       await widget.onSaved();
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -541,16 +544,16 @@ class _BasicPaneState extends State<_BasicPane> {
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
     return _Pane(
-      title: '프로젝트 정보',
-      description: '프로젝트의 기본 정보를 변경할 수 있습니다.',
+      title: tr('프로젝트 정보'),
+      description: tr('프로젝트의 기본 정보를 변경할 수 있습니다.'),
       action: FilledButton(
         onPressed: _saving ? null : _save,
-        child: const Text('저장'),
+        child: Text(tr('저장')),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _label('프로젝트 이름'),
+          _label(tr('프로젝트 이름')),
           TextField(
             controller: _name,
             maxLength: 60,
@@ -561,7 +564,7 @@ class _BasicPaneState extends State<_BasicPane> {
             ),
           ),
           const SizedBox(height: 20),
-          _label('대표 색상'),
+          _label(tr('대표 색상')),
           Wrap(
             spacing: 10,
             runSpacing: 10,
@@ -594,7 +597,7 @@ class _BasicPaneState extends State<_BasicPane> {
             ],
           ),
           const SizedBox(height: 20),
-          _label('프로젝트 키', hint: '업무 번호에 쓰이므로 만든 뒤에는 바꿀 수 없습니다.'),
+          _label(tr('프로젝트 키'), hint: tr('업무 번호에 쓰이므로 만든 뒤에는 바꿀 수 없습니다.')),
           TextField(
             enabled: false,
             controller: TextEditingController(text: widget.project.identifier),
@@ -604,35 +607,37 @@ class _BasicPaneState extends State<_BasicPane> {
             ),
           ),
           const SizedBox(height: 20),
-          _label('설명'),
+          _label(tr('설명')),
           TextField(
             controller: _description,
             minLines: 3,
             maxLines: 5,
-            decoration: const InputDecoration(
-              hintText: '프로젝트에 대한 설명을 추가하세요...',
+            decoration: InputDecoration(
+              hintText: tr('프로젝트에 대한 설명을 추가하세요...'),
               border: OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 20),
-          _label('공개 설정'),
+          _label(tr('공개 설정')),
           DropdownButtonFormField<bool>(
             initialValue: _isPublic,
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
               isDense: true,
             ),
-            items: const [
-              DropdownMenuItem(value: true, child: Text('공개')),
-              DropdownMenuItem(value: false, child: Text('비공개')),
+            items: [
+              DropdownMenuItem(value: true, child: Text(tr('공개'))),
+              DropdownMenuItem(value: false, child: Text(tr('비공개'))),
             ],
             onChanged: (v) => setState(() => _isPublic = v ?? true),
           ),
           const SizedBox(height: 8),
           Text(
             _isPublic
-                ? '공개: 정회원 이상 팀원 모두가 참여 절차 없이 자동으로 멤버가 되어 바로 업무를 보고 만들 수 있습니다.'
-                : '비공개: 프로젝트 멤버로 추가된 멤버만 접근할 수 있습니다.',
+                ? tr(
+                    '공개: 정회원 이상 팀원 모두가 참여 절차 없이 자동으로 멤버가 되어 바로 업무를 보고 만들 수 있습니다.',
+                  )
+                : tr('비공개: 프로젝트 멤버로 추가된 멤버만 접근할 수 있습니다.'),
             style: TextStyle(color: hint, fontSize: 12),
           ),
         ],
@@ -715,8 +720,8 @@ class _FieldsPaneState extends State<_FieldsPane> {
       children: [
         Expanded(
           child: card(
-            '기본 필드',
-            '상태 · 유형 · 우선순위는 프로젝트의 기본 메타데이터입니다.',
+            tr('기본 필드'),
+            tr('상태 · 유형 · 우선순위는 프로젝트의 기본 메타데이터입니다.'),
             // 세 구획이 각자 스크롤하면 어디를 굴려야 할지 알 수 없다 — 스크롤바는
             // "기본 필드" 카드에 하나만 두고 세 구획이 같이 쓴다.
             MutedScrollbar(
@@ -775,8 +780,8 @@ class _FieldsPaneState extends State<_FieldsPane> {
                         SizedBox(
                           height: fieldsHeight,
                           child: card(
-                            '사용자 정의 필드',
-                            '프로젝트에 필요한 입력 항목을 직접 추가합니다.',
+                            tr('사용자 정의 필드'),
+                            tr('프로젝트에 필요한 입력 항목을 직접 추가합니다.'),
                             ProjectFieldEditor(
                               session: session,
                               projectId: projectId,
@@ -857,7 +862,9 @@ class _TaskTemplateBoxState extends State<_TaskTemplateBox> {
       );
       if (saved != null) await widget.onChanged();
     } catch (e) {
-      if (mounted) showAppToast(context, '프로젝트 설정을 불러오지 못했습니다: $e');
+      if (mounted) {
+        showAppToast(context, tr('프로젝트 설정을 불러오지 못했습니다: {e}', {'e': e}));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -878,11 +885,12 @@ class _TaskTemplateBoxState extends State<_TaskTemplateBox> {
         children: [
           _cardHeader(
             theme,
-            '업무 템플릿',
+            tr('업무 템플릿'),
             template != null
-                ? '이 프로젝트가 사용한 프로젝트 템플릿입니다. 템플릿을 고쳐도 이 프로젝트의 구성은 바뀌지 않습니다.'
-                : '프로젝트 템플릿을 사용하지 않은 프로젝트입니다. 지금의 상태·유형·우선순위·사용자 정의 필드 '
-                      '구성을 템플릿으로 저장하면 새 프로젝트를 만들 때 불러올 수 있습니다.',
+                ? tr('이 프로젝트가 사용한 프로젝트 템플릿입니다. 템플릿을 고쳐도 이 프로젝트의 구성은 바뀌지 않습니다.')
+                : tr(
+                    '프로젝트 템플릿을 사용하지 않은 프로젝트입니다. 지금의 상태·유형·우선순위·사용자 정의 필드 구성을 템플릿으로 저장하면 새 프로젝트를 만들 때 불러올 수 있습니다.',
+                  ),
           ),
           const SizedBox(height: 10),
           if (template != null)
@@ -893,7 +901,7 @@ class _TaskTemplateBoxState extends State<_TaskTemplateBox> {
               child: FilledButton.icon(
                 onPressed: _busy ? null : _saveAsTemplate,
                 icon: const Icon(Icons.grid_view_outlined, size: 18),
-                label: const Text('템플릿 저장'),
+                label: Text(tr('템플릿 저장')),
               ),
             ),
         ],
@@ -956,7 +964,7 @@ class _MembersPaneState extends State<_MembersPane> {
       _checked.removeAll(targets);
       await widget.onChanged();
     } catch (e) {
-      if (mounted) showAppToast(context, '역할을 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('역할을 바꾸지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -966,16 +974,18 @@ class _MembersPaneState extends State<_MembersPane> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('멤버 제외'),
-        content: Text('${user.name}님을 이 프로젝트에서 제외할까요?'),
+        title: Text(tr('멤버 제외')),
+        content: Text(
+          tr('{user.name}님을 이 프로젝트에서 제외할까요?', {'user.name': user.name}),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('제외'),
+            child: Text(tr('제외')),
           ),
         ],
       ),
@@ -985,7 +995,7 @@ class _MembersPaneState extends State<_MembersPane> {
       await widget.session.api!.removeProjectMember(project.id, user.id);
       await widget.onChanged();
     } catch (e) {
-      if (mounted) showAppToast(context, '제외하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('제외하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -1011,33 +1021,32 @@ class _MembersPaneState extends State<_MembersPane> {
     if (project.isPublic) {
       final canManage = project.isOwner || widget.session.canManageCurrentTeam;
       return _Pane(
-        title: '프로젝트 담당자',
-        description: '프로젝트에 담당자를 지정합니다.',
+        title: tr('프로젝트 담당자'),
+        description: tr('프로젝트에 담당자를 지정합니다.'),
         scrollable: false,
         action: canManage
             ? FilledButton.icon(
                 onPressed: _addOwner,
                 icon: const Icon(Icons.person_add_alt, size: 18),
-                label: const Text('담당자 추가'),
+                label: Text(tr('담당자 추가')),
               )
             : null,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '공개 프로젝트는 정회원 이상 팀원 모두가 멤버입니다.',
+              tr('공개 프로젝트는 정회원 이상 팀원 모두가 멤버입니다.'),
               style: TextStyle(color: theme.hintColor, fontSize: 12),
             ),
             const SizedBox(height: 2),
             Text(
-              '따로 초대하거나 제외할 필요가 없어 멤버 목록은 표시되지 않으며, '
-              '프로젝트 담당자 수에는 제한이 없습니다.',
+              tr('따로 초대하거나 제외할 필요가 없어 멤버 목록은 표시되지 않으며, 프로젝트 담당자 수에는 제한이 없습니다.'),
               style: TextStyle(color: theme.hintColor, fontSize: 12),
             ),
             const SizedBox(height: 10),
             Expanded(
               child: _MemberList(
-                title: '프로젝트 담당자',
+                title: tr('프로젝트 담당자'),
                 role: 'owner',
                 users: owners,
                 session: widget.session,
@@ -1048,7 +1057,7 @@ class _MembersPaneState extends State<_MembersPane> {
                 onToggle: (_, _) {},
                 onDropped: (_) {},
                 onRemove: canManage ? (u) => _move([u.id], 'member') : null,
-                removeTooltip: '담당자 해제',
+                removeTooltip: tr('담당자 해제'),
               ),
             ),
           ],
@@ -1067,20 +1076,21 @@ class _MembersPaneState extends State<_MembersPane> {
         .toList();
 
     return _Pane(
-      title: '멤버 관리',
-      description: '멤버를 끌어다 놓거나 가운데 화살표로 역할을 바꿀 수 있습니다.',
+      title: tr('멤버 관리'),
+      description: tr('멤버를 끌어다 놓거나 가운데 화살표로 역할을 바꿀 수 있습니다.'),
       scrollable: false,
       action: FilledButton.icon(
         onPressed: _add,
         icon: const Icon(Icons.person_add_alt, size: 18),
-        label: const Text('멤버 초대하기'),
+        label: Text(tr('멤버 초대하기')),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '비공개 프로젝트라 여기에 추가된 멤버만 접근할 수 있습니다. '
-            '프로젝트 담당자는 설정을 바꿀 수 있고, 팀 소유자·관리자는 담당자가 아니어도 관리할 수 있습니다.',
+            tr(
+              '비공개 프로젝트라 여기에 추가된 멤버만 접근할 수 있습니다. 프로젝트 담당자는 설정을 바꿀 수 있고, 팀 소유자·관리자는 담당자가 아니어도 관리할 수 있습니다.',
+            ),
             style: TextStyle(color: theme.hintColor, fontSize: 12),
           ),
           const SizedBox(height: 10),
@@ -1090,7 +1100,7 @@ class _MembersPaneState extends State<_MembersPane> {
               children: [
                 Expanded(
                   child: _MemberList(
-                    title: '프로젝트 멤버',
+                    title: tr('프로젝트 멤버'),
                     role: 'member',
                     users: members,
                     session: widget.session,
@@ -1111,14 +1121,14 @@ class _MembersPaneState extends State<_MembersPane> {
                     children: [
                       IconButton(
                         icon: const Icon(Icons.chevron_right),
-                        tooltip: '담당자로',
+                        tooltip: tr('담당자로'),
                         onPressed: checkedMembers.isEmpty
                             ? null
                             : () => _move(checkedMembers, 'owner'),
                       ),
                       IconButton(
                         icon: const Icon(Icons.chevron_left),
-                        tooltip: '멤버로',
+                        tooltip: tr('멤버로'),
                         onPressed: checkedOwners.isEmpty
                             ? null
                             : () => _move(checkedOwners, 'member'),
@@ -1128,7 +1138,7 @@ class _MembersPaneState extends State<_MembersPane> {
                 ),
                 Expanded(
                   child: _MemberList(
-                    title: '프로젝트 담당자',
+                    title: tr('프로젝트 담당자'),
                     role: 'owner',
                     users: owners,
                     session: widget.session,
@@ -1237,7 +1247,7 @@ class _MemberListState extends State<_MemberList> {
           if (widget.onRemove != null)
             IconButton(
               icon: const Icon(Icons.close, size: 16),
-              tooltip: widget.removeTooltip,
+              tooltip: tr(widget.removeTooltip),
               visualDensity: VisualDensity.compact,
               onPressed: () => widget.onRemove!(user),
             ),
@@ -1309,8 +1319,8 @@ class _MemberListState extends State<_MemberList> {
               ),
               const SizedBox(height: 8),
               TextField(
-                decoration: const InputDecoration(
-                  hintText: '멤버 검색',
+                decoration: InputDecoration(
+                  hintText: tr('멤버 검색'),
                   isDense: true,
                   border: OutlineInputBorder(),
                 ),
@@ -1322,8 +1332,8 @@ class _MemberListState extends State<_MemberList> {
                     ? Center(
                         child: Text(
                           widget.selectable
-                              ? '없습니다. 여기로 끌어다 놓으세요.'
-                              : '아직 담당자가 없습니다.',
+                              ? tr('없습니다. 여기로 끌어다 놓으세요.')
+                              : tr('아직 담당자가 없습니다.'),
                           style: TextStyle(
                             color: theme.hintColor,
                             fontSize: 12,
@@ -1431,7 +1441,7 @@ class _NotesPaneState extends State<_NotesPane> {
           _edit = _savedEdit;
           _delete = _savedDelete;
         });
-        showAppToast(context, '노트 권한을 저장하지 못했습니다: $e');
+        showAppToast(context, tr('노트 권한을 저장하지 못했습니다: {e}', {'e': e}));
         break;
       }
     }
@@ -1443,19 +1453,19 @@ class _NotesPaneState extends State<_NotesPane> {
   Widget build(BuildContext context) {
     final canManage = _canManage;
     return _Pane(
-      title: '노트',
+      title: tr('노트'),
       description: canManage
-          ? '프로젝트 노트를 수정·삭제할 수 있는 사람을 정합니다.'
-          : '프로젝트 노트를 수정·삭제할 수 있는 사람입니다. 프로젝트 담당자와 팀 소유자·관리자만 바꿀 수 있습니다.',
+          ? tr('프로젝트 노트를 수정·삭제할 수 있는 사람을 정합니다.')
+          : tr('프로젝트 노트를 수정·삭제할 수 있는 사람입니다. 프로젝트 담당자와 팀 소유자·관리자만 바꿀 수 있습니다.'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _PermissionSection(
             keyPrefix: 'note-edit',
-            title: '노트 수정 권한',
-            description:
-                "노트를 수정할 수 있는 권한을 설정합니다. '생성자와 관리자' 선택 시, "
-                '작성자 본인과 관리자만 수정할 수 있습니다.',
+            title: tr('노트 수정 권한'),
+            description: tr(
+              '노트를 수정할 수 있는 권한을 설정합니다. \'생성자와 관리자\' 선택 시, 작성자 본인과 관리자만 수정할 수 있습니다.',
+            ),
             value: _edit,
             enabled: canManage,
             onChanged: (v) => _choose(edit: v),
@@ -1463,10 +1473,10 @@ class _NotesPaneState extends State<_NotesPane> {
           const SizedBox(height: 24),
           _PermissionSection(
             keyPrefix: 'note-delete',
-            title: '노트 삭제 권한',
-            description:
-                "노트를 삭제할 수 있는 권한을 설정합니다. '생성자와 관리자' 선택 시, "
-                '작성자 본인과 관리자만 삭제할 수 있습니다.',
+            title: tr('노트 삭제 권한'),
+            description: tr(
+              '노트를 삭제할 수 있는 권한을 설정합니다. \'생성자와 관리자\' 선택 시, 작성자 본인과 관리자만 삭제할 수 있습니다.',
+            ),
             value: _delete,
             enabled: canManage,
             onChanged: (v) => _choose(delete: v),
@@ -1495,7 +1505,10 @@ class _PermissionSection extends StatelessWidget {
     required this.onChanged,
   });
 
-  static const _options = [('all', '모두'), ('creator_admin', '생성자와 관리자')];
+  static final _options = [
+    ('all', tr('모두')),
+    ('creator_admin', tr('생성자와 관리자')),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -1599,11 +1612,14 @@ class _DangerPaneState extends State<_DangerPane> {
         archived: archived,
       );
       if (mounted) {
-        showAppToast(context, archived ? '프로젝트를 종료했습니다.' : '프로젝트를 다시 시작했습니다.');
+        showAppToast(
+          context,
+          archived ? tr('프로젝트를 종료했습니다.') : tr('프로젝트를 다시 시작했습니다.'),
+        );
       }
       await widget.onArchivedChanged();
     } catch (e) {
-      if (mounted) showAppToast(context, '바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('바꾸지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1617,7 +1633,7 @@ class _DangerPaneState extends State<_DangerPane> {
     } catch (e) {
       if (mounted) {
         setState(() => _busy = false);
-        showAppToast(context, '삭제하지 못했습니다: $e');
+        showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
       }
     }
   }
@@ -1628,7 +1644,7 @@ class _DangerPaneState extends State<_DangerPane> {
     final project = widget.project;
     final canDelete = _confirm.text.trim() == project.name;
     return _Pane(
-      title: project.archived ? '프로젝트 다시 시작 / 삭제' : '프로젝트 종료 / 삭제',
+      title: project.archived ? tr('프로젝트 다시 시작 / 삭제') : tr('프로젝트 종료 / 삭제'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1642,14 +1658,16 @@ class _DangerPaneState extends State<_DangerPane> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  project.archived ? '프로젝트 다시 시작' : '프로젝트 종료',
+                  project.archived ? tr('프로젝트 다시 시작') : tr('프로젝트 종료'),
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   project.archived
-                      ? '다시 시작하면 업무를 만들고 고칠 수 있습니다.'
-                      : '프로젝트를 종료하면 업무 생성·수정·삭제 등 모든 쓰기 작업이 제한됩니다. 읽기는 가능합니다.',
+                      ? tr('다시 시작하면 업무를 만들고 고칠 수 있습니다.')
+                      : tr(
+                          '프로젝트를 종료하면 업무 생성·수정·삭제 등 모든 쓰기 작업이 제한됩니다. 읽기는 가능합니다.',
+                        ),
                   style: TextStyle(color: theme.hintColor, fontSize: 12),
                 ),
                 const SizedBox(height: 12),
@@ -1662,7 +1680,7 @@ class _DangerPaneState extends State<_DangerPane> {
                   onPressed: _busy
                       ? null
                       : () => _setArchived(!project.archived),
-                  child: Text(project.archived ? '다시 시작' : '프로젝트 종료'),
+                  child: Text(project.archived ? tr('다시 시작') : tr('프로젝트 종료')),
                 ),
               ],
             ),
@@ -1686,7 +1704,7 @@ class _DangerPaneState extends State<_DangerPane> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      '프로젝트 삭제',
+                      tr('프로젝트 삭제'),
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                       ).copyWith(color: Colors.redAccent),
@@ -1695,19 +1713,19 @@ class _DangerPaneState extends State<_DangerPane> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '프로젝트를 삭제하면 모든 업무·댓글·노트가 영구히 삭제되며 복구할 수 없습니다.',
+                  tr('프로젝트를 삭제하면 모든 업무·댓글·노트가 영구히 삭제되며 복구할 수 없습니다.'),
                   style: TextStyle(color: theme.hintColor, fontSize: 12),
                 ),
                 const SizedBox(height: 12),
                 Text.rich(
                   TextSpan(
                     children: [
-                      const TextSpan(text: '계속하려면 프로젝트 이름 '),
+                      TextSpan(text: tr('계속하려면 프로젝트 이름 ')),
                       TextSpan(
                         text: '"${project.name}"',
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
-                      const TextSpan(text: '을 입력하세요'),
+                      TextSpan(text: tr('을 입력하세요')),
                     ],
                   ),
                   style: const TextStyle(fontSize: 12),
@@ -1715,8 +1733,8 @@ class _DangerPaneState extends State<_DangerPane> {
                 const SizedBox(height: 8),
                 TextField(
                   controller: _confirm,
-                  decoration: const InputDecoration(
-                    hintText: '프로젝트 이름 입력',
+                  decoration: InputDecoration(
+                    hintText: tr('프로젝트 이름 입력'),
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -1728,7 +1746,7 @@ class _DangerPaneState extends State<_DangerPane> {
                     backgroundColor: Colors.redAccent,
                   ),
                   onPressed: (_busy || !canDelete) ? null : _delete,
-                  child: const Text('프로젝트 영구 삭제'),
+                  child: Text(tr('프로젝트 영구 삭제')),
                 ),
               ],
             ),
@@ -1810,13 +1828,13 @@ class _MemberPickDialogState extends State<_MemberPickDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: _selected.isEmpty
               ? null
               : () => Navigator.of(context).pop(_selected.toList()),
-          child: const Text('추가'),
+          child: Text(tr('추가')),
         ),
       ],
     );

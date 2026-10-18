@@ -9,6 +9,7 @@ import '../../widgets/user_avatar.dart';
 import 'task_filter.dart';
 import 'task_views.dart';
 import '../../widgets/grab_cursors.dart';
+import '../../l10n/tr.dart';
 
 AppUser? _memberById(List<AppUser> members, String? id) =>
     id == null ? null : members.where((m) => m.id == id).firstOrNull;
@@ -311,7 +312,7 @@ class _KanbanColumnState extends State<_KanbanColumn> {
             child: widget.onAdd == null
                 ? null
                 : IconButton(
-                    tooltip: '업무 추가',
+                    tooltip: tr('업무 추가'),
                     onPressed: widget.onAdd,
                     icon: const Icon(Icons.add, size: 18),
                     color: theme.hintColor,
@@ -331,7 +332,7 @@ class _KanbanColumnState extends State<_KanbanColumn> {
       child: TextButton.icon(
         onPressed: widget.onAdd,
         icon: Icon(Icons.add, size: 16, color: hint),
-        label: Text('업무 추가', style: TextStyle(color: hint, fontSize: 13)),
+        label: Text(tr('업무 추가'), style: TextStyle(color: hint, fontSize: 13)),
         style: TextButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 8),
         ),
@@ -413,7 +414,7 @@ class _KanbanColumnState extends State<_KanbanColumn> {
               padding: const EdgeInsets.symmetric(vertical: 24),
               child: Center(
                 child: Text(
-                  '업무를 여기로 끌어다 놓으세요',
+                  tr('업무를 여기로 끌어다 놓으세요'),
                   style: TextStyle(
                     color: Theme.of(context).hintColor,
                     fontSize: 12,
@@ -581,7 +582,7 @@ class _KanbanCard extends StatelessWidget {
                 if (task.recurring) ...[
                   const SizedBox(width: 8),
                   Tooltip(
-                    message: '반복 업무',
+                    message: tr('반복 업무'),
                     child: Icon(Icons.repeat, size: 14, color: hint),
                   ),
                 ],
@@ -589,7 +590,9 @@ class _KanbanCard extends StatelessWidget {
                     task.status != TaskStatus.done) ...[
                   const SizedBox(width: 8),
                   Tooltip(
-                    message: '아직 안 끝난 선행 업무 ${task.openPredecessorCount}개',
+                    message: tr('아직 안 끝난 선행 업무 {task.openPredecessorCount}개', {
+                      'task.openPredecessorCount': task.openPredecessorCount,
+                    }),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -807,12 +810,12 @@ class TaskDashboardView extends StatelessWidget {
           // 스크롤 안이라 높이가 무한이다 — stretch를 쓰면 안 되고, 네 카드는 내용이 같아 어차피 키가 같다.
           Row(
             children: [
-              stat('전체 업무', total, doneColor, null, null),
+              stat(tr('전체 업무'), total, doneColor, null, null),
               const SizedBox(width: 12),
-              stat('완료', done, doneColor, doneColor, QuickFilter.done),
+              stat(tr('완료'), done, doneColor, doneColor, QuickFilter.done),
               const SizedBox(width: 12),
               stat(
-                '진행 중',
+                tr('진행 중'),
                 doing,
                 doneColor,
                 doingColor,
@@ -820,7 +823,7 @@ class TaskDashboardView extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               stat(
-                '지연',
+                tr('지연'),
                 overdue,
                 overdueColor,
                 overdueColor,
@@ -839,8 +842,8 @@ class TaskDashboardView extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          '전체 완료율',
+                        Text(
+                          tr('전체 완료율'),
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                         Expanded(
@@ -875,7 +878,7 @@ class TaskDashboardView extends StatelessWidget {
                                             ),
                                           ),
                                           Text(
-                                            '전체 완료율',
+                                            tr('전체 완료율'),
                                             style: TextStyle(
                                               color: hint,
                                               fontSize: 11,
@@ -891,9 +894,9 @@ class TaskDashboardView extends StatelessWidget {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    legend('완료', done, doneColor),
-                                    legend('진행 중', doing, doingColor),
-                                    legend('지연', overdue, overdueColor),
+                                    legend(tr('완료'), done, doneColor),
+                                    legend(tr('진행 중'), doing, doingColor),
+                                    legend(tr('지연'), overdue, overdueColor),
                                   ],
                                 ),
                               ),
@@ -999,8 +1002,8 @@ class _MemberWorkloadState extends State<_MemberWorkload> {
           padding: const EdgeInsets.only(right: 16),
           child: Row(
             children: [
-              const Text(
-                '멤버별 업무현황',
+              Text(
+                tr('멤버별 업무현황'),
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               const Spacer(),
@@ -1012,7 +1015,7 @@ class _MemberWorkloadState extends State<_MemberWorkload> {
                   tasks: widget.tasks,
                   onOpen: widget.onOpen,
                 ),
-                child: const Text('전체보기'),
+                child: Text(tr('전체보기')),
               ),
             ],
           ),
@@ -1021,7 +1024,7 @@ class _MemberWorkloadState extends State<_MemberWorkload> {
           child: widget.members.isEmpty
               ? Center(
                   child: Text(
-                    '프로젝트 멤버가 없습니다.',
+                    tr('프로젝트 멤버가 없습니다.'),
                     style: TextStyle(color: hint, fontSize: 12),
                   ),
                 )
@@ -1072,7 +1075,7 @@ Widget memberWorkloadRow(
     ),
     title: Text(member.name, maxLines: 1, overflow: TextOverflow.ellipsis),
     subtitle: mine.isEmpty
-        ? Text('담당 업무 없음', style: TextStyle(color: hint, fontSize: 11))
+        ? Text(tr('담당 업무 없음'), style: TextStyle(color: hint, fontSize: 11))
         : ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
@@ -1147,14 +1150,14 @@ class _MemberWorkloadDialogState extends State<_MemberWorkloadDialog> {
               if (t.assigneeId == selected.id) t,
           ];
     return FloatingDialog(
-      title: '멤버별 업무현황 — 전체보기',
+      title: tr('멤버별 업무현황 — 전체보기'),
       maxWidth: 900,
       maxHeight: 600,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '멤버를 선택하면 해당 멤버의 업무 상세를 확인할 수 있어요.',
+            tr('멤버를 선택하면 해당 멤버의 업무 상세를 확인할 수 있어요.'),
             style: TextStyle(color: theme.hintColor, fontSize: 12),
           ),
           const SizedBox(height: 12),
@@ -1168,7 +1171,9 @@ class _MemberWorkloadDialogState extends State<_MemberWorkloadDialog> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        '멤버 ${widget.members.length}명',
+                        tr('멤버 {widget.members.length}명', {
+                          'widget.members.length': widget.members.length,
+                        }),
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 4),
@@ -1204,7 +1209,10 @@ class _MemberWorkloadDialogState extends State<_MemberWorkloadDialog> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Text(
-                              '${selected.name} · 담당 업무 ${mine.length}',
+                              tr('{selected.name} · 담당 업무 {mine.length}', {
+                                'selected.name': selected.name,
+                                'mine.length': mine.length,
+                              }),
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                               ),
@@ -1214,7 +1222,7 @@ class _MemberWorkloadDialogState extends State<_MemberWorkloadDialog> {
                               child: mine.isEmpty
                                   ? Center(
                                       child: Text(
-                                        '담당한 업무가 없습니다.',
+                                        tr('담당한 업무가 없습니다.'),
                                         style: TextStyle(
                                           color: theme.hintColor,
                                         ),

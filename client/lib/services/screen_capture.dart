@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
+import '../l10n/tr.dart';
 
 /// 모든 모니터를 합친 가상 화면 전체를 찍은 결과. 픽셀은 파일([rawPath])에 위에서 아래로,
 /// 픽셀당 4바이트(B,G,R,A — A는 255로 채움)로 그냥 이어 붙여 저장한다(헤더 없음).
@@ -59,17 +60,19 @@ Future<void> captureVirtualScreenTo(VirtualScreenCapture geo) {
 }
 
 void _captureSync(int x, int y, int w, int h, String path) {
-  if (w <= 0 || h <= 0) throw StateError('화면 크기를 알 수 없습니다($w x $h).');
+  if (w <= 0 || h <= 0) {
+    throw StateError(tr('화면 크기를 알 수 없습니다({w} x {h}).', {'w': w, 'h': h}));
+  }
 
   final screenDc = GetDC(NULL);
-  if (screenDc == NULL) throw StateError('화면 DC를 열지 못했습니다.');
+  if (screenDc == NULL) throw StateError(tr('화면 DC를 열지 못했습니다.'));
   final memDc = CreateCompatibleDC(screenDc);
   final bitmap = memDc == NULL ? NULL : CreateCompatibleBitmap(screenDc, w, h);
   // 비트맵은 가상 화면 전체 크기라, 모니터가 많거나 해상도가 크면 GDI가 거절할 수 있다.
   if (memDc == NULL || bitmap == NULL) {
     if (memDc != NULL) DeleteDC(memDc);
     ReleaseDC(NULL, screenDc);
-    throw StateError('화면 버퍼를 만들지 못했습니다($w x $h).');
+    throw StateError(tr('화면 버퍼를 만들지 못했습니다({w} x {h}).', {'w': w, 'h': h}));
   }
 
   final old = SelectObject(memDc, bitmap);

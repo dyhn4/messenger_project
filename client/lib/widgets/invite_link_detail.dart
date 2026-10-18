@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../services/invite_share.dart';
 import 'app_toast.dart';
+import '../l10n/tr.dart';
 
 /// 초대 링크(설치 초대·팀 초대 공용) 하나의 내용 — 초대 링크 창의 목록 자리에 대신 보인다(InviteLinkScreen,
 /// TeamInviteLinkScreen). "사내 와이파이에서"·"사내 와이파이 밖(LTE/5G)에서" 주소를 따로 복사할 수 있게 해서, 목록의
@@ -45,7 +46,7 @@ class InviteLinkDetail extends StatelessWidget {
           TextButton.icon(
             onPressed: onBack,
             icon: const Icon(Icons.arrow_back, size: 18),
-            label: const Text('목록'),
+            label: Text(tr('목록')),
           ),
           const SizedBox(height: 4),
           Text(title, style: theme.textTheme.titleMedium),
@@ -53,29 +54,29 @@ class InviteLinkDetail extends StatelessWidget {
           for (final line in infoLines)
             Text(line, style: theme.textTheme.bodySmall?.copyWith(color: hint)),
           if (!isOpen)
-            _Notice(text: '취소되었거나 만료된 링크라 이 주소로는 더 이상 설치·연결할 수 없습니다.')
+            _Notice(text: tr('취소되었거나 만료된 링크라 이 주소로는 더 이상 설치·연결할 수 없습니다.'))
           else if (isFull)
             _Notice(
-              text:
-                  '가입 인원이 다 찼습니다. 사내 와이파이 밖에서는 이 링크로 새로 가입할 수 없고, '
-                  '이미 가입한 사람이 다른 기기를 연결하는 데만 쓸 수 있습니다.',
+              text: tr(
+                '가입 인원이 다 찼습니다. 사내 와이파이 밖에서는 이 링크로 새로 가입할 수 없고, 이미 가입한 사람이 다른 기기를 연결하는 데만 쓸 수 있습니다.',
+              ),
             ),
           const SizedBox(height: 16),
           _AddressField(
-            label: '사내 와이파이에서',
+            label: tr('사내 와이파이에서'),
             address: url,
-            missingText: '주소를 알 수 없습니다.',
-            copyTooltip: '사내 와이파이 주소 복사',
-            copiedMessage: '사내 와이파이 주소를 복사했습니다.',
+            missingText: tr('주소를 알 수 없습니다.'),
+            copyTooltip: tr('사내 와이파이 주소 복사'),
+            copiedMessage: tr('사내 와이파이 주소를 복사했습니다.'),
             canCopy: isOpen,
           ),
           const SizedBox(height: 16),
           _AddressField(
-            label: '사내 와이파이 밖(LTE/5G)에서',
+            label: tr('사내 와이파이 밖(LTE/5G)에서'),
             address: externalUrl,
-            missingText: '서버에 외부 접속 주소가 설정되어 있지 않아 밖에서 열 주소가 없습니다.',
-            copyTooltip: '외부 주소 복사',
-            copiedMessage: '사내 와이파이 밖(LTE/5G) 주소를 복사했습니다.',
+            missingText: tr('서버에 외부 접속 주소가 설정되어 있지 않아 밖에서 열 주소가 없습니다.'),
+            copyTooltip: tr('외부 주소 복사'),
+            copiedMessage: tr('사내 와이파이 밖(LTE/5G) 주소를 복사했습니다.'),
             canCopy: isOpen,
           ),
           if (externalUrl != null)

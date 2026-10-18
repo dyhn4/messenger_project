@@ -9,6 +9,7 @@ import '../widgets/team_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'org_chart_screen.dart';
 import 'team_settings_dialog.dart';
+import '../l10n/tr.dart';
 
 /// 로그인 직후(또는 로그인 상태를 유지한 채 앱을 새로 켰을 때) 가장 먼저 뜨는 화면.
 /// 내가 속한 팀들을 보여주고, "팀으로 가기"를 누르면 그 팀의 채팅 화면으로 들어간다
@@ -45,7 +46,7 @@ class _TeamSelectScreenState extends State<TeamSelectScreen> {
           // 조직도 — 부서 트리는 볼 수 있는 사람(session.canViewOrgTree)에게, 서버 전체 팀/회원 탭은 그중 관리자 이상에게만.
           if (widget.session.canViewOrgTree)
             IconButton(
-              tooltip: '조직도',
+              tooltip: tr('조직도'),
               icon: const Icon(Icons.account_tree_outlined),
               onPressed: () => showOrgChartScreen(context, widget.session),
             ),
@@ -88,7 +89,7 @@ class _TeamSelectScreenState extends State<TeamSelectScreen> {
                   Padding(
                     padding: const EdgeInsets.only(left: 4, bottom: 8),
                     child: Text(
-                      '팀 리스트',
+                      tr('팀 리스트'),
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: Theme.of(context).hintColor,
                       ),
@@ -145,10 +146,10 @@ class _EmptyTeams extends StatelessWidget {
               color: Theme.of(context).hintColor,
             ),
             const SizedBox(height: 12),
-            const Text('아직 속한 팀이 없습니다.'),
+            Text(tr('아직 속한 팀이 없습니다.')),
             const SizedBox(height: 6),
             Text(
-              '팀을 직접 만들거나, 팀의 소유자·관리자가 초대해 주면 여기에 표시됩니다.',
+              tr('팀을 직접 만들거나, 팀의 소유자·관리자가 초대해 주면 여기에 표시됩니다.'),
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).hintColor,
@@ -175,8 +176,9 @@ class _TeamRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final subtitle = [
-      if (team.isOwner) '소유자',
-      if (team.memberCount != null) '${team.memberCount}명',
+      if (team.isOwner) tr('소유자'),
+      if (team.memberCount != null)
+        tr('{team.memberCount}명', {'team.memberCount': team.memberCount}),
     ].join(' · ');
 
     return Padding(
@@ -210,11 +212,11 @@ class _TeamRow extends StatelessWidget {
           if (session.canManageTeam(team)) ...[
             OutlinedButton(
               onPressed: () => showTeamSettingsDialog(context, session, team),
-              child: const Text('설정'),
+              child: Text(tr('설정')),
             ),
             const SizedBox(width: 8),
           ],
-          FilledButton(onPressed: onEnter, child: const Text('팀으로 가기')),
+          FilledButton(onPressed: onEnter, child: Text(tr('팀으로 가기'))),
         ],
       ),
     );
@@ -241,7 +243,7 @@ class _CreateTeamButton extends StatelessWidget {
               Icon(Icons.add, color: Theme.of(context).hintColor),
               const SizedBox(width: 8),
               Text(
-                '팀 생성하기',
+                tr('팀 생성하기'),
                 style: TextStyle(
                   color: Theme.of(context).hintColor,
                   fontWeight: FontWeight.bold,

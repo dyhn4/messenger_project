@@ -3,12 +3,13 @@ import 'package:flutter/material.dart';
 import '../../models/calendar.dart';
 import '../../services/calendar_move.dart';
 import 'calendar_common.dart';
+import '../../l10n/tr.dart';
 
 /// 일정 드래그 이동의 공통 조각 — 끌 수 있는 일정에 씌우는 [EventDragSource]와, 끄는 동안 포인터를 따라다니는
 /// 작은 칩. 놓일 자리 계산(어느 날짜 칸/시간인지)과 고스트 그리기는 보기마다 달라서 월간·시간표가 각자 한다.
 
 /// 이 반복 일정에 마우스를 올렸을 때 보이는 안내.
-const kRecurringDragHint = '반복 일정은 상세에서 수정하세요';
+final kRecurringDragHint = tr('반복 일정은 상세에서 수정하세요');
 
 /// 드래그 이벤트를 보기에 알리는 콜백 묶음. 시작·갱신에는 포인터의 전역 좌표가 담긴다.
 class EventDragHandle {

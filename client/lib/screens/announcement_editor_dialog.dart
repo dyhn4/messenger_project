@@ -13,6 +13,7 @@ import '../widgets/rich_text_format.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'post_editor_dialog.dart' show TopicChip;
 import 'schedule_message_dialog.dart' show ScheduleDateTimeField;
+import '../l10n/tr.dart';
 
 /// 공지 본문 글자 수 한도 — 서버(announcements.js)와 같다.
 const announcementTextMaxLength = 2000;
@@ -109,14 +110,14 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
   String _originalText = '';
   String _originalFormat = 'null';
 
-  static const _quickOptions = <(String, Duration?)>[
-    ('없음', null),
-    ('1시간', Duration(hours: 1)),
-    ('4시간', Duration(hours: 4)),
-    ('9시간', Duration(hours: 9)),
-    ('1일', Duration(days: 1)),
-    ('7일', Duration(days: 7)),
-    ('30일', Duration(days: 30)),
+  static final _quickOptions = <(String, Duration?)>[
+    (tr('없음'), null),
+    (tr('1시간'), Duration(hours: 1)),
+    (tr('4시간'), Duration(hours: 4)),
+    (tr('9시간'), Duration(hours: 9)),
+    (tr('1일'), Duration(days: 1)),
+    (tr('7일'), Duration(days: 7)),
+    (tr('30일'), Duration(days: 30)),
   ];
 
   bool get _editing => widget.announcement != null;
@@ -165,7 +166,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
     // 사진 공지는 글 없이 사진만 둘 수 있다(서버도 같은 규칙).
     final allowEmpty = widget.announcement?.hasImage ?? false;
     if (text.isEmpty && !allowEmpty) {
-      setState(() => _error = '내용을 입력하세요.');
+      setState(() => _error = tr('내용을 입력하세요.'));
       _focus.requestFocus();
       return;
     }
@@ -175,7 +176,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
       autoUnpinAfter = customAt.difference(DateTime.now());
       // 창을 열어 둔 사이에 고른 시각이 지났으면 다시 고르게 한다(서버도 지난 시각은 받지 않는다).
       if (autoUnpinAfter <= Duration.zero) {
-        showAppToast(context, '자동 내리기 시각이 지났습니다. 다시 골라 주세요.');
+        showAppToast(context, tr('자동 내리기 시각이 지났습니다. 다시 골라 주세요.'));
         return;
       }
     }
@@ -201,21 +202,18 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
       final discard = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: Text(_editing ? '수정 취소' : '작성 취소'),
+          title: Text(_editing ? tr('수정 취소') : tr('작성 취소')),
           content: Text(
-            _editing ? '고친 내용을 저장하지 않고 닫을까요?' : '작성 중인 공지를 버리고 닫을까요?',
+            _editing ? tr('고친 내용을 저장하지 않고 닫을까요?') : tr('작성 중인 공지를 버리고 닫을까요?'),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('계속 쓰기'),
+              child: Text(tr('계속 쓰기')),
             ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text(
-                '닫기',
-                style: TextStyle(color: Colors.redAccent),
-              ),
+              child: Text(tr('닫기'), style: TextStyle(color: Colors.redAccent)),
             ),
           ],
         ),
@@ -245,19 +243,23 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
   /// "3일 4시간 뒤에 내려갑니다" — 지정 칸 옆(좁으면 아래) 안내. 분 단위는 올림.
   static String _untilText(DateTime at, DateTime now) {
     final total = (at.difference(now).inSeconds / 60).ceil();
-    if (total <= 0) return '이미 지난 시각입니다. 다시 골라 주세요.';
+    if (total <= 0) return tr('이미 지난 시각입니다. 다시 골라 주세요.');
     final days = total ~/ (24 * 60);
     final hours = total % (24 * 60) ~/ 60;
     final minutes = total % 60;
     final String span;
     if (days > 0) {
-      span = hours > 0 ? '$days일 $hours시간' : '$days일';
+      span = hours > 0
+          ? tr('{days}일 {hours}시간', {'days': days, 'hours': hours})
+          : tr('{days}일', {'days': days});
     } else if (hours > 0) {
-      span = minutes > 0 ? '$hours시간 $minutes분' : '$hours시간';
+      span = minutes > 0
+          ? tr('{hours}시간 {minutes}분', {'hours': hours, 'minutes': minutes})
+          : tr('{hours}시간', {'hours': hours});
     } else {
-      span = '$minutes분';
+      span = tr('{minutes}분', {'minutes': minutes});
     }
-    return '$span 뒤에 자동으로 내려갑니다';
+    return tr('{span} 뒤에 자동으로 내려갑니다', {'span': span});
   }
 
   @override
@@ -323,10 +325,10 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.close),
-          tooltip: '취소',
+          tooltip: tr('취소'),
           onPressed: _requestClose,
         ),
-        title: Text(_editing ? '공지 수정' : '공지 쓰기'),
+        title: Text(_editing ? tr('공지 수정') : tr('공지 쓰기')),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -369,7 +371,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
           ),
           const SizedBox(width: 10),
           Text(
-            _editing ? '공지 수정' : '공지 쓰기',
+            _editing ? tr('공지 수정') : tr('공지 쓰기'),
             style: theme.textTheme.titleLarge?.copyWith(
               fontSize: 18,
               fontWeight: FontWeight.w700,
@@ -384,7 +386,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
           ),
           IconButton(
             icon: const Icon(Icons.close),
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             onPressed: _submitting ? null : _requestClose,
           ),
         ],
@@ -424,8 +426,8 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
         keyboardType: TextInputType.multiline,
         textAlignVertical: TextAlignVertical.top,
         style: const TextStyle(fontSize: 14.5, height: 1.5),
-        decoration: const InputDecoration(
-          hintText: '공지 내용을 입력하세요',
+        decoration: InputDecoration(
+          hintText: tr('공지 내용을 입력하세요'),
           border: InputBorder.none,
           contentPadding: EdgeInsets.all(14),
         ),
@@ -520,7 +522,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '공지 자동 내리기',
+          tr('공지 자동 내리기'),
           style: theme.textTheme.labelLarge?.copyWith(
             fontWeight: FontWeight.w600,
           ),
@@ -538,7 +540,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
               ),
             ChoiceChip(
               key: const ValueKey('announcement-auto-unpin-custom'),
-              label: const Text('지정'),
+              label: Text(tr('지정')),
               selected: _isCustom,
               onSelected: _submitting ? null : (_) => _pickCustom(),
             ),
@@ -600,7 +602,9 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
           Expanded(
             child: AppPlatform.isWindows
                 ? Text(
-                    'Ctrl + Enter 로 ${_editing ? '저장' : '등록'} · Esc 로 닫기',
+                    tr('Ctrl + Enter 로 {p0} · Esc 로 닫기', {
+                      'p0': _editing ? tr('저장') : tr('등록'),
+                    }),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: hint),
@@ -609,7 +613,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
           ),
           TextButton(
             onPressed: _submitting ? null : _requestClose,
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           const SizedBox(width: 8),
           _buildSubmitButton(context),
@@ -632,10 +636,10 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
                 const SizedBox(width: 8),
-                Text(_editing ? '저장 중' : '등록 중'),
+                Text(_editing ? tr('저장 중') : tr('등록 중')),
               ],
             )
-          : Text(_editing ? '저장' : '등록'),
+          : Text(_editing ? tr('저장') : tr('등록')),
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/sticker_pack.dart';
+import '../l10n/tr.dart';
 
 /// 카카오톡 스타일의 "큼직하게 탭해서 보내는" 이모티콘. 실제 캐릭터 아트 대신 유니콘드
 /// 이모지를 크게 렌더링하는 방식으로 구현했다(별도 이미지 에셋 없이 모든 플랫폼에서 바로
@@ -25,52 +26,52 @@ class StickerCategory {
   const StickerCategory(this.name, this.stickers);
 }
 
-const stickerCategories = <StickerCategory>[
-  StickerCategory('표정', [
-    Sticker('grin', '😄', '활짝 웃음'),
-    Sticker('laugh_cry', '😂', '눈물 나게 웃김'),
-    Sticker('heart_eyes', '😍', '사랑스러움'),
-    Sticker('wink', '😉', '윙크'),
-    Sticker('cool', '😎', '쿨함'),
-    Sticker('thinking', '🤔', '생각 중'),
-    Sticker('cry', '😭', '펑펑 울음'),
-    Sticker('angry', '😡', '화남'),
-    Sticker('surprised', '😲', '놀람'),
-    Sticker('sleepy', '😴', '졸림'),
-    Sticker('sick', '🤢', '메스꺼움'),
-    Sticker('party', '🥳', '파티'),
+final stickerCategories = <StickerCategory>[
+  StickerCategory(tr('표정'), [
+    Sticker('grin', '😄', tr('활짝 웃음')),
+    Sticker('laugh_cry', '😂', tr('눈물 나게 웃김')),
+    Sticker('heart_eyes', '😍', tr('사랑스러움')),
+    Sticker('wink', '😉', tr('윙크')),
+    Sticker('cool', '😎', tr('쿨함')),
+    Sticker('thinking', '🤔', tr('생각 중')),
+    Sticker('cry', '😭', tr('펑펑 울음')),
+    Sticker('angry', '😡', tr('화남')),
+    Sticker('surprised', '😲', tr('놀람')),
+    Sticker('sleepy', '😴', tr('졸림')),
+    Sticker('sick', '🤢', tr('메스꺼움')),
+    Sticker('party', '🥳', tr('파티')),
   ]),
-  StickerCategory('손동작', [
-    Sticker('thumbs_up', '👍', '좋아요'),
-    Sticker('thumbs_down', '👎', '별로예요'),
-    Sticker('clap', '👏', '박수'),
-    Sticker('wave', '👋', '안녕'),
-    Sticker('ok', '👌', '오케이'),
-    Sticker('pray', '🙏', '부탁/감사'),
-    Sticker('fist_bump', '👊', '주먹 인사'),
-    Sticker('point_up', '☝️', '집중'),
-    Sticker('muscle', '💪', '파이팅'),
-    Sticker('victory', '✌️', '브이'),
+  StickerCategory(tr('손동작'), [
+    Sticker('thumbs_up', '👍', tr('좋아요')),
+    Sticker('thumbs_down', '👎', tr('별로예요')),
+    Sticker('clap', '👏', tr('박수')),
+    Sticker('wave', '👋', tr('안녕')),
+    Sticker('ok', '👌', tr('오케이')),
+    Sticker('pray', '🙏', tr('부탁/감사')),
+    Sticker('fist_bump', '👊', tr('주먹 인사')),
+    Sticker('point_up', '☝️', tr('집중')),
+    Sticker('muscle', '💪', tr('파이팅')),
+    Sticker('victory', '✌️', tr('브이')),
   ]),
-  StickerCategory('동물', [
-    Sticker('dog', '🐶', '강아지'),
-    Sticker('cat', '🐱', '고양이'),
-    Sticker('rabbit', '🐰', '토끼'),
-    Sticker('bear', '🐻', '곰'),
-    Sticker('panda', '🐼', '판다'),
-    Sticker('fox', '🦊', '여우'),
-    Sticker('chick', '🐥', '병아리'),
-    Sticker('monkey', '🙈', '못 봤어요'),
+  StickerCategory(tr('동물'), [
+    Sticker('dog', '🐶', tr('강아지')),
+    Sticker('cat', '🐱', tr('고양이')),
+    Sticker('rabbit', '🐰', tr('토끼')),
+    Sticker('bear', '🐻', tr('곰')),
+    Sticker('panda', '🐼', tr('판다')),
+    Sticker('fox', '🦊', tr('여우')),
+    Sticker('chick', '🐥', tr('병아리')),
+    Sticker('monkey', '🙈', tr('못 봤어요')),
   ]),
-  StickerCategory('기타', [
-    Sticker('heart', '❤️', '하트'),
-    Sticker('broken_heart', '💔', '상심'),
-    Sticker('fire', '🔥', '대박'),
-    Sticker('100', '💯', '백점'),
-    Sticker('congrats', '🎉', '축하'),
-    Sticker('question', '❓', '물음표'),
-    Sticker('exclaim', '❗', '느낌표'),
-    Sticker('sweat', '💦', '식은땀'),
+  StickerCategory(tr('기타'), [
+    Sticker('heart', '❤️', tr('하트')),
+    Sticker('broken_heart', '💔', tr('상심')),
+    Sticker('fire', '🔥', tr('대박')),
+    Sticker('100', '💯', tr('백점')),
+    Sticker('congrats', '🎉', tr('축하')),
+    Sticker('question', '❓', tr('물음표')),
+    Sticker('exclaim', '❗', tr('느낌표')),
+    Sticker('sweat', '💦', tr('식은땀')),
   ]),
 ];
 
@@ -134,7 +135,9 @@ class ServerStickerCatalog extends ChangeNotifier {
 /// 알림·방 목록 미리보기 문구 — 그림 이모티콘은 이모지가 없으니 문구만.
 String stickerPreviewText(String? id) {
   final emoji = findStickerById(id ?? '')?.emoji ?? '';
-  return emoji.isEmpty ? '이모티콘을 보냈습니다' : '$emoji 이모티콘을 보냈습니다';
+  return emoji.isEmpty
+      ? tr('이모티콘을 보냈습니다')
+      : tr('{emoji} 이모티콘을 보냈습니다', {'emoji': emoji});
 }
 
 /// id로 스티커를 찾는다(수신 측이 이모지/라벨을 다시 그릴 때).

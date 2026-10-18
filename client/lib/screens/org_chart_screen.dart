@@ -17,6 +17,7 @@ import 'chat_screen.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'member_profile_dialog.dart';
 import 'my_profile_dialog.dart';
+import '../l10n/tr.dart';
 
 /// "조직도" — 첫 탭 "부서"는 부서 트리와 부서장·상위자(org_tree_view.dart — 회사 하나면 정회원 이상, 팀마다면 그 팀 멤버가 본다).
 /// 계정 등급 관리자·서버 운영자에게는 서버 전체 팀/회원 목록 탭이 더 붙는다 — "팀" 탭은 팀별로 묶어서 보여주고 팀을 누르면 그
@@ -186,7 +187,7 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
   @override
   Widget build(BuildContext context) {
     return FloatingDialog(
-      title: '조직도',
+      title: tr('조직도'),
       maxWidth: 520,
       maxHeight: 680,
       child: Column(
@@ -196,10 +197,10 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
           if (_admin) ...[
             TabBar(
               controller: _tabController,
-              tabs: const [
-                Tab(text: '부서'),
-                Tab(text: '팀'),
-                Tab(text: '멤버'),
+              tabs: [
+                Tab(text: tr('부서')),
+                Tab(text: tr('팀')),
+                Tab(text: tr('멤버')),
               ],
               onTap: (_) => setState(() {}),
             ),
@@ -208,7 +209,7 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
           TextField(
             key: const ValueKey('org-chart-search'),
             decoration: InputDecoration(
-              hintText: _admin ? '부서/팀/멤버 검색' : '부서/이름 검색',
+              hintText: _admin ? tr('부서/팀/멤버 검색') : tr('부서/이름 검색'),
               isDense: true,
               prefixIcon: const Icon(Icons.search, size: 18),
               border: const OutlineInputBorder(),
@@ -260,7 +261,7 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
         unassigned.isNotEmpty && (filter.isEmpty || '미소속'.contains(filter));
 
     if (teamRows.isEmpty && !showUnassigned) {
-      return const Center(child: Text('검색 결과가 없습니다.'));
+      return Center(child: Text(tr('검색 결과가 없습니다.')));
     }
 
     return MutedScrollbar(
@@ -290,7 +291,7 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
             ),
           if (showUnassigned)
             _TeamGroup(
-              title: '미소속',
+              title: tr('미소속'),
               avatar: CircleAvatar(
                 radius: 18,
                 backgroundColor: Theme.of(
@@ -352,7 +353,7 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
         .where((u) => filter.isEmpty || u.name.toLowerCase().contains(filter))
         .toList();
     if (filtered.isEmpty) {
-      return const Center(child: Text('검색 결과가 없습니다.'));
+      return Center(child: Text(tr('검색 결과가 없습니다.')));
     }
     final list = _sortedMembers(filtered);
     // 한 사람이 여러 팀의 소유자일 수 있지만, 이 목록은 팀별로 나뉘지 않은 전체 멤버
@@ -438,7 +439,7 @@ class _TeamGroup extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '$memberCount명',
+                  tr('{memberCount}명', {'memberCount': memberCount}),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).hintColor,
                   ),
@@ -457,7 +458,7 @@ class _TeamGroup extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Text(
-                '멤버가 없습니다.',
+                tr('멤버가 없습니다.'),
                 style: TextStyle(color: Theme.of(context).hintColor),
               ),
             )
@@ -556,11 +557,11 @@ class _OrgMembersTableHead extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
       child: Row(
         children: [
-          Expanded(flex: 9, child: Text('이름', style: style)),
+          Expanded(flex: 9, child: Text(tr('이름'), style: style)),
           const SizedBox(width: 16),
-          Expanded(flex: 5, child: Text('등급', style: style)),
+          Expanded(flex: 5, child: Text(tr('등급'), style: style)),
           const SizedBox(width: 16),
-          Expanded(flex: 5, child: Text('직책', style: style)),
+          Expanded(flex: 5, child: Text(tr('직책'), style: style)),
           SortMenuButton<MemberSortField>(
             fields: const [
               MemberSortField.name,
@@ -641,7 +642,7 @@ class _OrgMemberTableRow extends StatelessWidget {
                   ),
                   if (isOwner)
                     RoleBadge(
-                      label: '소유자',
+                      label: tr('소유자'),
                       bg: ownerColors.bg,
                       fg: ownerColors.fg,
                     ),
@@ -652,7 +653,7 @@ class _OrgMemberTableRow extends StatelessWidget {
             Expanded(
               flex: 5,
               child: Text(
-                user.position?.isNotEmpty == true ? user.position! : '미등록',
+                user.position?.isNotEmpty == true ? user.position! : tr('미등록'),
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: Theme.of(context).hintColor,

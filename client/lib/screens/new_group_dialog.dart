@@ -12,6 +12,7 @@ import '../widgets/muted_scrollbar.dart';
 import '../widgets/user_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'invite_members_screen.dart' show showPickMembers;
+import '../l10n/tr.dart';
 
 /// 새 그룹채팅 만들기 — 넓은 화면(PC)은 떠 있는 창, 좁은 화면(모바일)은 전체 화면으로 띄우고, 만들어진
 /// 그룹채팅을 [onOpenRoom]으로 연다. 사이드바·모바일 목록이 같이 쓰는 진입점.
@@ -115,7 +116,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
   Future<void> _submit() async {
     if (_submitting) return;
     if (_members.isEmpty) {
-      setState(() => _membersError = '멤버를 한 명 이상 선택하세요.');
+      setState(() => _membersError = tr('멤버를 한 명 이상 선택하세요.'));
       return;
     }
     final type = _iconType;
@@ -145,7 +146,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
         _submitting = false;
         _error = e is ApiException
             ? e.message
-            : '그룹채팅을 만들지 못했습니다. 잠시 후 다시 시도하세요.';
+            : tr('그룹채팅을 만들지 못했습니다. 잠시 후 다시 시도하세요.');
       });
     }
   }
@@ -165,7 +166,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
       children: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         const SizedBox(width: 8),
         FilledButton(
@@ -177,13 +178,13 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('생성'),
+              : Text(tr('생성')),
         ),
       ],
     );
     if (widget.asDialog) {
       return FloatingDialog(
-        title: '새 그룹채팅 만들기',
+        title: tr('새 그룹채팅 만들기'),
         maxWidth: 600,
         maxHeight: 820,
         child: Column(
@@ -208,7 +209,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('새 그룹채팅 만들기')),
+      appBar: AppBar(title: Text(tr('새 그룹채팅 만들기'))),
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -236,7 +237,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const GroupFormLabel('그룹 아이콘'),
+        GroupFormLabel(tr('그룹 아이콘')),
         GroupIconField(
           editKey: const ValueKey('new-group-icon-edit'),
           preview: GroupIcon(
@@ -249,19 +250,19 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
             resolveUrl: _session.resolveUrl,
             radius: 32,
           ),
-          hint: '그대로 두면 그룹 이름의 앞 두 글자로, 이름이 없으면 멤버 사진으로 보여요.',
+          hint: tr('그대로 두면 그룹 이름의 앞 두 글자로, 이름이 없으면 멤버 사진으로 보여요.'),
           onEdit: editable ? _editIcon : null,
         ),
         const SizedBox(height: 18),
-        const GroupFormLabel('그룹 이름', optional: true),
+        GroupFormLabel(tr('그룹 이름'), optional: true),
         TextField(
           key: const ValueKey('new-group-name'),
           controller: _name,
           enabled: canCreate,
           maxLength: groupNameMaxLength,
           textInputAction: TextInputAction.next,
-          decoration: const InputDecoration(
-            hintText: '비워 두면 멤버 이름으로 표시돼요',
+          decoration: InputDecoration(
+            hintText: tr('비워 두면 멤버 이름으로 표시돼요'),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -269,7 +270,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 8),
-        const GroupFormLabel('설명', optional: true),
+        GroupFormLabel(tr('설명'), optional: true),
         TextField(
           key: const ValueKey('new-group-description'),
           controller: _description,
@@ -277,8 +278,8 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
           maxLength: groupDescriptionMaxLength,
           minLines: 2,
           maxLines: 4,
-          decoration: const InputDecoration(
-            hintText: '어떤 이야기를 나누는 그룹인지 적어 주세요',
+          decoration: InputDecoration(
+            hintText: tr('어떤 이야기를 나누는 그룹인지 적어 주세요'),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -287,10 +288,10 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
         _buildMembers(context, editable),
         if (!canCreate) ...[
           const SizedBox(height: 12),
-          const GroupFormNotice(
+          GroupFormNotice(
             key: ValueKey('new-group-guest-notice'),
             icon: Icons.lock_outline,
-            text: '준회원은 그룹채팅을 만들 수 없습니다. 초대받은 방에서만 활동할 수 있습니다.',
+            text: tr('준회원은 그룹채팅을 만들 수 없습니다. 초대받은 방에서만 활동할 수 있습니다.'),
             error: true,
           ),
         ],
@@ -319,8 +320,12 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
           children: [
             Expanded(
               child: GroupFormLabel(
-                '멤버',
-                trailing: _members.isEmpty ? null : '${_members.length}명',
+                tr('멤버'),
+                trailing: _members.isEmpty
+                    ? null
+                    : tr('{_members.length}명', {
+                        '_members.length': _members.length,
+                      }),
                 padding: EdgeInsets.zero,
               ),
             ),
@@ -329,7 +334,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
               key: const ValueKey('new-group-pick-members'),
               onPressed: editable ? _pickMembers : null,
               icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
-              label: const Text('멤버 선택'),
+              label: Text(tr('멤버 선택')),
             ),
           ],
         ),
@@ -349,7 +354,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
           alignment: _members.isEmpty ? Alignment.center : Alignment.topLeft,
           child: _members.isEmpty
               ? Text(
-                  "함께 대화할 멤버를 '멤버 선택'으로 골라 주세요.",
+                  tr('함께 대화할 멤버를 \'멤버 선택\'으로 골라 주세요.'),
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13, color: theme.hintColor),
                 )
@@ -411,7 +416,7 @@ class GroupFormLabel extends StatelessWidget {
               text: text,
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
             ),
-            if (optional) TextSpan(text: '  (선택)', style: hint),
+            if (optional) TextSpan(text: tr('  (선택)'), style: hint),
             if (trailing != null) TextSpan(text: '  $trailing', style: hint),
           ],
         ),
@@ -463,7 +468,7 @@ class GroupIconField extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                   ),
                   icon: const Icon(Icons.edit_outlined, size: 16),
-                  label: const Text('편집'),
+                  label: Text(tr('편집')),
                 ),
               ],
             ],

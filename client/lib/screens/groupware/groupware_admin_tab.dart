@@ -11,6 +11,7 @@ import 'approval_settings.dart' show ApprovalStatsSection;
 import 'groupware_work_admin.dart';
 import 'resource_tab.dart' show ResourcesAdminSection;
 import 'groupware_screen.dart';
+import '../../l10n/tr.dart';
 
 /// 관리 탭(결재·근태 관리자만) — 근무 시간(지각·조퇴 기준), 구성원 입사일·연차 현황·연차 조정, 한 달 근태 요약과 엑셀.
 /// 회사 전체 범위면 서버 운영자·관리자 등급, 팀 범위면 그 팀 소유자·관리자 등급이 본다(server groupwareScope.js).
@@ -83,7 +84,7 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
 
   Future<void> _saveHours() async {
     if (!isHmText(_workStart.text) || !isHmText(_workEnd.text)) {
-      showAppToast(context, '근무 시간을 HH:MM으로 넣으세요.');
+      showAppToast(context, tr('근무 시간을 HH:MM으로 넣으세요.'));
       return;
     }
     setState(() => _saving = true);
@@ -93,11 +94,11 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
         end: _workEnd.text.trim(),
       );
       if (!mounted) return;
-      showAppToast(context, '근무 시간을 저장했습니다.');
+      showAppToast(context, tr('근무 시간을 저장했습니다.'));
       widget.onContextChanged?.call();
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -110,17 +111,23 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
       initialDate: m.hireDate == null ? now : DateTime.parse(m.hireDate!),
       firstDate: DateTime(1970),
       lastDate: DateTime(now.year + 1),
-      helpText: '${m.name}님의 입사일',
+      helpText: tr('{m.name}님의 입사일', {'m.name': m.name}),
     );
     if (picked == null || !mounted) return;
     try {
       await widget.api.setHireDate(m.id, dateKeyOf(picked));
       if (mounted) {
-        showAppToast(context, '${m.name}님의 입사일을 ${dateKeyOf(picked)}로 정했습니다.');
+        showAppToast(
+          context,
+          tr('{m.name}님의 입사일을 {p0}로 정했습니다.', {
+            'm.name': m.name,
+            'p0': dateKeyOf(picked),
+          }),
+        );
       }
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -136,10 +143,12 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
         halfDays: result.halfDays,
         reason: result.reason,
       );
-      if (mounted) showAppToast(context, '${m.name}님의 연차를 조정했습니다.');
+      if (mounted) {
+        showAppToast(context, tr('{m.name}님의 연차를 조정했습니다.', {'m.name': m.name}));
+      }
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -166,7 +175,7 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
       );
       await openLocalFile(path);
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _exporting = false);
     }
@@ -185,13 +194,18 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
           child: Text(
-            '범위: ${widget.ctx.scope == 'server' ? '회사 전체' : '이 팀(${widget.ctx.teamName ?? ''})'}'
-            ' — 바꾸려면 관리자 콘솔 → 운영 현황의 "그룹웨어 범위". 법정 연차는 입사일 기준으로 계산하고, 출근율 80% 미만·이월·회사가 더 주는 '
-            '휴가는 "연차 조정"으로 맞춥니다.',
+            tr(
+              '범위: {p0} — 바꾸려면 관리자 콘솔 → 운영 현황의 "그룹웨어 범위". 법정 연차는 입사일 기준으로 계산하고, 출근율 80% 미만·이월·회사가 더 주는 휴가는 "연차 조정"으로 맞춥니다.',
+              {
+                'p0': widget.ctx.scope == 'server'
+                    ? tr('회사 전체')
+                    : tr('이 팀({p0})', {'p0': widget.ctx.teamName ?? ''}),
+              },
+            ),
             style: TextStyle(fontSize: 12, color: hint),
           ),
         ),
-        const GroupwareSectionHeader('근무 시간(지각·조퇴 기준)'),
+        GroupwareSectionHeader(tr('근무 시간(지각·조퇴 기준)')),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
@@ -201,8 +215,8 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
                 child: TextField(
                   key: const ValueKey('gw-work-start'),
                   controller: _workStart,
-                  decoration: const InputDecoration(
-                    labelText: '시작',
+                  decoration: InputDecoration(
+                    labelText: tr('시작'),
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -217,8 +231,8 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
                 child: TextField(
                   key: const ValueKey('gw-work-end'),
                   controller: _workEnd,
-                  decoration: const InputDecoration(
-                    labelText: '끝',
+                  decoration: InputDecoration(
+                    labelText: tr('끝'),
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -228,7 +242,7 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
               FilledButton(
                 key: const ValueKey('gw-work-save'),
                 onPressed: _saving ? null : _saveHours,
-                child: const Text('저장'),
+                child: Text(tr('저장')),
               ),
             ],
           ),
@@ -248,7 +262,7 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
           ctx: widget.ctx,
           changes: widget.changes,
         ),
-        const GroupwareSectionHeader('구성원 연차'),
+        GroupwareSectionHeader(tr('구성원 연차')),
         if (members == null)
           const Padding(
             padding: EdgeInsets.all(24),
@@ -259,13 +273,21 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
             ListTile(
               key: ValueKey('gw-member-${m.id}'),
               dense: true,
-              title: Text('${m.name}${m.suspended ? ' (정지)' : ''}'),
+              title: Text('${m.name}${m.suspended ? tr(' (정지)') : ''}'),
               subtitle: Text(
                 m.hireDate == null
-                    ? '입사일 미등록 — 눌러서 등록'
-                    : '입사 ${m.hireDate} · 생김 ${halfDaysText(m.grantedHalfDays ?? 0)} · 씀 ${halfDaysText(m.usedHalfDays)}'
-                          '${m.pendingHalfDays > 0 ? ' · 결재 중 ${halfDaysText(m.pendingHalfDays)}' : ''}'
-                          ' · 남음 ${halfDaysText(m.remainingHalfDays ?? 0)}',
+                    ? tr('입사일 미등록 — 눌러서 등록')
+                    : tr('입사 {m.hireDate} · 생김 {p0} · 씀 {p1}{p2} · 남음 {p3}', {
+                        'm.hireDate': m.hireDate,
+                        'p0': halfDaysText(m.grantedHalfDays ?? 0),
+                        'p1': halfDaysText(m.usedHalfDays),
+                        'p2': m.pendingHalfDays > 0
+                            ? tr(' · 결재 중 {p0}', {
+                                'p0': halfDaysText(m.pendingHalfDays),
+                              })
+                            : '',
+                        'p3': halfDaysText(m.remainingHalfDays ?? 0),
+                      }),
                 style: TextStyle(
                   color: m.hireDate == null ? theme.colorScheme.error : hint,
                 ),
@@ -276,11 +298,11 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
                   : TextButton(
                       key: ValueKey('gw-adjust-${m.id}'),
                       onPressed: () => _adjust(m),
-                      child: const Text('연차 조정'),
+                      child: Text(tr('연차 조정')),
                     ),
             ),
         GroupwareSectionHeader(
-          '월별 근태',
+          tr('월별 근태'),
           trailing: FilledButton.tonalIcon(
             key: const ValueKey('gw-export'),
             onPressed: _exporting ? null : _export,
@@ -291,7 +313,7 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.download, size: 18),
-            label: const Text('엑셀로 받기'),
+            label: Text(tr('엑셀로 받기')),
           ),
         ),
         Padding(
@@ -299,15 +321,18 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
           child: Row(
             children: [
               IconButton(
-                tooltip: '이전 달',
+                tooltip: tr('이전 달'),
                 onPressed: () => _shiftMonth(-1),
                 icon: const Icon(Icons.chevron_left),
               ),
               Text(
-                '${_monthKey.substring(0, 4)}년 ${int.parse(_monthKey.substring(5))}월',
+                tr('{p0}년 {p1}월', {
+                  'p0': _monthKey.substring(0, 4),
+                  'p1': int.parse(_monthKey.substring(5)),
+                }),
               ),
               IconButton(
-                tooltip: '다음 달',
+                tooltip: tr('다음 달'),
                 onPressed: () => _shiftMonth(1),
                 icon: const Icon(Icons.chevron_right),
               ),
@@ -327,19 +352,39 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
               title: Text(row.name),
               subtitle: Text(
                 [
-                  '출근 ${row.summary.daysWorked}일',
+                  tr('출근 {row.summary.daysWorked}일', {
+                    'row.summary.daysWorked': row.summary.daysWorked,
+                  }),
                   row.summary.hoursText,
-                  if (row.summary.late > 0) '지각 ${row.summary.late}',
+                  if (row.summary.late > 0)
+                    tr('지각 {row.summary.late}', {
+                      'row.summary.late': row.summary.late,
+                    }),
                   if (row.summary.earlyLeave > 0)
-                    '조퇴 ${row.summary.earlyLeave}',
+                    tr('조퇴 {row.summary.earlyLeave}', {
+                      'row.summary.earlyLeave': row.summary.earlyLeave,
+                    }),
                   if (row.summary.missingClockOut > 0)
-                    '퇴근 누락 ${row.summary.missingClockOut}',
-                  if (row.summary.absent > 0) '결근 ${row.summary.absent}',
+                    tr('퇴근 누락 {row.summary.missingClockOut}', {
+                      'row.summary.missingClockOut':
+                          row.summary.missingClockOut,
+                    }),
+                  if (row.summary.absent > 0)
+                    tr('결근 {row.summary.absent}', {
+                      'row.summary.absent': row.summary.absent,
+                    }),
                   if (row.summary.leaveHalfDays > 0)
-                    '휴가 ${halfDaysText(row.summary.leaveHalfDays)}',
-                  if (row.summary.tripDays > 0) '출장 ${row.summary.tripDays}일',
+                    tr('휴가 {p0}', {
+                      'p0': halfDaysText(row.summary.leaveHalfDays),
+                    }),
+                  if (row.summary.tripDays > 0)
+                    tr('출장 {row.summary.tripDays}일', {
+                      'row.summary.tripDays': row.summary.tripDays,
+                    }),
                   if (row.summary.overtimeMinutes > 0)
-                    '연장 ${row.summary.overtimeText}',
+                    tr('연장 {row.summary.overtimeText}', {
+                      'row.summary.overtimeText': row.summary.overtimeText,
+                    }),
                 ].join(' · '),
                 style: TextStyle(color: hint),
               ),
@@ -377,11 +422,11 @@ class _AdjustDialogState extends State<_AdjustDialog> {
         value <= 0 ||
         (value * 2) != (value * 2).roundToDouble() ||
         value > 60) {
-      setState(() => _error = '일수를 0.5일 단위로 넣으세요(최대 60일).');
+      setState(() => _error = tr('일수를 0.5일 단위로 넣으세요(최대 60일).'));
       return;
     }
     if (_reason.text.trim().isEmpty) {
-      setState(() => _error = '조정 사유를 쓰세요.');
+      setState(() => _error = tr('조정 사유를 쓰세요.'));
       return;
     }
     final halfDays = (value * 2).round() * (_subtract ? -1 : 1);
@@ -392,16 +437,16 @@ class _AdjustDialogState extends State<_AdjustDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Text('${widget.name}님 연차 조정'),
+    title: Text(tr('{widget.name}님 연차 조정', {'widget.name': widget.name})),
     content: SizedBox(
       width: 360,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(value: false, label: Text('더 주기')),
-              ButtonSegment(value: true, label: Text('빼기')),
+            segments: [
+              ButtonSegment(value: false, label: Text(tr('더 주기'))),
+              ButtonSegment(value: true, label: Text(tr('빼기'))),
             ],
             selected: {_subtract},
             onSelectionChanged: (s) => setState(() => _subtract = s.first),
@@ -411,10 +456,10 @@ class _AdjustDialogState extends State<_AdjustDialog> {
             key: const ValueKey('gw-adjust-days'),
             controller: _days,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: '일수 (예: 1, 0.5)',
+            decoration: InputDecoration(
+              labelText: tr('일수 (예: 1, 0.5)'),
               border: OutlineInputBorder(),
-              suffixText: '일',
+              suffixText: tr('일'),
             ),
           ),
           const SizedBox(height: 12),
@@ -422,8 +467,8 @@ class _AdjustDialogState extends State<_AdjustDialog> {
             key: const ValueKey('gw-adjust-reason'),
             controller: _reason,
             maxLength: 200,
-            decoration: const InputDecoration(
-              labelText: '사유 (예: 지난해 이월, 출근율 80% 미만)',
+            decoration: InputDecoration(
+              labelText: tr('사유 (예: 지난해 이월, 출근율 80% 미만)'),
               border: OutlineInputBorder(),
             ),
           ),
@@ -438,12 +483,12 @@ class _AdjustDialogState extends State<_AdjustDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('취소'),
+        child: Text(tr('취소')),
       ),
       FilledButton(
         key: const ValueKey('gw-adjust-ok'),
         onPressed: _done,
-        child: const Text('조정'),
+        child: Text(tr('조정')),
       ),
     ],
   );

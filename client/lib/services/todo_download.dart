@@ -11,6 +11,7 @@ import 'app_platform.dart';
 import 'download_progress.dart';
 import 'download_storage.dart';
 import 'session.dart';
+import '../l10n/tr.dart';
 
 /// 할 일 첨부 여러 개를 내려받은 결과.
 class TodoDownloadSummary {
@@ -83,12 +84,24 @@ String todoDownloadResultText(
       : ' (${displayDownloadPath(summary.folder!)})';
   if (cancelled) {
     return summary.saved == 0
-        ? '다운로드를 취소했습니다.'
-        : '다운로드를 취소했습니다. (${summary.saved}개는 받았습니다)$where';
+        ? tr('다운로드를 취소했습니다.')
+        : tr('다운로드를 취소했습니다. ({summary.saved}개는 받았습니다){where}', {
+            'summary.saved': summary.saved,
+            'where': where,
+          });
   }
-  if (summary.failed == 0) return '${summary.saved}개를 다운로드했습니다.$where';
-  if (summary.saved == 0) return '다운로드하지 못했습니다.';
-  return '${summary.saved}개를 다운로드했습니다. ${summary.failed}개는 실패했습니다.$where';
+  if (summary.failed == 0) {
+    return tr('{summary.saved}개를 다운로드했습니다.{where}', {
+      'summary.saved': summary.saved,
+      'where': where,
+    });
+  }
+  if (summary.saved == 0) return tr('다운로드하지 못했습니다.');
+  return tr('{summary.saved}개를 다운로드했습니다. {summary.failed}개는 실패했습니다.{where}', {
+    'summary.saved': summary.saved,
+    'summary.failed': summary.failed,
+    'where': where,
+  });
 }
 
 bool get _isMobile => AppPlatform.isAndroid || AppPlatform.isIOS;
@@ -125,7 +138,7 @@ Future<void> downloadTodoAttachments(
 
   // 진행 카드에 "파일 N개"로 보이고, 그 X로 멈추면 [task].cancelled.
   final task = DownloadTask(
-    '파일 ${attachments.length}개',
+    tr('파일 {attachments.length}개', {'attachments.length': attachments.length}),
     fileCount: attachments.length,
   );
   TodoDownloadSummary summary;
@@ -166,7 +179,7 @@ Future<void> downloadTodoAttachments(
         ? initial
         : await (pickFolder ??
               () => FilePicker.getDirectoryPath(
-                dialogTitle: '저장할 폴더 선택',
+                dialogTitle: tr('저장할 폴더 선택'),
                 initialDirectory: initial.isEmpty ? null : initial,
               ))();
     if (folder == null) return;

@@ -1,11 +1,13 @@
+import '../l10n/tr.dart';
+
 /// 내가 쓴 글 패널의 탭 — 서버 `GET /api/my-posts`의 `kind` 값과 같은 이름이다.
 enum MyPostKind { all, message, comment }
 
 extension MyPostKindLabel on MyPostKind {
   String get label => switch (this) {
-    MyPostKind.all => '전체',
-    MyPostKind.message => '메시지',
-    MyPostKind.comment => '댓글',
+    MyPostKind.all => tr('전체'),
+    MyPostKind.message => tr('메시지'),
+    MyPostKind.comment => tr('댓글'),
   };
 }
 

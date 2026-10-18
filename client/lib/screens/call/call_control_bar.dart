@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'call_logic.dart';
 import 'call_stage.dart' show callHandColor, callSpeakingColor;
+import '../../l10n/tr.dart';
 
 /// 화면 아래 가운데의 줌 스타일 컨트롤바 — 둥근 아이콘 단추 줄(아이콘 + 작은 라벨)과 맨 오른쪽의
 /// 빨간 "나가기". 마우스를 올리면 각 단추의 툴팁이 뜬다.
@@ -66,8 +67,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-mic'),
         icon: micOn ? Icons.mic : Icons.mic_off,
-        label: micOn ? '음소거' : '음소거 해제',
-        tooltip: micOn ? '마이크 끄기' : '마이크 켜기',
+        label: micOn ? tr('음소거') : tr('음소거 해제'),
+        tooltip: micOn ? tr('마이크 끄기') : tr('마이크 켜기'),
         off: !micOn,
         showLabel: showLabels,
         onPressed: onToggleMic,
@@ -75,8 +76,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-camera'),
         icon: camOn ? Icons.videocam : Icons.videocam_off,
-        label: camOn ? '비디오 중지' : '비디오 시작',
-        tooltip: camOn ? '카메라 끄기' : '카메라 켜기',
+        label: camOn ? tr('비디오 중지') : tr('비디오 시작'),
+        tooltip: camOn ? tr('카메라 끄기') : tr('카메라 켜기'),
         off: !camOn,
         showLabel: showLabels,
         onPressed: onToggleCamera,
@@ -84,8 +85,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-share'),
         icon: sharing ? Icons.stop_screen_share : Icons.screen_share,
-        label: sharing ? '공유 중지' : '화면 공유',
-        tooltip: sharing ? '화면 공유 중지' : '화면 공유',
+        label: sharing ? tr('공유 중지') : tr('화면 공유'),
+        tooltip: sharing ? tr('화면 공유 중지') : tr('화면 공유'),
         highlight: sharing ? callSpeakingColor : null,
         showLabel: showLabels,
         onPressed: onToggleShare,
@@ -93,8 +94,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-participants'),
         icon: Icons.people,
-        label: '참가자',
-        tooltip: '참가자 목록',
+        label: tr('참가자'),
+        tooltip: tr('참가자 목록'),
         badge: participantCount,
         selected: panel == CallPanel.participants,
         showLabel: showLabels,
@@ -103,8 +104,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-chat'),
         icon: Icons.chat_bubble,
-        label: '채팅',
-        tooltip: '통화 채팅',
+        label: tr('채팅'),
+        tooltip: tr('통화 채팅'),
         badge: chatUnread,
         badgeColor: Colors.redAccent,
         selected: panel == CallPanel.chat,
@@ -114,8 +115,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-hand'),
         icon: Icons.front_hand,
-        label: handRaised ? '손 내리기' : '손들기',
-        tooltip: handRaised ? '손 내리기' : '손들기',
+        label: handRaised ? tr('손 내리기') : tr('손들기'),
+        tooltip: handRaised ? tr('손 내리기') : tr('손들기'),
         highlight: handRaised ? callHandColor : null,
         showLabel: showLabels,
         onPressed: onToggleHand,
@@ -123,8 +124,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-whiteboard'),
         icon: Icons.draw,
-        label: '화이트보드',
-        tooltip: whiteboardOpen ? '화이트보드 닫기' : '화이트보드 열기',
+        label: tr('화이트보드'),
+        tooltip: whiteboardOpen ? tr('화이트보드 닫기') : tr('화이트보드 열기'),
         selected: whiteboardOpen,
         showLabel: showLabels,
         onPressed: onToggleWhiteboard,
@@ -132,8 +133,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-view'),
         icon: speaker ? Icons.grid_view : Icons.person_pin,
-        label: speaker ? '갤러리 보기' : '스피커 보기',
-        tooltip: speaker ? '갤러리 보기로 전환' : '스피커 보기로 전환',
+        label: speaker ? tr('갤러리 보기') : tr('스피커 보기'),
+        tooltip: speaker ? tr('갤러리 보기로 전환') : tr('스피커 보기로 전환'),
         showLabel: showLabels,
         onPressed: onToggleView,
       ),
@@ -168,7 +169,7 @@ class CallControlBar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Tooltip(
-              message: '통화 나가기',
+              message: tr('통화 나가기'),
               child: Material(
                 key: const ValueKey('call-leave'),
                 color: const Color(0xFFE53935),
@@ -190,8 +191,8 @@ class CallControlBar extends StatelessWidget {
                           size: 20,
                         ),
                         const SizedBox(width: 6),
-                        const Text(
-                          '나가기',
+                        Text(
+                          tr('나가기'),
                           style: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w600,
@@ -218,8 +219,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-mic'),
         icon: micOn ? Icons.mic : Icons.mic_off,
-        label: micOn ? '음소거' : '음소거 해제',
-        tooltip: micOn ? '마이크 끄기' : '마이크 켜기',
+        label: micOn ? tr('음소거') : tr('음소거 해제'),
+        tooltip: micOn ? tr('마이크 끄기') : tr('마이크 켜기'),
         off: !micOn,
         showLabel: false,
         onPressed: onToggleMic,
@@ -227,8 +228,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-camera'),
         icon: camOn ? Icons.videocam : Icons.videocam_off,
-        label: camOn ? '비디오 중지' : '비디오 시작',
-        tooltip: camOn ? '카메라 끄기' : '카메라 켜기',
+        label: camOn ? tr('비디오 중지') : tr('비디오 시작'),
+        tooltip: camOn ? tr('카메라 끄기') : tr('카메라 켜기'),
         off: !camOn,
         showLabel: false,
         onPressed: onToggleCamera,
@@ -236,8 +237,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-participants'),
         icon: Icons.people,
-        label: '참가자',
-        tooltip: '참가자 목록',
+        label: tr('참가자'),
+        tooltip: tr('참가자 목록'),
         badge: participantCount,
         selected: panel == CallPanel.participants,
         showLabel: false,
@@ -246,8 +247,8 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-chat'),
         icon: Icons.chat_bubble,
-        label: '채팅',
-        tooltip: '통화 채팅',
+        label: tr('채팅'),
+        tooltip: tr('통화 채팅'),
         badge: chatUnread,
         badgeColor: Colors.redAccent,
         selected: panel == CallPanel.chat,
@@ -257,14 +258,14 @@ class CallControlBar extends StatelessWidget {
       CallBarButton(
         key: const ValueKey('call-more'),
         icon: Icons.more_horiz,
-        label: '더보기',
-        tooltip: '더보기(화면 공유·손들기·화이트보드·보기 전환)',
+        label: tr('더보기'),
+        tooltip: tr('더보기(화면 공유·손들기·화이트보드·보기 전환)'),
         dot: moreActive,
         showLabel: false,
         onPressed: () => _openMoreSheet(context),
       ),
       Tooltip(
-        message: '통화 나가기',
+        message: tr('통화 나가기'),
         child: Material(
           key: const ValueKey('call-leave'),
           color: const Color(0xFFE53935),
@@ -336,28 +337,28 @@ class CallControlBar extends StatelessWidget {
               item(
                 key: const ValueKey('call-share'),
                 icon: sharing ? Icons.stop_screen_share : Icons.screen_share,
-                label: sharing ? '화면 공유 중지' : '화면 공유',
+                label: sharing ? tr('화면 공유 중지') : tr('화면 공유'),
                 activeColor: sharing ? callSpeakingColor : null,
                 onTap: onToggleShare,
               ),
               item(
                 key: const ValueKey('call-hand'),
                 icon: Icons.front_hand,
-                label: handRaised ? '손 내리기' : '손들기',
+                label: handRaised ? tr('손 내리기') : tr('손들기'),
                 activeColor: handRaised ? callHandColor : null,
                 onTap: onToggleHand,
               ),
               item(
                 key: const ValueKey('call-whiteboard'),
                 icon: Icons.draw,
-                label: whiteboardOpen ? '화이트보드 닫기' : '화이트보드 열기',
+                label: whiteboardOpen ? tr('화이트보드 닫기') : tr('화이트보드 열기'),
                 activeColor: whiteboardOpen ? Colors.white70 : null,
                 onTap: onToggleWhiteboard,
               ),
               item(
                 key: const ValueKey('call-view'),
                 icon: speaker ? Icons.grid_view : Icons.person_pin,
-                label: speaker ? '갤러리 보기로 전환' : '스피커 보기로 전환',
+                label: speaker ? tr('갤러리 보기로 전환') : tr('스피커 보기로 전환'),
                 onTap: onToggleView,
               ),
               const SizedBox(height: 8),

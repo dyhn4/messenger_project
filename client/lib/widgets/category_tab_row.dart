@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
 /// 세트/카테고리 이름을 ChoiceChip으로 가로로 나열하는 줄 — 채팅 입력창 이모티콘 목록
 /// (sticker_picker.dart)과 프로필 카드 "캐릭터 선택하기"(my_profile_dialog.dart)가 같이 쓴다.
@@ -160,7 +161,7 @@ class _CategoryTabRowState<T> extends State<CategoryTabRow<T>> {
             _pageButton(
               key: const ValueKey('category-tabs-prev'),
               icon: Icons.chevron_left,
-              tooltip: '이전',
+              tooltip: tr('이전'),
               onPressed: _atStart ? null : () => _page(-1),
             ),
           Expanded(
@@ -178,7 +179,7 @@ class _CategoryTabRowState<T> extends State<CategoryTabRow<T>> {
             _pageButton(
               key: const ValueKey('category-tabs-next'),
               icon: Icons.chevron_right,
-              tooltip: '다음',
+              tooltip: tr('다음'),
               onPressed: _atEnd ? null : () => _page(1),
             ),
         ],

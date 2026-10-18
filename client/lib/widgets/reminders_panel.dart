@@ -16,6 +16,7 @@ import 'todos_panel.dart'
         todoCardHoverBorder,
         todoCardPressColor,
         todoListBackgroundColor;
+import '../l10n/tr.dart';
 
 /// 리마인더 패널(side_panels.dart의 'reminders' — 메뉴 "생성"의 리마인더, 계정 메뉴의 리마인더) — 할 일 패널과 같은 모양이다.
 /// 위에서부터 머리(`리마인더`, 오른쪽 끝 ✕), 가로 전체 `+ 리마인더 생성`(직접 만드는 창 — [showCreateReminderDialog]), 그 아래
@@ -61,7 +62,9 @@ class _RemindersPanelState extends State<RemindersPanel> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _error = '리마인더를 불러오지 못했습니다: $e');
+      if (mounted) {
+        setState(() => _error = tr('리마인더를 불러오지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 
@@ -75,9 +78,9 @@ class _RemindersPanelState extends State<RemindersPanel> {
       await widget.session.api!.deleteReminder(r.id);
       if (!mounted) return;
       setState(() => _items = _items?.where((x) => x.id != r.id).toList());
-      showAppToast(context, '리마인더를 취소했습니다.');
+      showAppToast(context, tr('리마인더를 취소했습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '취소하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('취소하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -86,7 +89,7 @@ class _RemindersPanelState extends State<RemindersPanel> {
   void _openMessage(MessageReminder r) {
     final room = r.roomId == null ? null : widget.session.roomById(r.roomId!);
     if (room == null) {
-      showAppToast(context, '이 대화방에 더 이상 참여하고 있지 않습니다.');
+      showAppToast(context, tr('이 대화방에 더 이상 참여하고 있지 않습니다.'));
       return;
     }
     openRoomFromPanel(context, widget.session, room, messageId: r.messageId);
@@ -127,12 +130,15 @@ class _RemindersPanelState extends State<RemindersPanel> {
       child: Row(
         children: [
           Expanded(
-            child: Text('리마인더', style: Theme.of(context).textTheme.titleLarge),
+            child: Text(
+              tr('리마인더'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
           ),
           IconButton(
             key: const ValueKey('reminder-panel-close'),
             icon: const Icon(Icons.close),
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             onPressed: widget.onClose,
           ),
         ],
@@ -160,8 +166,8 @@ class _RemindersPanelState extends State<RemindersPanel> {
           ),
         ),
         icon: const Icon(Icons.add, size: 20),
-        label: const Text(
-          '리마인더 생성',
+        label: Text(
+          tr('리마인더 생성'),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -188,7 +194,7 @@ class _RemindersPanelState extends State<RemindersPanel> {
               ? const [TextSpan(text: ' ', style: bold)]
               : [
                   TextSpan(text: '${items.length}', style: bold),
-                  const TextSpan(text: '개의 리마인더'),
+                  TextSpan(text: tr('개의 리마인더')),
                 ],
         ),
         style: style,
@@ -209,7 +215,7 @@ class _RemindersPanelState extends State<RemindersPanel> {
                 child: Text(_error!, textAlign: TextAlign.center),
               ),
               const SizedBox(height: 8),
-              OutlinedButton(onPressed: _load, child: const Text('다시 시도')),
+              OutlinedButton(onPressed: _load, child: Text(tr('다시 시도'))),
             ],
           ),
         );
@@ -246,14 +252,14 @@ class _RemindersPanelState extends State<RemindersPanel> {
             Icon(Icons.alarm_rounded, size: 40, color: theme.hintColor),
             const SizedBox(height: 12),
             Text(
-              '걸어 둔 리마인더가 없어요.',
+              tr('걸어 둔 리마인더가 없어요.'),
               key: const ValueKey('reminder-empty'),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyLarge,
             ),
             const SizedBox(height: 4),
             Text(
-              '"리마인더 생성"으로 직접 만들거나, 메시지 메뉴의 "나중에 알림"으로 걸 수 있어요.',
+              tr('"리마인더 생성"으로 직접 만들거나, 메시지 메뉴의 "나중에 알림"으로 걸 수 있어요.'),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
@@ -296,7 +302,7 @@ class _ReminderCardState extends State<_ReminderCard> {
     final scheme = theme.colorScheme;
     final hint = theme.hintColor;
     final r = widget.reminder;
-    final title = r.isMemo ? (r.text ?? '') : (r.preview ?? '🔒 비밀 대화 메시지');
+    final title = r.isMemo ? (r.text ?? '') : (r.preview ?? tr('🔒 비밀 대화 메시지'));
     final info = _infoLine(context);
     return Material(
       color: todoCardColor(context),
@@ -334,7 +340,7 @@ class _ReminderCardState extends State<_ReminderCard> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      r.isMemo ? '직접 만든 리마인더' : '메시지',
+                      r.isMemo ? tr('직접 만든 리마인더') : tr('메시지'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 12, color: hint),
@@ -342,7 +348,7 @@ class _ReminderCardState extends State<_ReminderCard> {
                   ),
                   IconButton(
                     key: ValueKey('reminder-cancel-${r.id}'),
-                    tooltip: '리마인더 취소',
+                    tooltip: tr('리마인더 취소'),
                     icon: Icon(Icons.close, size: 18, color: hint),
                     visualDensity: VisualDensity.compact,
                     onPressed: widget.onCancel,
@@ -383,14 +389,14 @@ class _ReminderCardState extends State<_ReminderCard> {
       final team = session.teams.where((t) => t.id == r.teamId).firstOrNull;
       if (team == null) return null;
       return Text(
-        '${team.name}의 나와의 대화로 알림',
+        tr('{team.name}의 나와의 대화로 알림', {'team.name': team.name}),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: style,
       );
     }
     final room = r.roomId == null ? null : session.roomById(r.roomId!);
-    final roomName = room?.displayName(session.userId ?? '') ?? '대화방';
+    final roomName = room?.displayName(session.userId ?? '') ?? tr('대화방');
     return Padding(
       padding: const EdgeInsets.only(right: 10),
       child: Row(
@@ -435,12 +441,12 @@ Future<MessageReminder?> showCreateReminderDialog(
 
 /// 빠른 선택지 — [now] 기준 시각(메시지의 "나중에 알림"과 같다).
 final List<({String label, DateTime Function(DateTime now) at})> _presets = [
-  (label: '20분 뒤', at: (n) => n.add(const Duration(minutes: 20))),
-  (label: '1시간 뒤', at: (n) => n.add(const Duration(hours: 1))),
-  (label: '3시간 뒤', at: (n) => n.add(const Duration(hours: 3))),
-  (label: '내일 오전 9시', at: (n) => DateTime(n.year, n.month, n.day + 1, 9)),
+  (label: tr('20분 뒤'), at: (n) => n.add(const Duration(minutes: 20))),
+  (label: tr('1시간 뒤'), at: (n) => n.add(const Duration(hours: 1))),
+  (label: tr('3시간 뒤'), at: (n) => n.add(const Duration(hours: 3))),
+  (label: tr('내일 오전 9시'), at: (n) => DateTime(n.year, n.month, n.day + 1, 9)),
   (
-    label: '다음 주 월요일 오전 9시',
+    label: tr('다음 주 월요일 오전 9시'),
     at: (n) => DateTime(n.year, n.month, n.day + 8 - n.weekday, 9),
   ),
 ];
@@ -457,7 +463,7 @@ class _CreateReminderDialogState extends State<_CreateReminderDialog> {
   final _text = TextEditingController();
 
   /// 고른 빠른 선택지(이름) — 'custom'이면 [_custom]. 처음은 1시간 뒤.
-  String _choice = '1시간 뒤';
+  String _choice = tr('1시간 뒤');
 
   /// "지정"으로 고른 시각(처음 지정을 누를 때 한 시간 뒤를 15분 단위로 올린 시각으로 채운다).
   DateTime? _custom;
@@ -500,9 +506,9 @@ class _CreateReminderDialogState extends State<_CreateReminderDialog> {
   String? _timeProblem(DateTime now) {
     final at = _at(now);
     if (at == null || !at.isAfter(now.add(const Duration(minutes: 1)))) {
-      return '1분 뒤 이후로 고르세요.';
+      return tr('1분 뒤 이후로 고르세요.');
     }
-    if (at.isAfter(now.add(_customMaxAhead))) return '1년 안으로 고르세요.';
+    if (at.isAfter(now.add(_customMaxAhead))) return tr('1년 안으로 고르세요.');
     return null;
   }
 
@@ -513,11 +519,16 @@ class _CreateReminderDialogState extends State<_CreateReminderDialog> {
     final at = _at(now);
     if (text.isEmpty || at == null || _timeProblem(now) != null) return;
     if (text.characters.length > reminderTextMax) {
-      showAppToast(context, '내용은 $reminderTextMax자까지 쓸 수 있습니다.');
+      showAppToast(
+        context,
+        tr('내용은 {reminderTextMax}자까지 쓸 수 있습니다.', {
+          'reminderTextMax': reminderTextMax,
+        }),
+      );
       return;
     }
     if (teamId == null) {
-      showAppToast(context, '팀을 고른 뒤 만들 수 있습니다.');
+      showAppToast(context, tr('팀을 고른 뒤 만들 수 있습니다.'));
       return;
     }
     // 창을 닫은 뒤에 알리므로 미리 잡아 둔다.
@@ -533,10 +544,10 @@ class _CreateReminderDialogState extends State<_CreateReminderDialog> {
       Navigator.of(context).pop(created);
       showAppToastOnOverlay(
         overlay,
-        '${reminderTimeLabel(at)}에 "나와의 대화"로 알려 드릴게요.',
+        tr('{p0}에 "나와의 대화"로 알려 드릴게요.', {'p0': reminderTimeLabel(at)}),
       );
     } catch (e) {
-      if (mounted) showAppToast(context, '리마인더를 만들지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('리마인더를 만들지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -551,7 +562,7 @@ class _CreateReminderDialogState extends State<_CreateReminderDialog> {
     final problem = _timeProblem(now);
     final canSave = !_saving && _text.text.trim().isNotEmpty && problem == null;
     return AlertDialog(
-      title: const Text('리마인더 생성'),
+      title: Text(tr('리마인더 생성')),
       content: SizedBox(
         width: 400,
         child: SingleChildScrollView(
@@ -567,13 +578,13 @@ class _CreateReminderDialogState extends State<_CreateReminderDialog> {
                 minLines: 1,
                 maxLines: 3,
                 textInputAction: TextInputAction.newline,
-                decoration: const InputDecoration(
-                  hintText: '무엇을 알려 드릴까요? 예: 15시 회의 자료 보내기',
+                decoration: InputDecoration(
+                  hintText: tr('무엇을 알려 드릴까요? 예: 15시 회의 자료 보내기'),
                   border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 8),
-              Text('언제', style: theme.textTheme.labelLarge),
+              Text(tr('언제'), style: theme.textTheme.labelLarge),
               const SizedBox(height: 6),
               Wrap(
                 spacing: 8,
@@ -591,7 +602,7 @@ class _CreateReminderDialogState extends State<_CreateReminderDialog> {
                   ChoiceChip(
                     key: const ValueKey('reminder-new-custom'),
                     avatar: const Icon(Icons.event_outlined, size: 18),
-                    label: const Text('지정'),
+                    label: Text(tr('지정')),
                     selected: _choice == 'custom',
                     onSelected: _saving ? null : (_) => _pickCustom(),
                   ),
@@ -613,8 +624,8 @@ class _CreateReminderDialogState extends State<_CreateReminderDialog> {
                     child: DateTimePointPanel(
                       keyPrefix: 'reminder-new',
                       value: _custom!,
-                      caption: '언제 알려 드릴까요?',
-                      timeLabel: '알림 시간',
+                      caption: tr('언제 알려 드릴까요?'),
+                      timeLabel: tr('알림 시간'),
                       firstDay: now,
                       lastDay: now.add(_customMaxAhead),
                       onChanged: (v) => setState(() => _custom = v),
@@ -624,7 +635,10 @@ class _CreateReminderDialogState extends State<_CreateReminderDialog> {
               ],
               const SizedBox(height: 10),
               Text(
-                problem ?? '${reminderTimeLabel(at!)}에 "나와의 대화"로 알려 드립니다.',
+                problem ??
+                    tr('{p0}에 "나와의 대화"로 알려 드립니다.', {
+                      'p0': reminderTimeLabel(at!),
+                    }),
                 key: const ValueKey('reminder-new-summary'),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: problem != null ? theme.colorScheme.error : hint,
@@ -637,12 +651,12 @@ class _CreateReminderDialogState extends State<_CreateReminderDialog> {
       actions: [
         TextButton(
           onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('reminder-new-save'),
           onPressed: canSave ? _save : null,
-          child: const Text('생성'),
+          child: Text(tr('생성')),
         ),
       ],
     );

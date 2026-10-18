@@ -11,6 +11,7 @@ import 'approval_forms.dart' show toastSubmitted;
 import 'approval_print.dart';
 import 'approval_settings.dart';
 import 'groupware_screen.dart';
+import '../../l10n/tr.dart';
 
 /// 결재 탭 — 결재함(결재할 문서 · 내가 올린 문서 · 결재한 문서 · 참조 문서 · 관리자는 전체 문서). 줄을 누르면 문서 상세.
 class ApprovalTab extends StatefulWidget {
@@ -117,12 +118,12 @@ class _ApprovalTabState extends State<ApprovalTab> {
                 key: const ValueKey('approval-new'),
                 onPressed: _newApproval,
                 icon: const Icon(Icons.edit_document, size: 18),
-                label: const Text('새 결재'),
+                label: Text(tr('새 결재')),
               ),
               // 내 결재 설정 — 서명·도장, 대결(부재 중 대신 결재).
               PopupMenuButton<String>(
                 key: const ValueKey('approval-settings'),
-                tooltip: '결재 설정',
+                tooltip: tr('결재 설정'),
                 icon: const Icon(Icons.manage_accounts_outlined),
                 onSelected: (v) => v == 'signature'
                     ? showSignatureDialog(
@@ -137,9 +138,12 @@ class _ApprovalTabState extends State<ApprovalTab> {
                         session: widget.session,
                         changes: widget.changes,
                       ),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'signature', child: Text('내 서명·도장')),
-                  PopupMenuItem(value: 'delegation', child: Text('대결(부재) 설정')),
+                itemBuilder: (_) => [
+                  PopupMenuItem(value: 'signature', child: Text(tr('내 서명·도장'))),
+                  PopupMenuItem(
+                    value: 'delegation',
+                    child: Text(tr('대결(부재) 설정')),
+                  ),
                 ],
               ),
               const SizedBox(width: 4),
@@ -167,7 +171,9 @@ class _ApprovalTabState extends State<ApprovalTab> {
               ? const Center(child: CircularProgressIndicator())
               : docs.isEmpty
               ? GroupwareEmpty(
-                  _box == ApprovalBox.inbox ? '지금 결재할 문서가 없습니다.' : '문서가 없습니다.',
+                  _box == ApprovalBox.inbox
+                      ? tr('지금 결재할 문서가 없습니다.')
+                      : tr('문서가 없습니다.'),
                 )
               : RefreshIndicator(
                   onRefresh: _load,
@@ -255,20 +261,22 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
         context: context,
         builder: (_) => _CommentDialog(
           title: switch (action) {
-            'approve' => _doc?.finalForMe == true ? '전결 승인' : '승인',
-            'reject' => '반려',
-            _ => '결재 취소',
+            'approve' => _doc?.finalForMe == true ? tr('전결 승인') : tr('승인'),
+            'reject' => tr('반려'),
+            _ => tr('결재 취소'),
           },
           note: [
             if (action == 'approve' && _doc?.finalForMe == true)
-              '전결 — 승인하면 남은 결재는 생략되고 바로 결재가 끝납니다.',
+              tr('전결 — 승인하면 남은 결재는 생략되고 바로 결재가 끝납니다.'),
             if (action != 'cancel' && _doc?.actingFor != null)
-              '${_doc!.actingFor}님 대신(대결) 결정합니다. 대결한 사람으로 함께 남습니다.',
+              tr('{p0}님 대신(대결) 결정합니다. 대결한 사람으로 함께 남습니다.', {
+                'p0': _doc!.actingFor,
+              }),
           ].join('\n'),
           label: switch (action) {
-            'approve' => '의견 (선택)',
-            'reject' => '반려 사유',
-            _ => '취소 사유',
+            'approve' => tr('의견 (선택)'),
+            'reject' => tr('반려 사유'),
+            _ => tr('취소 사유'),
           },
           required: action != 'approve',
         ),
@@ -279,16 +287,16 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
       final ok = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('결재 회수'),
-          content: const Text('올린 결재를 거둘까요? 결재자에게 더는 보이지 않습니다.'),
+          title: Text(tr('결재 회수')),
+          content: Text(tr('올린 결재를 거둘까요? 결재자에게 더는 보이지 않습니다.')),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('취소'),
+              child: Text(tr('취소')),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('회수'),
+              child: Text(tr('회수')),
             ),
           ],
         ),
@@ -310,15 +318,20 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
       showAppToast(context, switch (action) {
         'approve' =>
           doc.status == ApprovalStatus.approved
-              ? '승인했습니다. 결재가 끝났습니다.'
-              : '승인했습니다. ${doc.steps.where((s) => s.status == ApprovalStepStatus.pending).map((s) => s.approverName).join(', ')}님 차례입니다.',
-        'reject' => '반려했습니다.',
-        'withdraw' => '회수했습니다.',
-        _ => '취소했습니다.',
+              ? tr('승인했습니다. 결재가 끝났습니다.')
+              : tr('승인했습니다. {p0}님 차례입니다.', {
+                  'p0': doc.steps
+                      .where((s) => s.status == ApprovalStepStatus.pending)
+                      .map((s) => s.approverName)
+                      .join(', '),
+                }),
+        'reject' => tr('반려했습니다.'),
+        'withdraw' => tr('회수했습니다.'),
+        _ => tr('취소했습니다.'),
       });
       await widget.session.refreshGroupwarePending();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -330,11 +343,11 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
     try {
       final path = await widget.session.downloadAuthedFile(
         url,
-        fileName: a.fileName ?? '첨부',
+        fileName: a.fileName ?? tr('첨부'),
       );
       await openLocalFile(path);
     } catch (e) {
-      if (mounted) showAppToast(context, '열지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('열지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -342,7 +355,7 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
   Widget build(BuildContext context) {
     final doc = _doc;
     return AlertDialog(
-      title: Text(doc?.title ?? '결재 문서'),
+      title: Text(doc?.title ?? tr('결재 문서')),
       content: SizedBox(
         width: 480,
         child: doc == null
@@ -357,43 +370,43 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(_changed),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
         if (doc != null)
           PopupMenuButton<String>(
             key: const ValueKey('approval-print'),
-            tooltip: '인쇄·PDF',
+            tooltip: tr('인쇄·PDF'),
             icon: const Icon(Icons.print_outlined),
             onSelected: (v) => v == 'print'
                 ? printApproval(context, doc, widget.ctx, widget.session)
                 : saveApprovalPdf(context, doc, widget.ctx, widget.session),
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'print', child: Text('인쇄')),
-              PopupMenuItem(value: 'pdf', child: Text('PDF로 저장')),
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'print', child: Text(tr('인쇄'))),
+              PopupMenuItem(value: 'pdf', child: Text(tr('PDF로 저장'))),
             ],
           ),
         if (doc != null && doc.canWithdraw)
           TextButton(
             key: const ValueKey('approval-withdraw'),
             onPressed: _busy ? null : () => _act('withdraw'),
-            child: const Text('회수'),
+            child: Text(tr('회수')),
           ),
         if (doc != null && doc.canCancel)
           TextButton(
             key: const ValueKey('approval-cancel'),
             onPressed: _busy ? null : () => _act('cancel'),
-            child: const Text('결재 취소'),
+            child: Text(tr('결재 취소')),
           ),
         if (doc != null && doc.myTurn) ...[
           OutlinedButton(
             key: const ValueKey('approval-reject'),
             onPressed: _busy ? null : () => _act('reject'),
-            child: const Text('반려'),
+            child: Text(tr('반려')),
           ),
           FilledButton(
             key: const ValueKey('approval-approve'),
             onPressed: _busy ? null : () => _act('approve'),
-            child: const Text('승인'),
+            child: Text(tr('승인')),
           ),
         ],
       ],
@@ -452,36 +465,43 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
               color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
               borderRadius: BorderRadius.circular(6),
             ),
-            child: Text('${doc.actingFor}님이 자리를 비워 대신(대결) 결재할 차례입니다.'),
+            child: Text(
+              tr('{doc.actingFor}님이 자리를 비워 대신(대결) 결재할 차례입니다.', {
+                'doc.actingFor': doc.actingFor,
+              }),
+            ),
           ),
         const SizedBox(height: 12),
         ApprovalStampBox(doc: doc, resolveUrl: widget.session.resolveUrl),
         const SizedBox(height: 12),
         if (doc.kind == ApprovalKind.leave) ...[
           row(
-            '종류',
+            tr('종류'),
             p['leaveLabel'] as String? ??
                 widget.ctx.leaveType(p['leaveType'] as String?)?.label ??
-                '휴가',
+                tr('휴가'),
           ),
           row(
-            '기간',
+            tr('기간'),
             p['startDate'] == p['endDate']
                 ? '${p['startDate']}'
                 : '${p['startDate']} ~ ${p['endDate']}',
           ),
-          row('일수', halfDaysText((p['halfDays'] as num?)?.toInt() ?? 0)),
+          row(tr('일수'), halfDaysText((p['halfDays'] as num?)?.toInt() ?? 0)),
         ],
         if (doc.kind == ApprovalKind.expense) ...[
-          row('금액', wonText((p['amount'] as num?)?.toInt() ?? 0)),
-          row('분류', '${p['category'] ?? ''}'),
-          row('쓴 날', '${p['spentOn'] ?? ''}'),
+          row(tr('금액'), wonText((p['amount'] as num?)?.toInt() ?? 0)),
+          row(tr('분류'), '${p['category'] ?? ''}'),
+          row(tr('쓴 날'), '${p['spentOn'] ?? ''}'),
         ],
         if (doc.kind.isForm) FormValuesView(doc: doc),
         if (doc.kind == ApprovalKind.attendance) ...[
-          row('날짜', '${p['workDate'] ?? ''}'),
-          row('출근', '${p['clockIn'] ?? ''}'),
-          row('퇴근', p['clockOut'] == null ? '(그대로)' : '${p['clockOut']}'),
+          row(tr('날짜'), '${p['workDate'] ?? ''}'),
+          row(tr('출근'), '${p['clockIn'] ?? ''}'),
+          row(
+            tr('퇴근'),
+            p['clockOut'] == null ? tr('(그대로)') : '${p['clockOut']}',
+          ),
         ],
         if (doc.body != null) ...[
           const SizedBox(height: 8),
@@ -503,14 +523,14 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
               for (final a in doc.attachments)
                 ActionChip(
                   avatar: const Icon(Icons.attach_file, size: 16),
-                  label: Text(a.fileName ?? '첨부'),
+                  label: Text(a.fileName ?? tr('첨부')),
                   onPressed: () => _openAttachment(a),
                 ),
             ],
           ),
         ],
         const SizedBox(height: 16),
-        Text('결재선', style: theme.textTheme.titleSmall),
+        Text(tr('결재선'), style: theme.textTheme.titleSmall),
         const SizedBox(height: 4),
         for (final s in doc.steps)
           ListTile(
@@ -542,18 +562,25 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
                 ? null
                 : Text(
                     [
-                      if (s.actedByName != null) '대결 ${s.actedByName}',
+                      if (s.actedByName != null)
+                        tr('대결 {s.actedByName}', {
+                          's.actedByName': s.actedByName,
+                        }),
                       if (s.decidedAt != null) formatDateTime(s.decidedAt!),
                       if (s.comment != null) '"${s.comment}"',
                     ].join(' · '),
                   ),
           ),
-        if (doc.cc.isNotEmpty) row('참조', doc.cc.map((c) => c.name).join(', ')),
+        if (doc.cc.isNotEmpty)
+          row(tr('참조'), doc.cc.map((c) => c.name).join(', ')),
         if (doc.status == ApprovalStatus.canceled)
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(
-              '${doc.canceledByName ?? '관리자'}님이 취소했습니다: ${doc.cancelReason ?? ''}',
+              tr('{p0}님이 취소했습니다: {p1}', {
+                'p0': doc.canceledByName ?? tr('관리자'),
+                'p1': doc.cancelReason ?? '',
+              }),
               style: TextStyle(color: theme.colorScheme.error),
             ),
           ),
@@ -592,7 +619,10 @@ class _CommentDialogState extends State<_CommentDialog> {
 
   void _done() {
     if (widget.required && _text.text.trim().isEmpty) {
-      setState(() => _error = '${widget.label}를 쓰세요.');
+      setState(
+        () =>
+            _error = tr('{widget.label}를 쓰세요.', {'widget.label': widget.label}),
+      );
       return;
     }
     Navigator.of(context).pop(_text.text);
@@ -638,7 +668,7 @@ class _CommentDialogState extends State<_CommentDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('취소'),
+        child: Text(tr('취소')),
       ),
       FilledButton(
         key: const ValueKey('approval-comment-ok'),

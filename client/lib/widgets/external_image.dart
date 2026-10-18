@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
 /// 외부 웹사이트 이미지 — 그냥 Image.network를 쓰면 못 불러온다.
 ///
@@ -84,7 +85,7 @@ class _ExternalImageState extends State<ExternalImage> {
         await for (final chunk in response) {
           bytes.addAll(chunk);
           if (bytes.length > _maxBytes) {
-            throw Exception('이미지가 너무 큽니다');
+            throw Exception(tr('이미지가 너무 큽니다'));
           }
         }
         return Uint8List.fromList(bytes);

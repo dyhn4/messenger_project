@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
 /// 방 목록에서 즐겨찾기를 켜고 끄는 작은 별 아이콘. 켜져 있으면 노란 채워진 별,
 /// 꺼져 있으면 회색 테두리 별.
@@ -21,7 +22,7 @@ class FavoriteStar extends StatelessWidget {
         color: favorite ? Colors.amber : Colors.grey,
         size: size,
       ),
-      tooltip: favorite ? '즐겨찾기 해제' : '즐겨찾기',
+      tooltip: favorite ? tr('즐겨찾기 해제') : tr('즐겨찾기'),
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(),
       onPressed: onTap,

@@ -9,6 +9,7 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/date_drop_calendar.dart';
 import 'task_views.dart' show formatYmd;
+import '../../l10n/tr.dart';
 
 /// 업무 상세 패널(task_detail_panel.dart)에 붙는 업무 기능 보강 — 반복 규칙·예상 시간 고르기 창, 선후행 업무 칸, 소요 시간 칸,
 /// 프로젝트 소요 시간 보고 창. 서버는 taskExtras.js.
@@ -48,11 +49,11 @@ class _RecurrenceDialogState extends State<_RecurrenceDialog> {
       ? null
       : _parseYmd(widget.initial!.until!);
 
-  static const _freqs = [
-    ('daily', '매일', '일'),
-    ('weekly', '매주', '주'),
-    ('monthly', '매월', '개월'),
-    ('yearly', '매년', '년'),
+  static final _freqs = [
+    ('daily', tr('매일'), tr('일')),
+    ('weekly', tr('매주'), tr('주')),
+    ('monthly', tr('매월'), tr('개월')),
+    ('yearly', tr('매년'), tr('년')),
   ];
 
   TaskRecurrence get _rule => TaskRecurrence(
@@ -67,7 +68,7 @@ class _RecurrenceDialogState extends State<_RecurrenceDialog> {
     final theme = Theme.of(context);
     final unit = _freqs.firstWhere((f) => f.$1 == _freq).$3;
     return AlertDialog(
-      title: const Text('반복'),
+      title: Text(tr('반복')),
       content: SizedBox(
         width: 380,
         child: Column(
@@ -87,7 +88,7 @@ class _RecurrenceDialogState extends State<_RecurrenceDialog> {
             const SizedBox(height: 14),
             Row(
               children: [
-                const Text('간격'),
+                Text(tr('간격')),
                 const SizedBox(width: 12),
                 DropdownButton<int>(
                   key: const ValueKey('recurrence-interval'),
@@ -96,7 +97,11 @@ class _RecurrenceDialogState extends State<_RecurrenceDialog> {
                     for (var i = 1; i <= 30; i++)
                       DropdownMenuItem(
                         value: i,
-                        child: Text(i == 1 ? '1$unit마다' : '$i$unit마다'),
+                        child: Text(
+                          i == 1
+                              ? tr('1{unit}마다', {'unit': unit})
+                              : tr('{i}{unit}마다', {'i': i, 'unit': unit}),
+                        ),
                       ),
                   ],
                   onChanged: (v) => setState(() => _interval = v ?? 1),
@@ -121,14 +126,14 @@ class _RecurrenceDialogState extends State<_RecurrenceDialog> {
                 ],
               ),
               Text(
-                '요일을 고르지 않으면 마감일의 요일에 반복합니다.',
+                tr('요일을 고르지 않으면 마감일의 요일에 반복합니다.'),
                 style: TextStyle(fontSize: 12, color: theme.hintColor),
               ),
             ],
             const SizedBox(height: 12),
             Row(
               children: [
-                const Text('종료일'),
+                Text(tr('종료일')),
                 const SizedBox(width: 12),
                 DateDropButton(
                   value: _until,
@@ -139,7 +144,7 @@ class _RecurrenceDialogState extends State<_RecurrenceDialog> {
                       vertical: 6,
                     ),
                     child: Text(
-                      _until == null ? '없음(계속 반복)' : formatYmd(_until!),
+                      _until == null ? tr('없음(계속 반복)') : formatYmd(_until!),
                       style: TextStyle(
                         color: _until == null ? theme.hintColor : null,
                       ),
@@ -150,7 +155,9 @@ class _RecurrenceDialogState extends State<_RecurrenceDialog> {
             ),
             const SizedBox(height: 12),
             Text(
-              '완료하면 다음 회차 업무가 만들어집니다 — 날짜는 마감일 기준으로 옮기고, 담당자·참조자·체크리스트(새로)를 그대로 가져갑니다.',
+              tr(
+                '완료하면 다음 회차 업무가 만들어집니다 — 날짜는 마감일 기준으로 옮기고, 담당자·참조자·체크리스트(새로)를 그대로 가져갑니다.',
+              ),
               style: TextStyle(fontSize: 12, color: theme.hintColor),
             ),
             const SizedBox(height: 6),
@@ -169,16 +176,16 @@ class _RecurrenceDialogState extends State<_RecurrenceDialog> {
         if (widget.initial != null)
           TextButton(
             onPressed: () => Navigator.of(context).pop((rule: null)),
-            child: const Text('반복 안 함'),
+            child: Text(tr('반복 안 함')),
           ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('recurrence-save'),
           onPressed: () => Navigator.of(context).pop((rule: _rule)),
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ],
     );
@@ -240,9 +247,9 @@ class _HoursMinutesFieldState extends State<_HoursMinutesField> {
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      _box(_h, '시간', '${widget.keyPrefix}-hours'),
+      _box(_h, tr('시간'), '${widget.keyPrefix}-hours'),
       const SizedBox(width: 8),
-      _box(_m, '분', '${widget.keyPrefix}-minutes'),
+      _box(_m, tr('분'), '${widget.keyPrefix}-minutes'),
     ],
   );
 }
@@ -257,7 +264,7 @@ Future<({int? minutes})?> showEstimateDialog(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
       builder: (dialogContext, setState) => AlertDialog(
-        title: const Text('예상 시간'),
+        title: Text(tr('예상 시간')),
         content: _HoursMinutesField(
           initial: initial,
           keyPrefix: 'estimate',
@@ -267,18 +274,18 @@ Future<({int? minutes})?> showEstimateDialog(
           if (initial != null)
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop((minutes: null)),
-              child: const Text('지우기'),
+              child: Text(tr('지우기')),
             ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('estimate-save'),
             onPressed: minutes < 1
                 ? null
                 : () => Navigator.of(dialogContext).pop((minutes: minutes)),
-            child: const Text('저장'),
+            child: Text(tr('저장')),
           ),
         ],
       ),
@@ -317,7 +324,7 @@ class _TimeEntryDialogState extends State<_TimeEntryDialog> {
   Widget build(BuildContext context) {
     final today = DateTime.now();
     return AlertDialog(
-      title: const Text('소요 시간 기록'),
+      title: Text(tr('소요 시간 기록')),
       content: SizedBox(
         width: 340,
         child: Column(
@@ -331,7 +338,7 @@ class _TimeEntryDialogState extends State<_TimeEntryDialog> {
             const SizedBox(height: 12),
             Row(
               children: [
-                const Text('날짜'),
+                Text(tr('날짜')),
                 const SizedBox(width: 12),
                 DateDropButton(
                   value: _date,
@@ -340,7 +347,7 @@ class _TimeEntryDialogState extends State<_TimeEntryDialog> {
                     if (d == null) return;
                     // 앞으로의 날짜에는 남길 수 없다(서버도 막는다).
                     if (d.isAfter(today)) {
-                      showAppToast(context, '오늘까지의 날짜만 고를 수 있습니다.');
+                      showAppToast(context, tr('오늘까지의 날짜만 고를 수 있습니다.'));
                       return;
                     }
                     setState(() => _date = d);
@@ -360,8 +367,8 @@ class _TimeEntryDialogState extends State<_TimeEntryDialog> {
               key: const ValueKey('time-entry-note'),
               controller: _note,
               maxLength: 200,
-              decoration: const InputDecoration(
-                hintText: '메모(선택)',
+              decoration: InputDecoration(
+                hintText: tr('메모(선택)'),
                 isDense: true,
                 border: OutlineInputBorder(),
               ),
@@ -372,7 +379,7 @@ class _TimeEntryDialogState extends State<_TimeEntryDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('time-entry-save'),
@@ -381,7 +388,7 @@ class _TimeEntryDialogState extends State<_TimeEntryDialog> {
               : () => Navigator.of(
                   context,
                 ).pop((minutes: _minutes, date: _date, note: _note.text)),
-          child: const Text('기록'),
+          child: Text(tr('기록')),
         ),
       ],
     );
@@ -471,7 +478,7 @@ class TaskDependenciesSection extends StatelessWidget {
             ),
             if (onRemove != null)
               IconButton(
-                tooltip: '선행 업무 해제',
+                tooltip: tr('선행 업무 해제'),
                 visualDensity: VisualDensity.compact,
                 iconSize: 16,
                 onPressed: onRemove,
@@ -502,7 +509,7 @@ class TaskDependenciesSection extends StatelessWidget {
           children: [
             Icon(Icons.account_tree_outlined, size: 16, color: hint),
             const SizedBox(width: 6),
-            const Text('선후행 업무', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(tr('선후행 업무'), style: TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
         if (open > 0 && task.status != TaskStatus.done)
@@ -520,14 +527,14 @@ class TaskDependenciesSection extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    '선행 업무 $open개가 아직 끝나지 않았습니다.',
+                    tr('선행 업무 {open}개가 아직 끝나지 않았습니다.', {'open': open}),
                     style: const TextStyle(fontSize: 12.5),
                   ),
                 ),
               ],
             ),
           ),
-        sub('선행 업무 — 이 업무 전에 끝나야 합니다'),
+        sub(tr('선행 업무 — 이 업무 전에 끝나야 합니다')),
         for (final p in task.predecessors)
           _row(
             context,
@@ -545,13 +552,13 @@ class TaskDependenciesSection extends StatelessWidget {
               key: const ValueKey('task-add-predecessor'),
               onPressed: () => _add(context),
               icon: const Icon(Icons.add, size: 16),
-              label: const Text('선행 업무 추가'),
+              label: Text(tr('선행 업무 추가')),
             ),
           )
         else if (task.predecessors.isEmpty)
-          Text('없음', style: TextStyle(fontSize: 13, color: hint)),
+          Text(tr('없음'), style: TextStyle(fontSize: 13, color: hint)),
         if (task.successors.isNotEmpty) ...[
-          sub('후행 업무 — 이 업무가 끝나기를 기다립니다'),
+          sub(tr('후행 업무 — 이 업무가 끝나기를 기다립니다')),
           for (final s in task.successors) _row(context, s),
         ],
       ],
@@ -605,7 +612,7 @@ class _TaskPickerDialogState extends State<_TaskPickerDialog> {
           t,
     ];
     return AlertDialog(
-      title: const Text('선행 업무 고르기'),
+      title: Text(tr('선행 업무 고르기')),
       content: SizedBox(
         width: 420,
         height: 420,
@@ -614,9 +621,9 @@ class _TaskPickerDialogState extends State<_TaskPickerDialog> {
             TextField(
               key: const ValueKey('task-picker-search'),
               autofocus: true,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 prefixIcon: Icon(Icons.search),
-                hintText: '번호나 제목으로 찾기',
+                hintText: tr('번호나 제목으로 찾기'),
                 isDense: true,
                 border: OutlineInputBorder(),
               ),
@@ -629,7 +636,7 @@ class _TaskPickerDialogState extends State<_TaskPickerDialog> {
                   : _tasks == null
                   ? const Center(child: CircularProgressIndicator())
                   : shown.isEmpty
-                  ? const Center(child: Text('고를 수 있는 업무가 없습니다.'))
+                  ? Center(child: Text(tr('고를 수 있는 업무가 없습니다.')))
                   : ListView.builder(
                       itemCount: shown.length,
                       itemBuilder: (context, i) {
@@ -658,7 +665,7 @@ class _TaskPickerDialogState extends State<_TaskPickerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
       ],
     );
@@ -743,8 +750,8 @@ class _TaskTimeSectionState extends State<TaskTimeSection> {
           showAppToast(
             context,
             entry == null
-                ? '1분이 안 되어 기록하지 않았습니다.'
-                : '${formatMinutes(entry.minutes)}을 기록했습니다.',
+                ? tr('1분이 안 되어 기록하지 않았습니다.')
+                : tr('{p0}을 기록했습니다.', {'p0': formatMinutes(entry.minutes)}),
           );
         }
         // 칸의 합·목록은 위 _setTimer(null)이 다시 읽는다.
@@ -753,7 +760,12 @@ class _TaskTimeSectionState extends State<TaskTimeSection> {
         final started = await api.startTaskTimer(widget.task.id);
         _setTimer(started);
         if (elsewhere != null && mounted) {
-          showAppToast(context, '${elsewhere.key} 타이머를 멈춰 기록하고 이 업무에서 시작했습니다.');
+          showAppToast(
+            context,
+            tr('{elsewhere.key} 타이머를 멈춰 기록하고 이 업무에서 시작했습니다.', {
+              'elsewhere.key': elsewhere.key,
+            }),
+          );
         }
       }
     } catch (e) {
@@ -797,7 +809,7 @@ class _TaskTimeSectionState extends State<TaskTimeSection> {
           children: [
             Icon(Icons.timer_outlined, size: 16, color: hint),
             const SizedBox(width: 6),
-            const Text('소요 시간', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(tr('소요 시간'), style: TextStyle(fontWeight: FontWeight.bold)),
             const Spacer(),
             if (!widget.readOnly)
               _runningHere
@@ -815,7 +827,7 @@ class _TaskTimeSectionState extends State<TaskTimeSection> {
                       key: const ValueKey('task-timer-start'),
                       onPressed: _busy ? null : _toggleTimer,
                       icon: const Icon(Icons.play_arrow, size: 16),
-                      label: const Text('타이머'),
+                      label: Text(tr('타이머')),
                     ),
           ],
         ),
@@ -823,7 +835,7 @@ class _TaskTimeSectionState extends State<TaskTimeSection> {
         Row(
           children: [
             Text(
-              '기록 ${formatMinutes(spent)}',
+              tr('기록 {p0}', {'p0': formatMinutes(spent)}),
               key: const ValueKey('task-time-spent'),
               style: TextStyle(
                 fontSize: 13,
@@ -839,8 +851,8 @@ class _TaskTimeSectionState extends State<TaskTimeSection> {
                 padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
                 child: Text(
                   estimate == null
-                      ? '예상 시간 정하기'
-                      : '예상 ${formatMinutes(estimate)}',
+                      ? tr('예상 시간 정하기')
+                      : tr('예상 {p0}', {'p0': formatMinutes(estimate)}),
                   key: const ValueKey('task-time-estimate'),
                   style: TextStyle(
                     fontSize: 13,
@@ -870,7 +882,9 @@ class _TaskTimeSectionState extends State<TaskTimeSection> {
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
-              '${running.key}에서 타이머가 돌고 있습니다 — 여기서 켜면 그 업무에 기록하고 넘어옵니다.',
+              tr('{running.key}에서 타이머가 돌고 있습니다 — 여기서 켜면 그 업무에 기록하고 넘어옵니다.', {
+                'running.key': running.key,
+              }),
               style: TextStyle(fontSize: 12, color: hint),
             ),
           ),
@@ -910,7 +924,7 @@ class _TaskTimeSectionState extends State<TaskTimeSection> {
                 ),
                 if (!widget.readOnly && (e.userId == me || widget.canManage))
                   IconButton(
-                    tooltip: '기록 지우기',
+                    tooltip: tr('기록 지우기'),
                     visualDensity: VisualDensity.compact,
                     iconSize: 15,
                     onPressed: () => widget.apply(
@@ -926,7 +940,11 @@ class _TaskTimeSectionState extends State<TaskTimeSection> {
             alignment: Alignment.centerLeft,
             child: TextButton(
               onPressed: () => setState(() => _showAll = true),
-              child: Text('기록 모두 보기 (${task.timeEntries.length})'),
+              child: Text(
+                tr('기록 모두 보기 ({task.timeEntries.length})', {
+                  'task.timeEntries.length': task.timeEntries.length,
+                }),
+              ),
             ),
           ),
         if (!widget.readOnly)
@@ -936,7 +954,7 @@ class _TaskTimeSectionState extends State<TaskTimeSection> {
               key: const ValueKey('task-add-time'),
               onPressed: _addEntry,
               icon: const Icon(Icons.add, size: 16),
-              label: const Text('시간 기록'),
+              label: Text(tr('시간 기록')),
             ),
           ),
       ],
@@ -1021,7 +1039,11 @@ class _TimeReportDialogState extends State<_TimeReportDialog> {
       ),
     );
     return AlertDialog(
-      title: Text('소요 시간 — ${widget.project.name}'),
+      title: Text(
+        tr('소요 시간 — {widget.project.name}', {
+          'widget.project.name': widget.project.name,
+        }),
+      ),
       content: SizedBox(
         width: 520,
         height: 480,
@@ -1031,11 +1053,11 @@ class _TimeReportDialogState extends State<_TimeReportDialog> {
             SegmentedButton<String>(
               key: const ValueKey('time-report-range'),
               showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: 'week', label: Text('이번 주')),
-                ButtonSegment(value: 'month', label: Text('이번 달')),
-                ButtonSegment(value: 'lastMonth', label: Text('지난달')),
-                ButtonSegment(value: 'year', label: Text('올해')),
+              segments: [
+                ButtonSegment(value: 'week', label: Text(tr('이번 주'))),
+                ButtonSegment(value: 'month', label: Text(tr('이번 달'))),
+                ButtonSegment(value: 'lastMonth', label: Text(tr('지난달'))),
+                ButtonSegment(value: 'year', label: Text(tr('올해'))),
               ],
               selected: {_range},
               onSelectionChanged: (s) {
@@ -1052,20 +1074,27 @@ class _TimeReportDialogState extends State<_TimeReportDialog> {
                   : r.totalMinutes == 0
                   ? Center(
                       child: Text(
-                        '${r.from} ~ ${r.to}에 기록한 시간이 없습니다.',
+                        tr('{r.from} ~ {r.to}에 기록한 시간이 없습니다.', {
+                          'r.from': r.from,
+                          'r.to': r.to,
+                        }),
                         style: TextStyle(color: hint),
                       ),
                     )
                   : ListView(
                       children: [
                         Text(
-                          '${r.from} ~ ${r.to} · 합계 ${formatMinutes(r.totalMinutes)}',
+                          tr('{r.from} ~ {r.to} · 합계 {p0}', {
+                            'r.from': r.from,
+                            'r.to': r.to,
+                            'p0': formatMinutes(r.totalMinutes),
+                          }),
                           key: const ValueKey('time-report-total'),
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          '사람별',
+                          tr('사람별'),
                           style: TextStyle(color: hint, fontSize: 12),
                         ),
                         for (final m in r.byMember)
@@ -1099,7 +1128,7 @@ class _TimeReportDialogState extends State<_TimeReportDialog> {
                           ),
                         const SizedBox(height: 12),
                         Text(
-                          '업무별',
+                          tr('업무별'),
                           style: TextStyle(color: hint, fontSize: 12),
                         ),
                         for (final t in r.byTask)
@@ -1145,7 +1174,7 @@ class _TimeReportDialogState extends State<_TimeReportDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );

@@ -5,6 +5,7 @@ import '../services/notification_controller.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'muted_scrollbar.dart';
+import '../l10n/tr.dart';
 
 /// 알림 센터 톱니 — 내 알림 설정: 탭별 "안 읽은 알림만 표시"(이 기기에만 저장), `@all 알림 받기` 스위치와
 /// 보드 알림 수준(전체 / 중요 알림 / 새 글 알림 — 서버에 저장). 고르는 즉시 저장하고(서버 값은 실패하면
@@ -75,7 +76,9 @@ class _NotificationSettingsDialogState
         emailDigest: emailDigest,
       );
     } catch (e) {
-      if (mounted) showAppToast(context, '알림 설정을 저장하지 못했습니다: $e');
+      if (mounted) {
+        showAppToast(context, tr('알림 설정을 저장하지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 
@@ -97,10 +100,10 @@ class _NotificationSettingsDialogState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('안 읽은 알림만 표시', style: Theme.of(context).textTheme.titleSmall),
+        Text(tr('안 읽은 알림만 표시'), style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 2),
         Text(
-          '켠 탭에서는 읽은 알림을 목록에서 숨깁니다. 이 기기에만 적용돼요.',
+          tr('켠 탭에서는 읽은 알림을 목록에서 숨깁니다. 이 기기에만 적용돼요.'),
           style: TextStyle(fontSize: 12, color: hint),
         ),
         for (final tab in tabs)
@@ -133,7 +136,7 @@ class _NotificationSettingsDialogState
                     Text(center.settingsError!),
                     TextButton(
                       onPressed: center.loadSettings,
-                      child: const Text('다시 시도'),
+                      child: Text(tr('다시 시도')),
                     ),
                   ],
                 )
@@ -149,9 +152,9 @@ class _NotificationSettingsDialogState
               SwitchListTile(
                 key: const ValueKey('notif-setting-mention-all'),
                 contentPadding: EdgeInsets.zero,
-                title: const Text('@all 알림 받기'),
+                title: Text(tr('@all 알림 받기')),
                 subtitle: Text(
-                  '끄면 @all 멘션의 푸시 알림을 받지 않습니다. 알림 센터에는 그대로 남습니다.',
+                  tr('끄면 @all 멘션의 푸시 알림을 받지 않습니다. 알림 센터에는 그대로 남습니다.'),
                   style: TextStyle(fontSize: 12, color: hint),
                 ),
                 value: settings.mentionAll,
@@ -162,19 +165,20 @@ class _NotificationSettingsDialogState
                 SwitchListTile(
                   key: const ValueKey('notif-setting-email-digest'),
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('멘션 요약 메일 받기'),
+                  title: Text(tr('멘션 요약 메일 받기')),
                   subtitle: Text(
                     widget.emailVerified
-                        ? '며칠 동안 접속하지 않으면 그 사이 쌓인 안 읽은 멘션을 이메일로 모아 보내 드립니다.'
-                        : '며칠 동안 접속하지 않으면 안 읽은 멘션을 이메일로 모아 보내 드립니다. 이메일을 확인해야 받을 수 있어요'
-                              '(내 프로필 → 개인정보 설정 → 이메일 관리).',
+                        ? tr('며칠 동안 접속하지 않으면 그 사이 쌓인 안 읽은 멘션을 이메일로 모아 보내 드립니다.')
+                        : tr(
+                            '며칠 동안 접속하지 않으면 안 읽은 멘션을 이메일로 모아 보내 드립니다. 이메일을 확인해야 받을 수 있어요(내 프로필 → 개인정보 설정 → 이메일 관리).',
+                          ),
                     style: TextStyle(fontSize: 12, color: hint),
                   ),
                   value: settings.emailDigest,
                   onChanged: (v) => _save(emailDigest: v),
                 ),
               const Divider(height: 24),
-              Text('보드 알림', style: Theme.of(context).textTheme.titleSmall),
+              Text(tr('보드 알림'), style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 4),
               RadioGroup<BoardNotifyLevel>(
                 groupValue: settings.boardLevel,
@@ -202,7 +206,7 @@ class _NotificationSettingsDialogState
           );
         }
         return AlertDialog(
-          title: const Text('알림 설정'),
+          title: Text(tr('알림 설정')),
           // 스크롤바가 대화상자 오른쪽 모서리에 붙도록 오른쪽 안쪽 여백(기본 24)을 스크롤 영역 안으로 옮긴다.
           // 내용이 다 보이면 스크롤바는 그려지지 않는다(넘칠 때만 나타난다).
           contentPadding: const EdgeInsets.only(top: 20),
@@ -228,7 +232,7 @@ class _NotificationSettingsDialogState
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('닫기'),
+              child: Text(tr('닫기')),
             ),
           ],
         );

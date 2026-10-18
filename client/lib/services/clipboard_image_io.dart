@@ -22,6 +22,7 @@ import 'package:win32/win32.dart'
 
 import 'app_platform.dart';
 import 'win32_window.dart';
+import '../l10n/tr.dart';
 
 /// 이 기기에서 이미지를 클립보드에 복사할 수 있는지 — 안드로이드는 pasteboard가 FileProvider(앱에 아직 없음)를
 /// 요구해서 빼고, 리눅스는 pasteboard가 쓰기를 지원하지 않는다.
@@ -37,7 +38,7 @@ Future<void> copyImageToClipboard(Future<Uint8List> bytes) async {
   final data = await bytes;
   if (!AppPlatform.isWindows) return Pasteboard.writeImage(data);
   final dib = await Isolate.run(() => _encodeDib(data));
-  if (dib == null) throw const FormatException('이미지 형식을 읽을 수 없습니다.');
+  if (dib == null) throw FormatException(tr('이미지 형식을 읽을 수 없습니다.'));
   await _writeWindowsClipboard(dib, png: _isPng(data) ? data : null);
 }
 
@@ -92,11 +93,11 @@ Future<void> _writeWindowsClipboard(Uint8List dib, {Uint8List? png}) async {
     if (i > 0) await Future.delayed(const Duration(milliseconds: 30));
     opened = OpenClipboard(owner) != 0;
   }
-  if (!opened) throw StateError('다른 프로그램이 클립보드를 쓰고 있습니다.');
+  if (!opened) throw StateError(tr('다른 프로그램이 클립보드를 쓰고 있습니다.'));
   try {
     EmptyClipboard();
     if (!_setClipboardBytes(CF_DIB, dib)) {
-      throw StateError('클립보드에 이미지를 올리지 못했습니다.');
+      throw StateError(tr('클립보드에 이미지를 올리지 못했습니다.'));
     }
     if (png != null) {
       final name = TEXT('PNG');

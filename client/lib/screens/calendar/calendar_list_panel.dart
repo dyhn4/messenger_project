@@ -6,6 +6,7 @@ import '../../services/calendar_controller.dart';
 import '../../widgets/app_toast.dart';
 import 'calendar_common.dart';
 import 'external_calendar_dialogs.dart';
+import '../../l10n/tr.dart';
 
 /// 캘린더 목록 — 데스크톱은 왼쪽 열, 모바일은 서랍. "나의 캘린더"(기본·팀·내가 만든/속한 shared)와
 /// "구독 캘린더"(국가 공휴일·멤버 생일·구독한 캘린더) 두 묶음이고, 각 항목의 체크박스로 내 화면에서
@@ -32,14 +33,17 @@ class CalendarListPanel extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 24),
           children: [
             _SectionHeader(
-              title: '나의 캘린더',
+              title: tr('나의 캘린더'),
               showAdd: !controller.isGuest,
               addKey: const ValueKey('cal-add-mine'),
-              addTooltip: '새 캘린더 만들기',
+              addTooltip: tr('새 캘린더 만들기'),
               onAdd: () {
                 final hook = hooks.onCreateCalendar;
                 if (hook == null) {
-                  CalendarManagementHooks.notConnected(context, '새 캘린더 만들기');
+                  CalendarManagementHooks.notConnected(
+                    context,
+                    tr('새 캘린더 만들기'),
+                  );
                 } else {
                   hook(context, controller);
                 }
@@ -71,14 +75,14 @@ class CalendarListPanel extends StatelessWidget {
             const SizedBox(height: 8),
             Divider(height: 1, color: theme.dividerColor),
             _SectionHeader(
-              title: '구독 캘린더',
+              title: tr('구독 캘린더'),
               showAdd: !controller.isGuest,
               addKey: const ValueKey('cal-add-subscribed'),
-              addTooltip: '구독할 캘린더 찾기',
+              addTooltip: tr('구독할 캘린더 찾기'),
               onAdd: () {
                 final hook = hooks.onSearchSubscribe;
                 if (hook == null) {
-                  CalendarManagementHooks.notConnected(context, '캘린더 구독');
+                  CalendarManagementHooks.notConnected(context, tr('캘린더 구독'));
                 } else {
                   hook(context, controller);
                 }
@@ -90,10 +94,10 @@ class CalendarListPanel extends StatelessWidget {
             Divider(height: 1, color: theme.dividerColor),
             // 외부 캘린더 구독은 나에게만 보이는 개인 설정이라 준회원도 쓸 수 있다.
             _SectionHeader(
-              title: '외부 캘린더',
+              title: tr('외부 캘린더'),
               showAdd: controller.teamId != null,
               addKey: const ValueKey('cal-add-external'),
-              addTooltip: '외부 캘린더 추가 (Google·Outlook 등)',
+              addTooltip: tr('외부 캘린더 추가 (Google·Outlook 등)'),
               onAdd: () => showAddExternalCalendarDialog(context, controller),
             ),
             for (final c in controller.external)
@@ -104,7 +108,7 @@ class CalendarListPanel extends StatelessWidget {
               contentPadding: const EdgeInsets.only(left: 20, right: 16),
               leading: Icon(Icons.ios_share, size: 18, color: theme.hintColor),
               minLeadingWidth: 20,
-              title: const Text('내 일정 내보내기 (ICS 주소)'),
+              title: Text(tr('내 일정 내보내기 (ICS 주소)')),
               enabled: controller.teamId != null,
               onTap: () => showCalendarFeedDialog(context, controller),
             ),
@@ -176,7 +180,7 @@ class _LoadError extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(message, style: TextStyle(color: Theme.of(context).hintColor)),
-          TextButton(onPressed: onRetry, child: const Text('다시 시도')),
+          TextButton(onPressed: onRetry, child: Text(tr('다시 시도'))),
         ],
       ),
     );
@@ -202,7 +206,7 @@ class _CalendarTile extends StatelessWidget {
       if (context.mounted) {
         showAppToast(
           context,
-          e is ApiException ? e.message : '캘린더 표시를 바꾸지 못했습니다.',
+          e is ApiException ? trServer(e.message) : tr('캘린더 표시를 바꾸지 못했습니다.'),
         );
       }
     }
@@ -217,7 +221,10 @@ class _CalendarTile extends StatelessWidget {
       await controller.setColor(calendar, hex);
     } catch (e) {
       if (context.mounted) {
-        showAppToast(context, e is ApiException ? e.message : '색을 바꾸지 못했습니다.');
+        showAppToast(
+          context,
+          e is ApiException ? trServer(e.message) : tr('색을 바꾸지 못했습니다.'),
+        );
       }
     }
   }
@@ -229,20 +236,20 @@ class _CalendarTile extends StatelessWidget {
       case _CalAction.settings:
         final hook = hooks.onOpenSettings;
         hook == null
-            ? CalendarManagementHooks.notConnected(context, '캘린더 설정')
+            ? CalendarManagementHooks.notConnected(context, tr('캘린더 설정'))
             : hook(context, controller, calendar);
       case _CalAction.leave:
         final hook = hooks.onLeave;
         hook == null
             ? CalendarManagementHooks.notConnected(
                 context,
-                calendar.isSubscriber ? '구독 취소' : '나에게만 삭제',
+                calendar.isSubscriber ? tr('구독 취소') : tr('나에게만 삭제'),
               )
             : hook(context, controller, calendar);
       case _CalAction.delete:
         final hook = hooks.onDelete;
         hook == null
-            ? CalendarManagementHooks.notConnected(context, '캘린더 삭제')
+            ? CalendarManagementHooks.notConnected(context, tr('캘린더 삭제'))
             : hook(context, controller, calendar);
       case _CalAction.refresh:
         refreshExternalCalendarNow(context, controller, calendar);
@@ -313,38 +320,40 @@ class _CalendarTile extends StatelessWidget {
             if (hasMenu)
               PopupMenuButton<_CalAction>(
                 key: ValueKey('cal-menu-${calendar.id}'),
-                tooltip: '더보기',
+                tooltip: tr('더보기'),
                 icon: const Icon(Icons.more_horiz, size: 20),
                 padding: EdgeInsets.zero,
                 onSelected: (a) => _onAction(context, a),
                 itemBuilder: (_) => [
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: _CalAction.color,
-                    child: Text('색 변경'),
+                    child: Text(tr('색 변경')),
                   ),
                   if (hasSettings)
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: _CalAction.settings,
-                      child: Text('캘린더 설정'),
+                      child: Text(tr('캘린더 설정')),
                     ),
                   if (hasLeave)
                     PopupMenuItem(
                       value: _CalAction.leave,
-                      child: Text(calendar.isSubscriber ? '구독 취소' : '나에게만 삭제'),
+                      child: Text(
+                        calendar.isSubscriber ? tr('구독 취소') : tr('나에게만 삭제'),
+                      ),
                     ),
                   if (hasDelete)
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: _CalAction.delete,
-                      child: Text('삭제'),
+                      child: Text(tr('삭제')),
                     ),
                   if (external) ...[
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: _CalAction.refresh,
-                      child: Text('지금 새로고침'),
+                      child: Text(tr('지금 새로고침')),
                     ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: _CalAction.unsubscribe,
-                      child: Text('구독 해지'),
+                      child: Text(tr('구독 해지')),
                     ),
                   ],
                 ],

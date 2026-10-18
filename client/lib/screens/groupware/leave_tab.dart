@@ -9,6 +9,7 @@ import 'approval_forms.dart';
 import 'approval_tab.dart';
 import 'groupware_screen.dart';
 import 'leave_calendar.dart';
+import '../../l10n/tr.dart';
 
 /// 휴가 탭 — 내 연차 현황(입사일 기준 법정 연차 — server annualLeave.js), 휴가 신청, 팀 휴가(달력 — leave_calendar.dart, 또는 앞으로 30일
 /// 목록), 내 휴가 결재.
@@ -90,7 +91,7 @@ class _LeaveTabState extends State<LeaveTab> {
   Future<void> _submitPlan(LeavePromotion p) async {
     final dates = await showLeaveDatesDialog(
       context,
-      title: '연차 쓸 날 내기',
+      title: tr('연차 쓸 날 내기'),
       from: widget.ctx.today,
       to: p.expiry,
       maxDays: p.remainingHalfDays ~/ 2,
@@ -99,10 +100,10 @@ class _LeaveTabState extends State<LeaveTab> {
     try {
       await widget.api.submitPromotionPlan(p.id, dates);
       if (!mounted) return;
-      showAppToast(context, '쓸 날을 냈습니다. 그날 휴가 신청도 잊지 마세요.');
+      showAppToast(context, tr('쓸 날을 냈습니다. 그날 휴가 신청도 잊지 마세요.'));
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -139,13 +140,13 @@ class _LeaveTabState extends State<LeaveTab> {
             ),
           _BalanceCard(balance: balance, onRequest: _request),
           GroupwareSectionHeader(
-            '팀 휴가',
+            tr('팀 휴가'),
             trailing: SegmentedButton<bool>(
               key: const ValueKey('leave-view'),
               showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: true, label: Text('달력')),
-                ButtonSegment(value: false, label: Text('앞으로 30일')),
+              segments: [
+                ButtonSegment(value: true, label: Text(tr('달력'))),
+                ButtonSegment(value: false, label: Text(tr('앞으로 30일'))),
               ],
               selected: {_calendarView},
               onSelectionChanged: (s) =>
@@ -159,14 +160,14 @@ class _LeaveTabState extends State<LeaveTab> {
               changes: widget.changes,
             )
           else if (_teamLeaves.isEmpty)
-            const GroupwareEmpty('예정된 휴가가 없습니다.')
+            GroupwareEmpty(tr('예정된 휴가가 없습니다.'))
           else
             for (final l in _teamLeaves)
               ListTile(
                 dense: true,
                 leading: const Icon(Icons.beach_access_outlined, size: 20),
                 title: Text(
-                  '${l.name} · ${l.leaveLabel ?? widget.ctx.leaveType(l.leaveType)?.label ?? '휴가'}',
+                  '${l.name} · ${l.leaveLabel ?? widget.ctx.leaveType(l.leaveType)?.label ?? tr('휴가')}',
                 ),
                 subtitle: Text(
                   l.startDate == l.endDate
@@ -174,9 +175,9 @@ class _LeaveTabState extends State<LeaveTab> {
                       : '${shortDateText(l.startDate)} ~ ${shortDateText(l.endDate)}',
                 ),
               ),
-          GroupwareSectionHeader('내 휴가 결재'),
+          GroupwareSectionHeader(tr('내 휴가 결재')),
           if (_mine.isEmpty)
-            const GroupwareEmpty('올린 휴가 결재가 없습니다.')
+            GroupwareEmpty(tr('올린 휴가 결재가 없습니다.'))
           else
             for (final d in _mine)
               ApprovalDocumentTile(
@@ -233,30 +234,32 @@ class _BalanceCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text('내 연차', style: theme.textTheme.titleMedium),
+                  child: Text(tr('내 연차'), style: theme.textTheme.titleMedium),
                 ),
                 FilledButton.icon(
                   key: const ValueKey('leave-request'),
                   onPressed: onRequest,
                   icon: const Icon(Icons.add, size: 18),
-                  label: const Text('휴가 신청'),
+                  label: Text(tr('휴가 신청')),
                 ),
               ],
             ),
             const SizedBox(height: 12),
             if (!balance.known)
               Text(
-                '입사일이 등록되지 않아 연차를 계산할 수 없습니다. 결재·근태 관리자에게 입사일 등록을 요청하세요. (휴가 신청은 할 수 있습니다)',
+                tr(
+                  '입사일이 등록되지 않아 연차를 계산할 수 없습니다. 결재·근태 관리자에게 입사일 등록을 요청하세요. (휴가 신청은 할 수 있습니다)',
+                ),
                 style: TextStyle(color: hint),
               )
             else ...[
               Row(
                 children: [
-                  stat('생긴 연차', halfDaysText(balance.grantedHalfDays!)),
-                  stat('쓴 연차', halfDaysText(balance.usedHalfDays)),
-                  stat('결재 중', halfDaysText(balance.pendingHalfDays)),
+                  stat(tr('생긴 연차'), halfDaysText(balance.grantedHalfDays!)),
+                  stat(tr('쓴 연차'), halfDaysText(balance.usedHalfDays)),
+                  stat(tr('결재 중'), halfDaysText(balance.pendingHalfDays)),
                   stat(
-                    '남은 연차',
+                    tr('남은 연차'),
                     halfDaysText(balance.remainingHalfDays!),
                     color: theme.colorScheme.primary,
                   ),
@@ -265,14 +268,24 @@ class _BalanceCard extends StatelessWidget {
               const SizedBox(height: 10),
               Text(
                 [
-                  '입사일 ${balance.hireDate}',
+                  tr('입사일 {balance.hireDate}', {
+                    'balance.hireDate': balance.hireDate,
+                  }),
                   if (balance.periodStart != null)
-                    '이번 연차 기간 ${balance.periodStart} ~ ${balance.periodEnd}',
+                    tr('이번 연차 기간 {balance.periodStart} ~ {balance.periodEnd}', {
+                      'balance.periodStart': balance.periodStart,
+                      'balance.periodEnd': balance.periodEnd,
+                    }),
                   balance.serviceYears == 0
-                      ? '입사 첫해 — 한 달 채울 때마다 1일(최대 11일)'
-                      : '근속 ${balance.serviceYears}년',
+                      ? tr('입사 첫해 — 한 달 채울 때마다 1일(최대 11일)')
+                      : tr('근속 {balance.serviceYears}년', {
+                          'balance.serviceYears': balance.serviceYears,
+                        }),
                   if (balance.adjustmentHalfDays != 0)
-                    '관리자 조정 ${balance.adjustmentHalfDays > 0 ? '+' : '−'}${halfDaysText(balance.adjustmentHalfDays.abs())}',
+                    tr('관리자 조정 {p0}{p1}', {
+                      'p0': balance.adjustmentHalfDays > 0 ? '+' : '−',
+                      'p1': halfDaysText(balance.adjustmentHalfDays.abs()),
+                    }),
                 ].join(' · '),
                 style: TextStyle(fontSize: 12, color: hint),
               ),
@@ -310,15 +323,23 @@ class _PromotionCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              p.stage == 1 ? '연차 사용 촉진 안내' : '연차 사용 시기 지정 통보',
+              p.stage == 1 ? tr('연차 사용 촉진 안내') : tr('연차 사용 시기 지정 통보'),
               style: theme.textTheme.titleSmall,
             ),
             const SizedBox(height: 6),
             Text(
               p.stage == 1
-                  ? '쓰지 않은 연차가 $days 있습니다(연차 기간 ${p.expiry}까지). ${p.deadline}까지 쓸 날을 정해 내 주세요. '
-                        '내지 않으면 회사가 쓸 날을 정해 알립니다.'
-                  : '회사가 정한 연차 쓸 날: ${p.designatedDates.join(', ')}',
+                  ? tr(
+                      '쓰지 않은 연차가 {days} 있습니다(연차 기간 {p.expiry}까지). {p.deadline}까지 쓸 날을 정해 내 주세요. 내지 않으면 회사가 쓸 날을 정해 알립니다.',
+                      {
+                        'days': days,
+                        'p.expiry': p.expiry,
+                        'p.deadline': p.deadline,
+                      },
+                    )
+                  : tr('회사가 정한 연차 쓸 날: {p0}', {
+                      'p0': p.designatedDates.join(', '),
+                    }),
             ),
             if (p.message != null) ...[
               const SizedBox(height: 4),
@@ -330,7 +351,7 @@ class _PromotionCard extends StatelessWidget {
             if (p.planDates.isNotEmpty) ...[
               const SizedBox(height: 6),
               Text(
-                '낸 계획: ${p.planDates.join(', ')}',
+                tr('낸 계획: {p0}', {'p0': p.planDates.join(', ')}),
                 key: const ValueKey('leave-promotion-plan'),
               ),
             ],
@@ -340,7 +361,7 @@ class _PromotionCard extends StatelessWidget {
                 child: FilledButton(
                   key: const ValueKey('leave-promotion-submit'),
                   onPressed: onPlan,
-                  child: const Text('쓸 날 내기'),
+                  child: Text(tr('쓸 날 내기')),
                 ),
               ),
           ],
@@ -404,7 +425,10 @@ class _LeaveDatesDialogState extends State<_LeaveDatesDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '${widget.to}까지, ${widget.maxDays}일까지 고를 수 있습니다.',
+              tr('{widget.to}까지, {widget.maxDays}일까지 고를 수 있습니다.', {
+                'widget.to': widget.to,
+                'widget.maxDays': widget.maxDays,
+              }),
               style: TextStyle(
                 fontSize: 12,
                 color: Theme.of(context).hintColor,
@@ -423,7 +447,12 @@ class _LeaveDatesDialogState extends State<_LeaveDatesDialog> {
                 ActionChip(
                   key: const ValueKey('leave-dates-add'),
                   avatar: const Icon(Icons.add, size: 16),
-                  label: Text('날 더하기 (${_dates.length}/${widget.maxDays})'),
+                  label: Text(
+                    tr('날 더하기 ({_dates.length}/{widget.maxDays})', {
+                      '_dates.length': _dates.length,
+                      'widget.maxDays': widget.maxDays,
+                    }),
+                  ),
                   onPressed: _dates.length >= widget.maxDays ? null : _add,
                 ),
               ],
@@ -434,14 +463,14 @@ class _LeaveDatesDialogState extends State<_LeaveDatesDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('leave-dates-save'),
           onPressed: _dates.isEmpty
               ? null
               : () => Navigator.of(context).pop(sorted),
-          child: const Text('내기'),
+          child: Text(tr('내기')),
         ),
       ],
     );

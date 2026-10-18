@@ -38,6 +38,7 @@ import 'search_screen.dart';
 import 'settings_screen.dart';
 import 'start_chat_dialog.dart';
 import 'topic_browse_screen.dart';
+import '../l10n/tr.dart';
 
 const _appVersion = '1.0.0';
 
@@ -86,7 +87,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
     _lastBackPressAt = now;
     showAppToast(
       context,
-      '한 번 더 누르면 앱이 종료됩니다',
+      tr('한 번 더 누르면 앱이 종료됩니다'),
       duration: const Duration(seconds: 3),
     );
   }
@@ -204,7 +205,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
       final room = await session.openSelfChat();
       _openRoom(room);
     } catch (e) {
-      if (mounted) showAppToast(context, '나와의 대화를 열지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('나와의 대화를 열지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -222,20 +223,20 @@ class _RoomListScreenState extends State<RoomListScreen> {
             if (session.canCreateRooms && session.canCreateTopic)
               ListTile(
                 leading: const Icon(Icons.add_comment_outlined),
-                title: const Text('새로운 토픽 생성하기'),
+                title: Text(tr('새로운 토픽 생성하기')),
                 onTap: () =>
                     Navigator.of(sheetContext).pop(_TopicFabAction.create),
               ),
             if (session.canCreateRooms)
               ListTile(
                 leading: const Icon(Icons.explore_outlined),
-                title: const Text('참여 가능한 토픽 보기'),
+                title: Text(tr('참여 가능한 토픽 보기')),
                 onTap: () =>
                     Navigator.of(sheetContext).pop(_TopicFabAction.browse),
               ),
             ListTile(
               leading: const Icon(Icons.create_new_folder_outlined),
-              title: const Text('폴더 만들기'),
+              title: Text(tr('폴더 만들기')),
               onTap: () =>
                   Navigator.of(sheetContext).pop(_TopicFabAction.folder),
             ),
@@ -289,20 +290,20 @@ class _RoomListScreenState extends State<RoomListScreen> {
             _RoomTypeTab(
               session: widget.session,
               type: RoomType.topic,
-              emptyText: '토픽방이 없습니다.',
+              emptyText: tr('토픽방이 없습니다.'),
               onOpenRoom: _openRoom,
             ),
             _RoomTypeTab(
               session: widget.session,
               type: RoomType.group,
-              emptyText: '그룹채팅이 없습니다.',
+              emptyText: tr('그룹채팅이 없습니다.'),
               onOpenRoom: _openRoom,
               showActivityTime: true,
             ),
             _RoomTypeTab(
               session: widget.session,
               type: RoomType.dm,
-              emptyText: '대화가 없습니다.',
+              emptyText: tr('대화가 없습니다.'),
               onOpenRoom: _openRoom,
               onOpenSelfChat: _openSelfChat,
               showActivityTime: true,
@@ -317,12 +318,12 @@ class _RoomListScreenState extends State<RoomListScreen> {
         // 눌러봐야 실패하는 버튼을 보여주지 않는다).
         floatingActionButton: switch (_index) {
           0 => FloatingActionButton(
-            tooltip: '토픽 추가',
+            tooltip: tr('토픽 추가'),
             onPressed: _showTopicActions,
             child: const Icon(Icons.add),
           ),
           1 when widget.session.canCreateRooms => FloatingActionButton(
-            tooltip: '새 그룹채팅',
+            tooltip: tr('새 그룹채팅'),
             onPressed: () => showNewGroupDialog(
               context,
               widget.session,
@@ -331,7 +332,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
             child: const Icon(Icons.add),
           ),
           2 when widget.session.canCreateRooms => FloatingActionButton(
-            tooltip: '채팅 시작하기',
+            tooltip: tr('채팅 시작하기'),
             onPressed: () => showStartChatDialog(
               context,
               widget.session,
@@ -344,21 +345,24 @@ class _RoomListScreenState extends State<RoomListScreen> {
         bottomNavigationBar: NavigationBar(
           selectedIndex: _index,
           onDestinationSelected: (i) => setState(() => _index = i),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.tag), label: '토픽'),
+          destinations: [
+            NavigationDestination(icon: Icon(Icons.tag), label: tr('토픽')),
             NavigationDestination(
               icon: Icon(Icons.groups_outlined),
-              label: '그룹채팅',
+              label: tr('그룹채팅'),
             ),
             NavigationDestination(
               icon: Icon(Icons.chat_bubble_outline),
-              label: '채팅',
+              label: tr('채팅'),
             ),
             NavigationDestination(
               icon: Icon(Icons.people_outline),
-              label: '멤버',
+              label: tr('멤버'),
             ),
-            NavigationDestination(icon: Icon(Icons.more_horiz), label: '더보기'),
+            NavigationDestination(
+              icon: Icon(Icons.more_horiz),
+              label: tr('더보기'),
+            ),
           ],
         ),
       ),
@@ -501,7 +505,7 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
       return ListTile(
         key: key,
         leading: SelfRoomAvatar(session: session),
-        title: const Text(selfRoomName),
+        title: Text(selfRoomName),
         onTap: onOpenSelf,
       );
     }
@@ -579,7 +583,7 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
               key: const ValueKey('topic-folder-archived'),
               mobile: true,
               archived: true,
-              name: '보관된 토픽',
+              name: tr('보관된 토픽'),
               count: groups.archived.length,
               unreadCount: groups.archivedUnread,
               collapsed: !_archivedExpanded,
@@ -782,7 +786,7 @@ class _RoomRow extends StatelessWidget {
                     ? Icons.notifications_active_outlined
                     : Icons.notifications_off_outlined,
               ),
-              title: Text(room.muted ? '알림 켜기' : '알림 끄기'),
+              title: Text(room.muted ? tr('알림 켜기') : tr('알림 끄기')),
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 session.toggleMuted(room);
@@ -803,7 +807,7 @@ class _RoomRow extends StatelessWidget {
                   room.favorite ? Icons.star : Icons.star_border,
                   color: room.favorite ? Colors.amber : null,
                 ),
-                title: Text(room.favorite ? '즐겨찾기 해제' : '즐겨찾기'),
+                title: Text(room.favorite ? tr('즐겨찾기 해제') : tr('즐겨찾기')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   session.toggleFavorite(room);
@@ -813,7 +817,7 @@ class _RoomRow extends StatelessWidget {
             if (folder != null) ...[
               ListTile(
                 leading: const Icon(Icons.drive_file_move_outline),
-                title: const Text('폴더로 이동'),
+                title: Text(tr('폴더로 이동')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   folder.onPick();
@@ -822,7 +826,7 @@ class _RoomRow extends StatelessWidget {
               if (folder.inFolder)
                 ListTile(
                   leading: const Icon(Icons.folder_off_outlined),
-                  title: const Text('폴더에서 빼기'),
+                  title: Text(tr('폴더에서 빼기')),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     folder.onRemove();
@@ -833,7 +837,7 @@ class _RoomRow extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.exit_to_app, color: Colors.redAccent),
                 title: Text(
-                  isDm && !room.isSecret ? '숨기기' : '나가기',
+                  isDm && !room.isSecret ? tr('숨기기') : tr('나가기'),
                   style: const TextStyle(color: Colors.redAccent),
                 ),
                 onTap: () {
@@ -878,7 +882,7 @@ class _SearchBox extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  '대화방, 메시지 검색',
+                  tr('대화방, 메시지 검색'),
                   style: TextStyle(color: Theme.of(context).hintColor),
                 ),
               ],
@@ -970,8 +974,8 @@ class _MembersTabState extends State<_MembersTab> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: TextField(
-            decoration: const InputDecoration(
-              hintText: '멤버 검색',
+            decoration: InputDecoration(
+              hintText: tr('멤버 검색'),
               isDense: true,
               prefixIcon: Icon(Icons.search, size: 18),
               border: OutlineInputBorder(),
@@ -985,7 +989,7 @@ class _MembersTabState extends State<_MembersTab> {
               : _users == null
               ? const Center(child: CircularProgressIndicator())
               : list.isEmpty
-              ? const Center(child: Text('검색 결과가 없습니다.'))
+              ? Center(child: Text(tr('검색 결과가 없습니다.')))
               : MutedScrollbar(
                   controller: _scrollController,
                   child: ListView.separated(
@@ -1088,7 +1092,7 @@ class _MoreTabState extends State<_MoreTab> {
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.settings_outlined),
-            title: const Text('환경설정'),
+            title: Text(tr('환경설정')),
             onTap: () => showDialog(
               context: context,
               builder: (_) => SettingsScreen(session: widget.session),
@@ -1098,7 +1102,7 @@ class _MoreTabState extends State<_MoreTab> {
           if (widget.session.canCreateInviteLink)
             ListTile(
               leading: const Icon(Icons.add_link),
-              title: const Text('초대 링크 생성'),
+              title: Text(tr('초대 링크 생성')),
               onTap: () => showInviteLinkScreen(context, widget.session),
             ),
           // 팀 초대 링크 생성은 팀 설정(팀 정보 탭)으로 옮겼다 — 이미 어느 팀인지 정해진
@@ -1107,12 +1111,12 @@ class _MoreTabState extends State<_MoreTab> {
           if (widget.session.isServerAdmin)
             ListTile(
               leading: const Icon(Icons.admin_panel_settings_outlined),
-              title: const Text('서버 관리'),
+              title: Text(tr('서버 관리')),
               onTap: () => showAdminConsole(context, widget.session),
             ),
           ListTile(
             leading: const Icon(Icons.description_outlined),
-            title: const Text('오픈소스 라이선스'),
+            title: Text(tr('오픈소스 라이선스')),
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'TangoTalk',
@@ -1122,10 +1126,7 @@ class _MoreTabState extends State<_MoreTab> {
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.redAccent),
-            title: const Text(
-              '로그아웃',
-              style: TextStyle(color: Colors.redAccent),
-            ),
+            title: Text(tr('로그아웃'), style: TextStyle(color: Colors.redAccent)),
             onTap: () => _logout(context),
           ),
         ],

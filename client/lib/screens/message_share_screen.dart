@@ -7,6 +7,7 @@ import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/room_picker_field.dart';
 import 'message_forward_screen.dart' show canForwardTo;
+import '../l10n/tr.dart';
 
 /// 메시지 롱프레스 메뉴(모바일)/더보기 메뉴(PC)의 "메시지 공유" — 대화방을 골라 새 텍스트를
 /// 쓰고, 그 아래 원본 메시지를 인용 카드로 붙여서 보낸다. 앱은 원본 id(quotedMessageId — 댓글이면
@@ -45,7 +46,7 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
 
   /// 게시글은 방 목록·알림 미리보기와 같은 "게시글: 제목"으로 인용한다.
   String get _quotedPreview => widget.message.isPost
-      ? '게시글: ${widget.message.title ?? ''}'
+      ? tr('게시글: {p0}', {'p0': widget.message.title ?? ''})
       : formatMessagePreview(
           type: widget.message.type,
           text: widget.message.text,
@@ -72,7 +73,7 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('공유 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('공유 실패: {e}', {'e': e}))));
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -86,7 +87,7 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: widget.asDialog ? MainAxisSize.min : MainAxisSize.max,
       children: [
-        Text('대화방', style: Theme.of(context).textTheme.labelLarge),
+        Text(tr('대화방'), style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 8),
         RoomPickerField(
           session: widget.session,
@@ -103,8 +104,8 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
               maxLines: null,
               expands: true,
               textAlignVertical: TextAlignVertical.top,
-              decoration: const InputDecoration(
-                hintText: '내용을 입력하세요.',
+              decoration: InputDecoration(
+                hintText: tr('내용을 입력하세요.'),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -116,8 +117,8 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
               maxLines: null,
               expands: true,
               textAlignVertical: TextAlignVertical.top,
-              decoration: const InputDecoration(
-                hintText: '내용을 입력하세요.',
+              decoration: InputDecoration(
+                hintText: tr('내용을 입력하세요.'),
                 border: InputBorder.none,
               ),
             ),
@@ -136,7 +137,7 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
                   onPressed: _sending
                       ? null
                       : () => Navigator.of(context).pop(),
-                  child: const Text('취소'),
+                  child: Text(tr('취소')),
                 ),
               ),
               const SizedBox(width: 8),
@@ -149,7 +150,7 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('공유'),
+                      : Text(tr('공유')),
                 ),
               ),
             ],
@@ -159,11 +160,11 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
     );
 
     if (widget.asDialog) {
-      return FloatingDialog(title: '메시지 공유', maxWidth: 480, child: body);
+      return FloatingDialog(title: tr('메시지 공유'), maxWidth: 480, child: body);
     }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('메시지 공유'),
+        title: Text(tr('메시지 공유')),
         actions: [
           TextButton(
             onPressed: canShare ? _share : null,
@@ -173,7 +174,7 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('공유'),
+                : Text(tr('공유')),
           ),
         ],
       ),

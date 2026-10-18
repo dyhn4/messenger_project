@@ -1,0 +1,770 @@
+[
+ {
+  "file": "lib/models/bookmark.dart",
+  "line": 4,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'팀 북마크'"
+ },
+ {
+  "file": "lib/models/bookmark.dart",
+  "line": 5,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'개인 북마크'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 9,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'휴가'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 10,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'지출'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 11,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'근태 수정'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 12,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'기안'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 13,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'출장'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 14,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'구매'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 15,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'연장근무'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 16,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'양식'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 31,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'한 줄 글'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 32,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'여러 줄 글'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 33,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'숫자'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 34,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'금액(원)'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 35,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'날짜'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 36,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'기간'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 37,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'시간대'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 38,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'고르기'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 39,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'품목 표'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 150,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'진행 중'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 151,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'승인'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 152,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'반려'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 153,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'회수'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 154,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'취소'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 166,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'대기'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 167,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'결재 차례'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 168,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'승인'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 169,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'반려'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 172,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'생략'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 184,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'결재'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 185,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'합의'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 186,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'전결'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 365,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'결재할 문서'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 366,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'내가 올린 문서'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 367,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'결재한 문서'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 368,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'참조 문서'"
+ },
+ {
+  "file": "lib/models/groupware.dart",
+  "line": 369,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'전체 문서'"
+ },
+ {
+  "file": "lib/models/groupware_forms.dart",
+  "line": 16,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'하나 고르기'"
+ },
+ {
+  "file": "lib/models/groupware_forms.dart",
+  "line": 17,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'여러 개 고르기'"
+ },
+ {
+  "file": "lib/models/groupware_forms.dart",
+  "line": 18,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'글'"
+ },
+ {
+  "file": "lib/models/groupware_forms.dart",
+  "line": 19,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'별점'"
+ },
+ {
+  "file": "lib/models/groupware_forms.dart",
+  "line": 78,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'만든 사람만'"
+ },
+ {
+  "file": "lib/models/groupware_forms.dart",
+  "line": 79,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'응답한 사람도'"
+ },
+ {
+  "file": "lib/models/groupware_forms.dart",
+  "line": 80,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'대상 모두'"
+ },
+ {
+  "file": "lib/models/groupware_forms.dart",
+  "line": 284,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'일일'"
+ },
+ {
+  "file": "lib/models/groupware_forms.dart",
+  "line": 285,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'주간'"
+ },
+ {
+  "file": "lib/models/groupware_work.dart",
+  "line": 140,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'1차 촉진 기간'"
+ },
+ {
+  "file": "lib/models/groupware_work.dart",
+  "line": 141,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'계획 기다리는 중'"
+ },
+ {
+  "file": "lib/models/groupware_work.dart",
+  "line": 142,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'2차 촉진 필요'"
+ },
+ {
+  "file": "lib/models/groupware_work.dart",
+  "line": 143,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'끝남'"
+ },
+ {
+  "file": "lib/models/groupware_work.dart",
+  "line": 144,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'기간을 놓침'"
+ },
+ {
+  "file": "lib/models/groupware_work.dart",
+  "line": 145,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'아직 이름'"
+ },
+ {
+  "file": "lib/models/groupware_work.dart",
+  "line": 146,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'남은 연차 없음'"
+ },
+ {
+  "file": "lib/models/todo.dart",
+  "line": 49,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'대기'"
+ },
+ {
+  "file": "lib/models/todo.dart",
+  "line": 50,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'진행'"
+ },
+ {
+  "file": "lib/models/todo.dart",
+  "line": 51,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'완료'"
+ },
+ {
+  "file": "lib/models/todo.dart",
+  "line": 87,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'모든 할 일'"
+ },
+ {
+  "file": "lib/models/todo.dart",
+  "line": 88,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'나의 할 일'"
+ },
+ {
+  "file": "lib/models/todo.dart",
+  "line": 89,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'부여한 할 일'"
+ },
+ {
+  "file": "lib/models/todo.dart",
+  "line": 103,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'생성 순'"
+ },
+ {
+  "file": "lib/models/todo.dart",
+  "line": 104,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'기한 순'"
+ },
+ {
+  "file": "lib/models/user_status.dart",
+  "line": 26,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'지우지 않음'"
+ },
+ {
+  "file": "lib/models/user_status.dart",
+  "line": 27,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'30분 뒤'"
+ },
+ {
+  "file": "lib/models/user_status.dart",
+  "line": 28,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'1시간 뒤'"
+ },
+ {
+  "file": "lib/models/user_status.dart",
+  "line": 29,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'4시간 뒤'"
+ },
+ {
+  "file": "lib/models/user_status.dart",
+  "line": 30,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'오늘까지'"
+ },
+ {
+  "file": "lib/models/user_status.dart",
+  "line": 31,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'이번 주까지'"
+ },
+ {
+  "file": "lib/screens/announcement_detail_screen.dart",
+  "line": 910,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'공지 읽음 확인'"
+ },
+ {
+  "file": "lib/screens/calendar/calendar_common.dart",
+  "line": 15,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'월간'"
+ },
+ {
+  "file": "lib/screens/calendar/calendar_common.dart",
+  "line": 16,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'주간'"
+ },
+ {
+  "file": "lib/screens/calendar/calendar_common.dart",
+  "line": 17,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'일간'"
+ },
+ {
+  "file": "lib/screens/calendar/calendar_common.dart",
+  "line": 18,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'목록'"
+ },
+ {
+  "file": "lib/screens/calendar/calendar_common.dart",
+  "line": 185,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'색 변경'"
+ },
+ {
+  "file": "lib/screens/drive/drive_screen.dart",
+  "line": 138,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'확인'"
+ },
+ {
+  "file": "lib/screens/drive/drive_screen.dart",
+  "line": 1108,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'확인'"
+ },
+ {
+  "file": "lib/screens/invite_members_screen.dart",
+  "line": 47,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'멤버 선택'"
+ },
+ {
+  "file": "lib/screens/invite_members_screen.dart",
+  "line": 49,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'확인'"
+ },
+ {
+  "file": "lib/screens/wiki/wiki_screen.dart",
+  "line": 760,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'확인'"
+ },
+ {
+  "file": "lib/services/api_client.dart",
+  "line": 1739,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'DDNS 설정'"
+ },
+ {
+  "file": "lib/services/secret_peer_store.dart",
+  "line": 219,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'상대 기기의 서명이 맞지 않습니다.'"
+ },
+ {
+  "file": "lib/services/secret_peer_store.dart",
+  "line": 222,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'상대 기기의 주인이 대화 상대와 다릅니다.'"
+ },
+ {
+  "file": "lib/services/secret_peer_store.dart",
+  "line": 225,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'이 대화의 상대가 아닌 사람이 보낸 요청입니다.'"
+ },
+ {
+  "file": "lib/services/secret_peer_store.dart",
+  "line": 228,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'이 대화를 맺은 상대 기기가 아닌 다른 기기의 요청입니다.'"
+ },
+ {
+  "file": "lib/services/secret_peer_store.dart",
+  "line": 232,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'서버가 상대 기기의 키를 이 기기에 고정해 둔 것과 다르게 알려 왔습니다.'"
+ },
+ {
+  "file": "lib/services/secret_peer_store.dart",
+  "line": 235,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'상대 기기 키를 다시 받기로 해서, 예전 키로 맺은 이 대화를 멈췄습니다.'"
+ },
+ {
+  "file": "lib/services/secret_peer_store.dart",
+  "line": 239,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'새 방식으로 대화하던 상대 기기와 예전 방식으로 맺게 하려 했습니다(서버가 바꿨을 수 있습니다).'"
+ },
+ {
+  "file": "lib/services/secret_session_manager.dart",
+  "line": 23,
+  "code": "INVALID_CONSTANT",
+  "text": "'보안 확인에 실패해 멈춘 비밀 대화입니다. 이 비밀 대화를 끝내고 상대와 보안 코드를 비교한 뒤 새로 시작해 주세요.'"
+ },
+ {
+  "file": "lib/services/secret_session_manager.dart",
+  "line": 32,
+  "code": "INVALID_CONSTANT",
+  "text": "'상대가 예전 버전의 앱으로 보낸 비밀 대화 요청이라 수락할 수 없습니다. 상대에게 앱을 업데이트한 뒤 다시 요청해 달라고 해 주세요.'"
+ },
+ {
+  "file": "lib/services/secret_session_manager.dart",
+  "line": 39,
+  "code": "INVALID_CONSTANT",
+  "text": "'이 기기에 저장된 비밀 대화 키를 읽을 수 없어 보낼 수 없습니다. 이 비밀 대화를 끝내고 새로 시작해 주세요.'"
+ },
+ {
+  "file": "lib/widgets/album_actions.dart",
+  "line": 14,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'전체 다운로드'"
+ },
+ {
+  "file": "lib/widgets/album_actions.dart",
+  "line": 15,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'앨범 공유'"
+ },
+ {
+  "file": "lib/widgets/album_actions.dart",
+  "line": 16,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'앨범 수정'"
+ },
+ {
+  "file": "lib/widgets/album_actions.dart",
+  "line": 17,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'앨범 삭제'"
+ },
+ {
+  "file": "lib/widgets/albums_panel.dart",
+  "line": 22,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'업데이트 순'"
+ },
+ {
+  "file": "lib/widgets/albums_panel.dart",
+  "line": 23,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'최신순'"
+ },
+ {
+  "file": "lib/widgets/albums_panel.dart",
+  "line": 24,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'오래된순'"
+ },
+ {
+  "file": "lib/widgets/albums_panel.dart",
+  "line": 25,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'제목순'"
+ },
+ {
+  "file": "lib/widgets/albums_panel.dart",
+  "line": 26,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'사진·영상 많은 순'"
+ },
+ {
+  "file": "lib/widgets/integration_widgets.dart",
+  "line": 125,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'예: 서버 모니터링'"
+ },
+ {
+  "file": "lib/widgets/integration_widgets.dart",
+  "line": 126,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'저장'"
+ },
+ {
+  "file": "lib/widgets/menu_entries.dart",
+  "line": 47,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'생성'"
+ },
+ {
+  "file": "lib/widgets/menu_entries.dart",
+  "line": 48,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'리스트'"
+ },
+ {
+  "file": "lib/widgets/menu_entries.dart",
+  "line": 49,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'툴'"
+ },
+ {
+  "file": "lib/widgets/room_options_menu.dart",
+  "line": 38,
+  "code": "INVALID_CONSTANT",
+  "text": "'보드 뷰'"
+ },
+ {
+  "file": "lib/widgets/room_options_menu.dart",
+  "line": 42,
+  "code": "INVALID_CONSTANT",
+  "text": "'읽기 전용'"
+ },
+ {
+  "file": "lib/widgets/room_options_menu.dart",
+  "line": 46,
+  "code": "INVALID_CONSTANT",
+  "text": "'보관됨'"
+ },
+ {
+  "file": "lib/widgets/scheduled_panel.dart",
+  "line": 20,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'모든 예약'"
+ },
+ {
+  "file": "lib/widgets/scheduled_panel.dart",
+  "line": 21,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'예약됨'"
+ },
+ {
+  "file": "lib/widgets/scheduled_panel.dart",
+  "line": 22,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'발송 실패'"
+ },
+ {
+  "file": "lib/widgets/scheduled_panel.dart",
+  "line": 37,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'발송 시간 순'"
+ },
+ {
+  "file": "lib/widgets/scheduled_panel.dart",
+  "line": 40,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'생성 순'"
+ },
+ {
+  "file": "lib/screens/groupware/approval_forms.dart",
+  "line": 556,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'사유'"
+ },
+ {
+  "file": "lib/screens/invite_members_screen.dart",
+  "line": 190,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'멤버 선택'"
+ },
+ {
+  "file": "lib/screens/invite_members_screen.dart",
+  "line": 192,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'확인'"
+ },
+ {
+  "file": "lib/screens/project/automation_flow_editor.dart",
+  "line": 2818,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'선택하세요'"
+ },
+ {
+  "file": "lib/screens/project/filter_controls.dart",
+  "line": 250,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'전체'"
+ },
+ {
+  "file": "lib/screens/project/project_forms.dart",
+  "line": 2068,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'마감일'"
+ },
+ {
+  "file": "lib/screens/project/project_menu_dialog.dart",
+  "line": 1185,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'프로젝트에서 제외'"
+ },
+ {
+  "file": "lib/screens/project/task_views.dart",
+  "line": 106,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'업무가 없습니다.'"
+ },
+ {
+  "file": "lib/widgets/date_time_range_field.dart",
+  "line": 121,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'기간을 선택하세요'"
+ },
+ {
+  "file": "lib/widgets/date_time_range_field.dart",
+  "line": 515,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'날짜를 선택하세요'"
+ },
+ {
+  "file": "lib/widgets/date_time_range_field.dart",
+  "line": 516,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'시간'"
+ },
+ {
+  "file": "lib/widgets/email_code_input.dart",
+  "line": 36,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'인증 코드 보내기'"
+ },
+ {
+  "file": "lib/widgets/filter_dropdown.dart",
+  "line": 204,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'참여 대화방'"
+ },
+ {
+  "file": "lib/widgets/integration_widgets.dart",
+  "line": 20,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'복사했습니다.'"
+ },
+ {
+  "file": "lib/widgets/panel_filters.dart",
+  "line": 540,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'파일 형식'"
+ },
+ {
+  "file": "lib/widgets/panel_filters.dart",
+  "line": 872,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'종류'"
+ },
+ {
+  "file": "lib/widgets/todo_widgets.dart",
+  "line": 200,
+  "code": "CONST_EVAL_METHOD_INVOCATION",
+  "text": "'할 일'"
+ }
+]

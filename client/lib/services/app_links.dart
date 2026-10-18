@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../l10n/tr.dart';
 
 /// 앱 안을 가리키는 링크 — 노트와 업무.
 ///
@@ -118,7 +119,7 @@ abstract final class AppLinks {
     if (t.contains(RegExp(r'\s'))) return null;
     final p = parse(t);
     if (p == null) return null;
-    final title = p.title ?? (p.kind == 'task' ? '업무' : '노트');
+    final title = p.title ?? (p.kind == 'task' ? tr('업무') : tr('노트'));
     return p.key == null ? title : '[${p.key}] $title';
   }
 

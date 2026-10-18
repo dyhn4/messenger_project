@@ -6,6 +6,7 @@ import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import 'groupware_screen.dart' show GroupwareChanges;
+import '../../l10n/tr.dart';
 
 /// 그룹웨어 "업무일지" 탭 — 일일·주간 업무보고(서버 groupwareReports.js). "내 보고"에 한 일·할 일·이슈를 쓰고(조직도 상위자에게
 /// 간다 — 위에 받는 사람이 보인다), "팀 현황"에서 내가 검토하는 사람들의 보고를 읽고 댓글을 단다(안 쓴 사람이 위로). 주간 보고는
@@ -62,9 +63,9 @@ class _WorkReportTabState extends State<WorkReportTab> {
               SegmentedButton<bool>(
                 key: const ValueKey('report-view'),
                 showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: false, label: Text('내 보고')),
-                  ButtonSegment(value: true, label: Text('팀 현황')),
+                segments: [
+                  ButtonSegment(value: false, label: Text(tr('내 보고'))),
+                  ButtonSegment(value: true, label: Text(tr('팀 현황'))),
                 ],
                 selected: {_team},
                 onSelectionChanged: (s) => setState(() => _team = s.first),
@@ -119,21 +120,23 @@ class _PeriodBar extends StatelessWidget {
       children: [
         IconButton(
           key: const ValueKey('report-prev'),
-          tooltip: kind == WorkReportKind.weekly ? '지난주' : '전날',
+          tooltip: kind == WorkReportKind.weekly ? tr('지난주') : tr('전날'),
           onPressed: () => onPeriod(shiftPeriod(start, kind, -1)),
           icon: const Icon(Icons.chevron_left),
         ),
         Text(
           periodLabel(kind, start, end) +
               (isCurrent
-                  ? (kind == WorkReportKind.weekly ? ' · 이번 주' : ' · 오늘')
+                  ? (kind == WorkReportKind.weekly
+                        ? tr(' · 이번 주')
+                        : tr(' · 오늘'))
                   : ''),
           key: const ValueKey('report-period'),
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         IconButton(
           key: const ValueKey('report-next'),
-          tooltip: kind == WorkReportKind.weekly ? '다음 주' : '다음 날',
+          tooltip: kind == WorkReportKind.weekly ? tr('다음 주') : tr('다음 날'),
           onPressed: isCurrent
               ? null
               : () => onPeriod(shiftPeriod(start, kind, 1)),
@@ -235,7 +238,7 @@ class _MyReportState extends State<_MyReport> {
       if (!mounted) return;
       showAppToast(
         context,
-        page.report == null ? '업무일지를 올렸습니다.' : '업무일지를 고쳤습니다.',
+        page.report == null ? tr('업무일지를 올렸습니다.') : tr('업무일지를 고쳤습니다.'),
       );
       _filled = false;
       await _load();
@@ -256,7 +259,7 @@ class _MyReportState extends State<_MyReport> {
       );
       if (!mounted) return;
       if (daily.isEmpty) {
-        showAppToast(context, '이 주에 쓴 일일 보고가 없습니다.');
+        showAppToast(context, tr('이 주에 쓴 일일 보고가 없습니다.'));
         return;
       }
       final lines = [
@@ -279,16 +282,16 @@ class _MyReportState extends State<_MyReport> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('업무일지 삭제'),
-        content: const Text('이 업무일지와 댓글을 지울까요?'),
+        title: Text(tr('업무일지 삭제')),
+        content: Text(tr('이 업무일지와 댓글을 지울까요?')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           TextButton(
             onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       ),
@@ -351,8 +354,10 @@ class _MyReportState extends State<_MyReport> {
         ),
         Text(
           page.reviewers.isEmpty
-              ? '받는 사람: 그룹웨어 관리자(조직도에 상위자가 없습니다)'
-              : '받는 사람: ${page.reviewers.map((r) => r.name).join(', ')}',
+              ? tr('받는 사람: 그룹웨어 관리자(조직도에 상위자가 없습니다)')
+              : tr('받는 사람: {p0}', {
+                  'p0': page.reviewers.map((r) => r.name).join(', '),
+                }),
           key: const ValueKey('report-reviewers'),
           style: TextStyle(fontSize: 13, color: hint),
         ),
@@ -360,8 +365,10 @@ class _MyReportState extends State<_MyReport> {
           const SizedBox(height: 4),
           Text(
             report.reads.isEmpty
-                ? '아직 아무도 확인하지 않았습니다.'
-                : '확인: ${report.reads.map((r) => r.name).join(', ')}',
+                ? tr('아직 아무도 확인하지 않았습니다.')
+                : tr('확인: {p0}', {
+                    'p0': report.reads.map((r) => r.name).join(', '),
+                  }),
             key: const ValueKey('report-reads'),
             style: TextStyle(
               fontSize: 13,
@@ -370,7 +377,7 @@ class _MyReportState extends State<_MyReport> {
           ),
         ],
         const SizedBox(height: 12),
-        _field('한 일', _done, 'report-done'),
+        _field(tr('한 일'), _done, 'report-done'),
         if (page.kind == WorkReportKind.weekly)
           Align(
             alignment: Alignment.centerLeft,
@@ -378,24 +385,24 @@ class _MyReportState extends State<_MyReport> {
               key: const ValueKey('report-import-daily'),
               onPressed: _importDaily,
               icon: const Icon(Icons.playlist_add, size: 18),
-              label: const Text('이번 주 일일 보고 불러오기'),
+              label: Text(tr('이번 주 일일 보고 불러오기')),
             ),
           ),
-        _field('할 일', _plan, 'report-plan'),
-        _field('이슈·건의(선택)', _issues, 'report-issues'),
+        _field(tr('할 일'), _plan, 'report-plan'),
+        _field(tr('이슈·건의(선택)'), _issues, 'report-issues'),
         Row(
           children: [
             FilledButton(
               key: const ValueKey('report-save'),
               onPressed: _saving ? null : _save,
-              child: Text(report == null ? '올리기' : '고치기'),
+              child: Text(report == null ? tr('올리기') : tr('고치기')),
             ),
             if (report != null) ...[
               const SizedBox(width: 8),
               TextButton(
                 key: const ValueKey('report-delete'),
                 onPressed: _delete,
-                child: const Text('삭제'),
+                child: Text(tr('삭제')),
               ),
             ],
           ],
@@ -403,7 +410,9 @@ class _MyReportState extends State<_MyReport> {
         if (detail != null && detail.comments.isNotEmpty) ...[
           const Divider(height: 32),
           Text(
-            '댓글 ${detail.comments.length}',
+            tr('댓글 {detail.comments.length}', {
+              'detail.comments.length': detail.comments.length,
+            }),
             style: theme.textTheme.titleSmall,
           ),
           for (final c in detail.comments) _CommentLine(c),
@@ -519,7 +528,7 @@ class _TeamReportsState extends State<_TeamReports> {
           Padding(
             padding: const EdgeInsets.all(32),
             child: Text(
-              '검토할 사람이 없습니다. 조직도에서 나를 상위자로 둔 사람의 업무일지가 여기에 모입니다.',
+              tr('검토할 사람이 없습니다. 조직도에서 나를 상위자로 둔 사람의 업무일지가 여기에 모입니다.'),
               textAlign: TextAlign.center,
               style: TextStyle(color: hint),
             ),
@@ -528,7 +537,10 @@ class _TeamReportsState extends State<_TeamReports> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
             child: Text(
-              '제출 ${team.submittedCount}/${team.roster.length}',
+              tr('제출 {team.submittedCount}/{team.roster.length}', {
+                'team.submittedCount': team.submittedCount,
+                'team.roster.length': team.roster.length,
+              }),
               key: const ValueKey('team-report-count'),
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
@@ -540,7 +552,7 @@ class _TeamReportsState extends State<_TeamReports> {
               title: Text(r.name),
               subtitle: r.report == null
                   ? Text(
-                      '아직 안 썼습니다',
+                      tr('아직 안 썼습니다'),
                       style: TextStyle(color: theme.colorScheme.error),
                     )
                   : Text(
@@ -676,7 +688,7 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
       appBar: AppBar(
         title: Text(
           r == null
-              ? '업무일지'
+              ? tr('업무일지')
               : '${r.userName} · ${r.kind.label} ${periodLabel(r.kind, r.periodStart, r.periodEnd)}',
         ),
       ),
@@ -692,12 +704,14 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
                   child: ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
-                      _section('한 일', r.done),
-                      _section('할 일', r.plan),
-                      _section('이슈·건의', r.issues),
+                      _section(tr('한 일'), r.done),
+                      _section(tr('할 일'), r.plan),
+                      _section(tr('이슈·건의'), r.issues),
                       const Divider(),
                       Text(
-                        '댓글 ${r.comments.length}',
+                        tr('댓글 {r.comments.length}', {
+                          'r.comments.length': r.comments.length,
+                        }),
                         style: Theme.of(context).textTheme.titleSmall,
                       ),
                       for (final c in r.comments) _CommentLine(c),
@@ -715,8 +729,8 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
                             key: const ValueKey('report-comment-input'),
                             controller: _comment,
                             maxLength: 1000,
-                            decoration: const InputDecoration(
-                              hintText: '댓글',
+                            decoration: InputDecoration(
+                              hintText: tr('댓글'),
                               isDense: true,
                               counterText: '',
                               border: OutlineInputBorder(),
@@ -726,7 +740,7 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
                         ),
                         IconButton(
                           key: const ValueKey('report-comment-send'),
-                          tooltip: '보내기',
+                          tooltip: tr('보내기'),
                           onPressed: _sending ? null : _send,
                           icon: const Icon(Icons.send),
                         ),

@@ -1,4 +1,5 @@
 import 'room.dart' show RoomType;
+import '../l10n/tr.dart';
 
 /// 초대 결과에 나오는 사람 한 명 — 초대됨/이미 참여중이면 [reason]이 없고, 초대하지 못했으면 사유가 있다.
 class InvitePerson {
@@ -9,7 +10,7 @@ class InvitePerson {
 
   factory InvitePerson.fromJson(Map<String, dynamic> json) => InvitePerson(
     userId: json['userId'] as String,
-    name: (json['name'] as String?) ?? '알 수 없음',
+    name: (json['name'] as String?) ?? tr('알 수 없음'),
     reason: json['reason'] as String?,
   );
 }
@@ -64,9 +65,9 @@ class RoomInviteResult {
   /// 이 방을 건너뛴 이유를 사람이 읽는 말로.
   String? get errorText => switch (error) {
     null => null,
-    'notMember' => '내가 참여 중인 대화방이 아니어서 초대하지 못했습니다.',
-    'wrongTeam' => '다른 팀의 대화방이라 초대하지 못했습니다.',
-    'notAllowed' => '멤버를 초대할 수 없는 대화방입니다.',
-    _ => '초대하지 못했습니다. 잠시 후 다시 시도하세요.',
+    'notMember' => tr('내가 참여 중인 대화방이 아니어서 초대하지 못했습니다.'),
+    'wrongTeam' => tr('다른 팀의 대화방이라 초대하지 못했습니다.'),
+    'notAllowed' => tr('멤버를 초대할 수 없는 대화방입니다.'),
+    _ => tr('초대하지 못했습니다. 잠시 후 다시 시도하세요.'),
   };
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/team.dart';
 import '../services/session.dart';
 import 'team_avatar.dart';
+import '../l10n/tr.dart';
 
 /// 창 왼쪽 위의 팀 표시 겸 전환 버튼: [팀 아이콘] 팀 이름 ▾.
 /// 누르면 아래로 팝업이 떠서 내가 속한 다른 팀으로 바로 전환하거나, 팀 목록 화면으로 돌아간다.
@@ -24,7 +25,7 @@ class TeamSwitcher extends StatelessWidget {
             foregroundColor ?? Theme.of(context).colorScheme.onSurface;
 
         return PopupMenuButton<Object>(
-          tooltip: '팀 전환',
+          tooltip: tr('팀 전환'),
           position: PopupMenuPosition.under,
           offset: const Offset(0, 10),
           onSelected: (value) {
@@ -67,13 +68,13 @@ class TeamSwitcher extends StatelessWidget {
                 ),
               ),
             const PopupMenuDivider(),
-            const PopupMenuItem<Object>(
+            PopupMenuItem<Object>(
               value: 'list',
               child: Row(
                 children: [
                   Icon(Icons.grid_view_outlined, size: 20),
                   SizedBox(width: 10),
-                  Text('팀 리스트'),
+                  Text(tr('팀 리스트')),
                 ],
               ),
             ),
@@ -170,7 +171,7 @@ class TeamSwitcherTabs extends StatelessWidget {
                 padding: const EdgeInsets.only(left: 2, bottom: 2),
                 child: IconButton(
                   icon: const Icon(Icons.grid_view_outlined, size: 18),
-                  tooltip: '팀 리스트',
+                  tooltip: tr('팀 리스트'),
                   visualDensity: VisualDensity.compact,
                   color: Theme.of(context).hintColor,
                   onPressed: session.leaveTeam,

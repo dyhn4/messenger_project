@@ -14,6 +14,7 @@ import 'task_views.dart';
 import 'task_filter.dart';
 import 'gantt_chart_view.dart';
 import 'my_tasks_view.dart' show compareTaskKeys;
+import '../../l10n/tr.dart';
 
 /// 프로젝트 머리의 위 여백(창 상단 바 밑줄부터 이름까지)과 아래 여백(설명부터 탭 줄 윗줄까지).
 const _kHeaderTopGap = 14.0;
@@ -192,7 +193,7 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
       }
       await api.reorderTasks(task.projectId, orderedIds);
     } catch (e) {
-      if (mounted) showAppToast(context, '업무를 옮기지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('업무를 옮기지 못했습니다: {e}', {'e': e}));
     }
     if (mounted) await _load();
   }
@@ -251,12 +252,12 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
         !showArchived &&
         _tab != _ProjectTab.dashboard &&
         _tab != _ProjectTab.notes) {
-      return const EmptyHint('아직 등록된 업무가 없습니다. "새 업무"로 시작해보세요.');
+      return EmptyHint(tr('아직 등록된 업무가 없습니다. "새 업무"로 시작해보세요.'));
     }
     if (tasks.isEmpty &&
         _tab != _ProjectTab.dashboard &&
         _tab != _ProjectTab.notes) {
-      return const EmptyHint('조건에 맞는 업무가 없습니다. 필터를 바꿔보세요.');
+      return EmptyHint(tr('조건에 맞는 업무가 없습니다. 필터를 바꿔보세요.'));
     }
     switch (_tab) {
       case _ProjectTab.dashboard:
@@ -364,13 +365,13 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
                 FilledButton.icon(
                   onPressed: _newTask,
                   icon: const Icon(Icons.add, size: 18),
-                  label: const Text('새 업무'),
+                  label: Text(tr('새 업무')),
                 ),
               // 소요 시간 보고 — 사람별·업무별로 기록한 시간(구성원 누구나).
               IconButton(
                 key: const ValueKey('project-time-report'),
                 icon: const Icon(Icons.timer_outlined),
-                tooltip: '소요 시간',
+                tooltip: tr('소요 시간'),
                 onPressed: () => showProjectTimeReportDialog(
                   context,
                   widget.session,
@@ -381,7 +382,7 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
               // 멤버 / 알림 / 자동화 / 노트 / 삭제). 사이드바 프로젝트 ⋯ 메뉴에서도 연다.
               IconButton(
                 icon: const Icon(Icons.settings_outlined),
-                tooltip: '프로젝트 설정',
+                tooltip: tr('프로젝트 설정'),
                 onPressed: _openMenu,
               ),
             ],
@@ -397,7 +398,7 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '종료된 프로젝트입니다. 읽기만 할 수 있습니다.',
+                    tr('종료된 프로젝트입니다. 읽기만 할 수 있습니다.'),
                     style: TextStyle(color: hint, fontSize: 12),
                   ),
                 ),
@@ -420,12 +421,12 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
                         if (tab != _ProjectTab.notes)
                           _ViewTab(
                             label: switch (tab) {
-                              _ProjectTab.dashboard => '대시보드',
-                              _ProjectTab.kanban => '칸반보드',
-                              _ProjectTab.list => '리스트',
-                              _ProjectTab.gantt => '간트차트',
-                              _ProjectTab.calendar => '캘린더',
-                              _ProjectTab.notes => '노트',
+                              _ProjectTab.dashboard => tr('대시보드'),
+                              _ProjectTab.kanban => tr('칸반보드'),
+                              _ProjectTab.list => tr('리스트'),
+                              _ProjectTab.gantt => tr('간트차트'),
+                              _ProjectTab.calendar => tr('캘린더'),
+                              _ProjectTab.notes => tr('노트'),
                             },
                             icon: switch (tab) {
                               _ProjectTab.dashboard => Icons.dashboard_outlined,
@@ -445,7 +446,7 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
               ),
               // "노트" — 프로젝트 창이면 오른쪽 노트 패널로 열고, 아니면(대화상자) 탭 안에.
               _ViewTab(
-                label: '노트',
+                label: tr('노트'),
                 icon: Icons.description_outlined,
                 selected: _tab == _ProjectTab.notes,
                 onTap: () {

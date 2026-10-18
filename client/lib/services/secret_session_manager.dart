@@ -14,6 +14,7 @@ import 'secret_key_store.dart';
 import 'secret_peer_store.dart';
 import 'secret_ratchet.dart';
 import 'secret_room_lock.dart';
+import '../l10n/tr.dart';
 
 /// 보안 확인에 실패해 멈춘 비밀 대화로 보내려 할 때 — 화면에 그대로 보여 줄 문구를 담는다.
 class SecretChatBlockedException extends ApiException {
@@ -273,7 +274,7 @@ class SecretSessionManager {
   /// 서로를 기다리지 않는다). 버리기 전에 저장을 줄 세운 일은 저장소 줄(앱 전체에 하나)이 먼저 끝낸다.
   void _ensureNotDisposed() {
     if (_disposed) {
-      throw StateError('로그아웃해 버린 비밀 대화 매니저입니다.');
+      throw StateError(tr('로그아웃해 버린 비밀 대화 매니저입니다.'));
     }
   }
 
@@ -304,7 +305,7 @@ class SecretSessionManager {
   String get _me {
     final me = _myUserId;
     if (me == null) {
-      throw StateError('비밀 대화 핸드셰이크에는 로그인한 사용자 id가 필요합니다.');
+      throw StateError(tr('비밀 대화 핸드셰이크에는 로그인한 사용자 id가 필요합니다.'));
     }
     return me;
   }
@@ -1012,230 +1013,225 @@ class SecretSessionManager {
   /// [SecretChatRefusedException]을 던진다. 이미 맺어 서버도 받았다고 답한 대화에 같은 초대가 다시 오면(초대 창이 다시
   /// 뜸·서버가 다시 보냄) 아무것도 하지 않는다 — 다시 수락하면 지금 세션을 덮어쓰고, 서버는 이미 받은 수락이라 거절해(409)
   /// 세션까지 지워진다. 응답을 못 받은 수락(그 사이 끊김·꺼짐)은 다시 할 수 있다.
-  Future<SecretHandshakeOutcome> acceptInvite(SecretInviteEvent invite) =>
-      _inRoom(invite.roomId, () async {
-        // 새 규약을 알리지 않은 초대는 받지 않는다([offersCurrentProtocol]) — 아무것도 적지 않고 묻지도 않는다.
-        if (!_acceptLegacyInvites && !offersCurrentProtocol(invite)) {
-          throw const SecretInviteOutdatedException();
-        }
-        final roomId = invite.roomId;
-        final me = _me;
-        final myDeviceId = _identity.deviceId;
-        if ((await _securityOf(roomId)).blocked) {
-          return SecretHandshakeOutcome.blocked;
-        }
-        final peerUserId = invite.initiatorUserId;
-        final peerDeviceId = invite.initiatorDeviceId;
-        // 초대를 보낸 사람이 이 방의 상대가 맞는지 — 나 자신이거나 방에 없는 사람이면 서버가 꾸민 초대다.
-        if (peerUserId == me || !_isMemberOfKnownRoom(roomId, peerUserId)) {
-          return _block(roomId, SecretBlockReason.peerMismatch);
-        }
-        final existing = await _bindingOf(roomId);
-        if (existing != null &&
-            (existing.peerUserId != peerUserId ||
-                existing.peerDeviceId != peerDeviceId)) {
-          return _block(roomId, SecretBlockReason.deviceMismatch);
-        }
-        final theirEphemeralBytes = _x25519Bytes(
-          invite.initiatorEphemeralPublicKey,
-        );
-        if (theirEphemeralBytes == null) {
-          return _block(roomId, SecretBlockReason.badSignature);
-        }
-        final key = await _peerKeyFor(peerDeviceId, peerUserId);
-        // 서버에 묻는 사이 로그아웃해 버린 매니저면 여기서 그만둔다(새 매니저가 같은 방에 적은 것을 덮어쓰지 않게).
-        _ensureNotDisposed();
-        final keyFailure = key.failure;
-        if (keyFailure != null) {
-          return _blockForKey(roomId, peerDeviceId, key, keyFailure);
-        }
-        final check = await _verifyPeer(
-          signingPublicKey: key.signingPublicKey!,
-          contextSignature: invite.initiatorContextSignature,
-          context: () => crypto.secretInitContext(
-            initiatorUserId: peerUserId,
-            initiatorDeviceId: peerDeviceId,
-            responderUserId: me,
-            initiatorEphemeralPublicKey: invite.initiatorEphemeralPublicKey,
-          ),
-          ephemeralPublicKey: invite.initiatorEphemeralPublicKey,
-          ephemeralSignature: invite.initiatorEphemeralSignature,
-        );
-        // 서버가 키를 바꿔치기했거나 변조됨 — 절대 진행하지 않는다.
-        if (!check.ok) {
-          return _blockForKey(
-            roomId,
-            peerDeviceId,
-            key,
-            SecretBlockReason.badSignature,
-          );
-        }
-        final hadSession = await _keyStore.hasSession(roomId);
-        if (hadSession && !await _keyStore.hasAcceptPending(roomId)) {
-          return SecretHandshakeOutcome.ignored;
-        }
-        // 상대 기기에 먼저 묶고 그다음 고정한다 — 다른 방에서 이 기기의 키 다툼이 드러나면 그 기기에 묶인 방을 모두
-        // 멈추는데, 고정과 묶음 사이에 그 일이 끼어도 이 방이 빠지지 않게. 고정은 체인키를 적기 전에 — 같은 기기를
-        // 다른 키로 먼저 고정한 곳이 있으면 여기서 멈춘다(묶음은 멈춘 방에 남아도 쓰이지 않는다).
-        await _saveBinding(
-          roomId,
-          SecretRoomBinding(
-            peerUserId: peerUserId,
-            peerDeviceId: peerDeviceId,
-            myDeviceId: myDeviceId,
-          ),
-        );
-        final pinned = await _pinPeerDevice(
-          roomId,
-          peerDeviceId,
-          peerUserId,
-          key,
-        );
-        final pinFailure = pinned.failure;
-        if (pinFailure != null) {
-          return _block(
-            roomId,
-            pinFailure,
-            deviceId: peerDeviceId,
-            pin: pinned.pin,
-          );
-        }
-        final deviceChanged = pinned.deviceChanged;
-        // 초대한 앱이 새 규약을 안다고 했으면 v3로 수락한다. 맥락 서명(v2)이 없는 초대는 예전 앱의 것이라(새 앱은
-        // 늘 보낸다) 서버가 규약 번호를 붙였더라도 예전 규약으로 받는다.
-        final useV3 =
-            !check.legacy &&
-            (invite.initiatorProtocol ?? 0) >= crypto.secretProtocolV3;
-        // 새 규약으로 말하는 것을 확인한 기기인데 이번 초대는 예전 규약이다 — 서버가 초대에서 새 규약 표시나 맥락 서명을
-        // 뺀 것이다(새 앱은 늘 둘 다 보낸다). 예전 방식으로 맺지 않고 멈춘다.
-        if (!useV3 && pinned.pin?.speaksV3 == true) {
-          return _block(
-            roomId,
-            SecretBlockReason.downgrade,
-            deviceId: peerDeviceId,
-            pin: pinned.pin,
-          );
-        }
+  Future<SecretHandshakeOutcome> acceptInvite(
+    SecretInviteEvent invite,
+  ) => _inRoom(invite.roomId, () async {
+    // 새 규약을 알리지 않은 초대는 받지 않는다([offersCurrentProtocol]) — 아무것도 적지 않고 묻지도 않는다.
+    if (!_acceptLegacyInvites && !offersCurrentProtocol(invite)) {
+      throw SecretInviteOutdatedException();
+    }
+    final roomId = invite.roomId;
+    final me = _me;
+    final myDeviceId = _identity.deviceId;
+    if ((await _securityOf(roomId)).blocked) {
+      return SecretHandshakeOutcome.blocked;
+    }
+    final peerUserId = invite.initiatorUserId;
+    final peerDeviceId = invite.initiatorDeviceId;
+    // 초대를 보낸 사람이 이 방의 상대가 맞는지 — 나 자신이거나 방에 없는 사람이면 서버가 꾸민 초대다.
+    if (peerUserId == me || !_isMemberOfKnownRoom(roomId, peerUserId)) {
+      return _block(roomId, SecretBlockReason.peerMismatch);
+    }
+    final existing = await _bindingOf(roomId);
+    if (existing != null &&
+        (existing.peerUserId != peerUserId ||
+            existing.peerDeviceId != peerDeviceId)) {
+      return _block(roomId, SecretBlockReason.deviceMismatch);
+    }
+    final theirEphemeralBytes = _x25519Bytes(
+      invite.initiatorEphemeralPublicKey,
+    );
+    if (theirEphemeralBytes == null) {
+      return _block(roomId, SecretBlockReason.badSignature);
+    }
+    final key = await _peerKeyFor(peerDeviceId, peerUserId);
+    // 서버에 묻는 사이 로그아웃해 버린 매니저면 여기서 그만둔다(새 매니저가 같은 방에 적은 것을 덮어쓰지 않게).
+    _ensureNotDisposed();
+    final keyFailure = key.failure;
+    if (keyFailure != null) {
+      return _blockForKey(roomId, peerDeviceId, key, keyFailure);
+    }
+    final check = await _verifyPeer(
+      signingPublicKey: key.signingPublicKey!,
+      contextSignature: invite.initiatorContextSignature,
+      context: () => crypto.secretInitContext(
+        initiatorUserId: peerUserId,
+        initiatorDeviceId: peerDeviceId,
+        responderUserId: me,
+        initiatorEphemeralPublicKey: invite.initiatorEphemeralPublicKey,
+      ),
+      ephemeralPublicKey: invite.initiatorEphemeralPublicKey,
+      ephemeralSignature: invite.initiatorEphemeralSignature,
+    );
+    // 서버가 키를 바꿔치기했거나 변조됨 — 절대 진행하지 않는다.
+    if (!check.ok) {
+      return _blockForKey(
+        roomId,
+        peerDeviceId,
+        key,
+        SecretBlockReason.badSignature,
+      );
+    }
+    final hadSession = await _keyStore.hasSession(roomId);
+    if (hadSession && !await _keyStore.hasAcceptPending(roomId)) {
+      return SecretHandshakeOutcome.ignored;
+    }
+    // 상대 기기에 먼저 묶고 그다음 고정한다 — 다른 방에서 이 기기의 키 다툼이 드러나면 그 기기에 묶인 방을 모두
+    // 멈추는데, 고정과 묶음 사이에 그 일이 끼어도 이 방이 빠지지 않게. 고정은 체인키를 적기 전에 — 같은 기기를
+    // 다른 키로 먼저 고정한 곳이 있으면 여기서 멈춘다(묶음은 멈춘 방에 남아도 쓰이지 않는다).
+    await _saveBinding(
+      roomId,
+      SecretRoomBinding(
+        peerUserId: peerUserId,
+        peerDeviceId: peerDeviceId,
+        myDeviceId: myDeviceId,
+      ),
+    );
+    final pinned = await _pinPeerDevice(roomId, peerDeviceId, peerUserId, key);
+    final pinFailure = pinned.failure;
+    if (pinFailure != null) {
+      return _block(
+        roomId,
+        pinFailure,
+        deviceId: peerDeviceId,
+        pin: pinned.pin,
+      );
+    }
+    final deviceChanged = pinned.deviceChanged;
+    // 초대한 앱이 새 규약을 안다고 했으면 v3로 수락한다. 맥락 서명(v2)이 없는 초대는 예전 앱의 것이라(새 앱은
+    // 늘 보낸다) 서버가 규약 번호를 붙였더라도 예전 규약으로 받는다.
+    final useV3 =
+        !check.legacy &&
+        (invite.initiatorProtocol ?? 0) >= crypto.secretProtocolV3;
+    // 새 규약으로 말하는 것을 확인한 기기인데 이번 초대는 예전 규약이다 — 서버가 초대에서 새 규약 표시나 맥락 서명을
+    // 뺀 것이다(새 앱은 늘 둘 다 보낸다). 예전 방식으로 맺지 않고 멈춘다.
+    if (!useV3 && pinned.pin?.speaksV3 == true) {
+      return _block(
+        roomId,
+        SecretBlockReason.downgrade,
+        deviceId: peerDeviceId,
+        pin: pinned.pin,
+      );
+    }
 
-        final myEphemeral = await X25519().newKeyPair();
-        final myEphemeralPublicKey = await publicKeyBase64(myEphemeral);
-        final acceptContext = useV3
-            ? crypto.secretAcceptContextV3
-            : crypto.secretAcceptContext;
-        final myContextSignature = await crypto.signContext(
-          _identity.signingKeyPair,
-          acceptContext(
-            roomId: roomId,
-            initiatorUserId: peerUserId,
-            initiatorDeviceId: peerDeviceId,
-            initiatorEphemeralPublicKey: invite.initiatorEphemeralPublicKey,
-            responderUserId: me,
-            responderDeviceId: myDeviceId,
-            responderEphemeralPublicKey: myEphemeralPublicKey,
-          ),
-        );
-        // 키만 서명하는 예전 서명(v1)은 예전 앱이 읽는다. v3로 수락할 때는 그 칸에도 v3 맥락 서명을 넣는다 — v3를 알린
-        // 초대는 새 앱이 건 것이라 그 칸을 읽지 않고, 서버가 맥락 서명을 빼고 넘기면 초대한 쪽이 예전 서명으로 확인하다
-        // 실패해 멈춘다(빼지 않았다면 받는 쪽만 v3라 아무 메시지도 풀리지 않는 채로 맺어진다).
-        final mySignature = useV3
-            ? myContextSignature
-            : await crypto.signEphemeralKey(
-                _identity.signingKeyPair,
-                base64Decode(myEphemeralPublicKey),
-              );
+    final myEphemeral = await X25519().newKeyPair();
+    final myEphemeralPublicKey = await publicKeyBase64(myEphemeral);
+    final acceptContext = useV3
+        ? crypto.secretAcceptContextV3
+        : crypto.secretAcceptContext;
+    final myContextSignature = await crypto.signContext(
+      _identity.signingKeyPair,
+      acceptContext(
+        roomId: roomId,
+        initiatorUserId: peerUserId,
+        initiatorDeviceId: peerDeviceId,
+        initiatorEphemeralPublicKey: invite.initiatorEphemeralPublicKey,
+        responderUserId: me,
+        responderDeviceId: myDeviceId,
+        responderEphemeralPublicKey: myEphemeralPublicKey,
+      ),
+    );
+    // 키만 서명하는 예전 서명(v1)은 예전 앱이 읽는다. v3로 수락할 때는 그 칸에도 v3 맥락 서명을 넣는다 — v3를 알린
+    // 초대는 새 앱이 건 것이라 그 칸을 읽지 않고, 서버가 맥락 서명을 빼고 넘기면 초대한 쪽이 예전 서명으로 확인하다
+    // 실패해 멈춘다(빼지 않았다면 받는 쪽만 v3라 아무 메시지도 풀리지 않는 채로 맺어진다).
+    final mySignature = useV3
+        ? myContextSignature
+        : await crypto.signEphemeralKey(
+            _identity.signingKeyPair,
+            base64Decode(myEphemeralPublicKey),
+          );
 
-        final SecretRatchetState? ratchet;
-        final List<int>? chainKey;
-        if (useV3) {
-          final rootKey = await crypto.deriveRootKeyV3(
-            myEphemeralKeyPair: myEphemeral,
-            theirEphemeralPublicKey: theirEphemeralBytes,
-            roomId: roomId,
-            transcript: crypto.secretRootTranscriptV3(
-              roomId: roomId,
-              initiatorUserId: peerUserId,
-              initiatorDeviceId: peerDeviceId,
-              initiatorEphemeralPublicKey: invite.initiatorEphemeralPublicKey,
-              responderUserId: me,
-              responderDeviceId: myDeviceId,
-              responderEphemeralPublicKey: myEphemeralPublicKey,
-            ),
-          );
-          // 서명은 맞는데 공유비밀이 0뿐인 임시키 — 상대 기기가 일부러 만든 값이 아니면 생길 수 없다.
-          if (rootKey == null) {
-            return _block(roomId, SecretBlockReason.badSignature);
-          }
-          ratchet = await SecretRatchetState.forResponder(
-            rootKey: rootKey,
-            myEphemeralKeyPair: myEphemeral,
-          );
-          chainKey = null;
-        } else {
-          ratchet = null;
-          chainKey = await crypto.deriveInitialChainKey(
-            myEphemeralKeyPair: myEphemeral,
-            theirEphemeralPublicKey: SimplePublicKey(
-              theirEphemeralBytes,
-              type: KeyPairType.x25519,
-            ),
-            roomId: roomId,
-          );
-        }
-        // 묶음(위)은 세션 키보다 먼저 적혀 있다 — 세션 키가 있는데 묶인 기기가 없으면 예전 대화로 보고 방 정보로
-        // 묶으려 하기 때문이다.
-        _ensureNotDisposed();
-        await _saveSecurity(
-          roomId,
-          (await _securityOf(roomId)).copyWith(
-            legacyPeer: check.legacy,
-            peerDeviceChanged: deviceChanged,
-          ),
-        );
-        // 서버가 받았다고 답하기 전에는 "응답 대기" 표시를 남긴다(세션보다 먼저) — 그 사이 끊기거나 꺼지면 같은 초대를 다시
-        // 수락할 수 있게. 응답을 못 받은 지난 수락의 키는(다른 규약의 칸까지) 비우고 새로 적는다.
-        await _keyStore.markAcceptPending(roomId);
-        if (hadSession) {
-          _forgetKeyState(roomId);
-          await _keyStore.deleteSessionKeyMaterial(roomId);
-        }
-        if (ratchet != null) {
-          await _keyStore.saveRatchetState(roomId, ratchet);
-          _ratchetStates[roomId] = ratchet;
-          _protocols[roomId] = crypto.secretProtocolV3;
-        } else {
-          final state = SecretChainState(epoch: 0, n: 0, chainKey: chainKey!);
-          await _keyStore.saveChainState(roomId, state, skipped: const []);
-          _chainStates[roomId] = state;
-          _v1Skipped[roomId] = const [];
-          _protocols[roomId] = 1;
-        }
+    final SecretRatchetState? ratchet;
+    final List<int>? chainKey;
+    if (useV3) {
+      final rootKey = await crypto.deriveRootKeyV3(
+        myEphemeralKeyPair: myEphemeral,
+        theirEphemeralPublicKey: theirEphemeralBytes,
+        roomId: roomId,
+        transcript: crypto.secretRootTranscriptV3(
+          roomId: roomId,
+          initiatorUserId: peerUserId,
+          initiatorDeviceId: peerDeviceId,
+          initiatorEphemeralPublicKey: invite.initiatorEphemeralPublicKey,
+          responderUserId: me,
+          responderDeviceId: myDeviceId,
+          responderEphemeralPublicKey: myEphemeralPublicKey,
+        ),
+      );
+      // 서명은 맞는데 공유비밀이 0뿐인 임시키 — 상대 기기가 일부러 만든 값이 아니면 생길 수 없다.
+      if (rootKey == null) {
+        return _block(roomId, SecretBlockReason.badSignature);
+      }
+      ratchet = await SecretRatchetState.forResponder(
+        rootKey: rootKey,
+        myEphemeralKeyPair: myEphemeral,
+      );
+      chainKey = null;
+    } else {
+      ratchet = null;
+      chainKey = await crypto.deriveInitialChainKey(
+        myEphemeralKeyPair: myEphemeral,
+        theirEphemeralPublicKey: SimplePublicKey(
+          theirEphemeralBytes,
+          type: KeyPairType.x25519,
+        ),
+        roomId: roomId,
+      );
+    }
+    // 묶음(위)은 세션 키보다 먼저 적혀 있다 — 세션 키가 있는데 묶인 기기가 없으면 예전 대화로 보고 방 정보로
+    // 묶으려 하기 때문이다.
+    _ensureNotDisposed();
+    await _saveSecurity(
+      roomId,
+      (await _securityOf(
+        roomId,
+      )).copyWith(legacyPeer: check.legacy, peerDeviceChanged: deviceChanged),
+    );
+    // 서버가 받았다고 답하기 전에는 "응답 대기" 표시를 남긴다(세션보다 먼저) — 그 사이 끊기거나 꺼지면 같은 초대를 다시
+    // 수락할 수 있게. 응답을 못 받은 지난 수락의 키는(다른 규약의 칸까지) 비우고 새로 적는다.
+    await _keyStore.markAcceptPending(roomId);
+    if (hadSession) {
+      _forgetKeyState(roomId);
+      await _keyStore.deleteSessionKeyMaterial(roomId);
+    }
+    if (ratchet != null) {
+      await _keyStore.saveRatchetState(roomId, ratchet);
+      _ratchetStates[roomId] = ratchet;
+      _protocols[roomId] = crypto.secretProtocolV3;
+    } else {
+      final state = SecretChainState(epoch: 0, n: 0, chainKey: chainKey!);
+      await _keyStore.saveChainState(roomId, state, skipped: const []);
+      _chainStates[roomId] = state;
+      _v1Skipped[roomId] = const [];
+      _protocols[roomId] = 1;
+    }
 
-        try {
-          await _api.acceptSecretChat(
-            roomId: roomId,
-            deviceId: myDeviceId,
-            responderEphemeralPublicKey: myEphemeralPublicKey,
-            responderEphemeralSignature: mySignature,
-            responderContextSignature: myContextSignature,
-          );
-          try {
-            await _keyStore.clearAcceptPending(roomId);
-          } catch (_) {
-            // 표시를 지우지 못했다 — 수락은 됐다. 이 기기가 수락했다는 secret:accepted가 오면 그때 지운다.
-          }
-        } on SecretChatRefusedException {
-          // 서버가 이 기기의 수락을 받지 않았다 — 이 기기는 이 대화의 기기가 아니다. 키를 남겨 두면 이 기기가 대화를
-          // 맺은 것처럼 보이지만 상대는 다른 기기와 맺었다(이 기기가 보낸 것을 상대가 풀지 못한다). 응답이 없었던
-          // 경우(시간 초과)는 처리됐을 수 있어 그대로 둔다.
-          await _clearSessionKeys(roomId);
-          rethrow;
-        } finally {
-          await _refreshTrust(roomId);
-        }
-        return deviceChanged
-            ? SecretHandshakeOutcome.establishedOnChangedDevice
-            : SecretHandshakeOutcome.established;
-      });
+    try {
+      await _api.acceptSecretChat(
+        roomId: roomId,
+        deviceId: myDeviceId,
+        responderEphemeralPublicKey: myEphemeralPublicKey,
+        responderEphemeralSignature: mySignature,
+        responderContextSignature: myContextSignature,
+      );
+      try {
+        await _keyStore.clearAcceptPending(roomId);
+      } catch (_) {
+        // 표시를 지우지 못했다 — 수락은 됐다. 이 기기가 수락했다는 secret:accepted가 오면 그때 지운다.
+      }
+    } on SecretChatRefusedException {
+      // 서버가 이 기기의 수락을 받지 않았다 — 이 기기는 이 대화의 기기가 아니다. 키를 남겨 두면 이 기기가 대화를
+      // 맺은 것처럼 보이지만 상대는 다른 기기와 맺었다(이 기기가 보낸 것을 상대가 풀지 못한다). 응답이 없었던
+      // 경우(시간 초과)는 처리됐을 수 있어 그대로 둔다.
+      await _clearSessionKeys(roomId);
+      rethrow;
+    } finally {
+      await _refreshTrust(roomId);
+    }
+    return deviceChanged
+        ? SecretHandshakeOutcome.establishedOnChangedDevice
+        : SecretHandshakeOutcome.established;
+  });
 
   Future<void> rejectInvite(String roomId) async {
     await _api.rejectSecretChat(roomId);
@@ -1648,13 +1644,13 @@ class SecretSessionManager {
   }) => _inRoom(roomId, () async {
     _ensureNotDisposed();
     if ((await _securityOf(roomId)).blocked) {
-      throw const SecretChatBlockedException();
+      throw SecretChatBlockedException();
     }
     final Map<String, dynamic> envelope;
     switch (await _protocolOf(roomId)) {
       case crypto.secretProtocolV3:
         final state = await _ratchetStateOf(roomId);
-        if (state == null) throw const SecretChatBrokenException();
+        if (state == null) throw SecretChatBrokenException();
         final sealed = await state.encrypt(
           roomId: roomId,
           plainText: _wrapPlacedText(plainText, place),
@@ -1663,7 +1659,7 @@ class SecretSessionManager {
         envelope = sealed.envelope;
       case 1:
         final state = await _chainStateOf(roomId);
-        if (state == null) throw const SecretChatBrokenException();
+        if (state == null) throw SecretChatBrokenException();
         final step = await crypto.ratchetStep(state.chainKey);
         envelope = await crypto.encryptEnvelope(
           msgKey: step.msgKey,

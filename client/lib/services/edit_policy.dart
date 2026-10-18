@@ -1,5 +1,6 @@
 import '../models/team.dart';
 import 'session.dart';
+import '../l10n/tr.dart';
 
 /// 메시지/댓글 **수정·삭제** 허용 여부와 허용 시간은 팀 설정([메시지 설정] → 메시지 수정/삭제,
 /// 수정/삭제 가능 시간)을 따른다. 여기 함수들은 버튼을 누르자마자 바로 실패를 보여주기 위한
@@ -28,8 +29,11 @@ String editDeleteWindowExpiredMessage(
   Session session, {
   required String what,
   required String action,
-}) =>
-    '작성 후 ${formatEditDeleteWindow(editDeleteWindowOf(session).inSeconds)}이 지나 $what을 $action할 수 없습니다.';
+}) => tr('작성 후 {p0}이 지나 {what}을 {action}할 수 없습니다.', {
+  'p0': formatEditDeleteWindow(editDeleteWindowOf(session).inSeconds),
+  'what': what,
+  'action': action,
+});
 
 /// [메시지 수정/삭제]를 꺼둔 팀에서 수정/삭제를 시도했을 때의 안내 문구.
-const editDeleteDisabledMessage = '이 팀은 메시지 수정/삭제를 사용하지 않도록 설정되어 있습니다.';
+final editDeleteDisabledMessage = tr('이 팀은 메시지 수정/삭제를 사용하지 않도록 설정되어 있습니다.');

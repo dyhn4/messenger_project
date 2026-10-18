@@ -6,6 +6,7 @@ import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/muted_scrollbar.dart';
+import '../../l10n/tr.dart';
 
 IconData projectNotificationIcon(String kind) => switch (kind) {
   'assigned' => Icons.assignment_ind_outlined,
@@ -104,7 +105,7 @@ class _ProjectNotificationsBellState extends State<ProjectNotificationsBell> {
       await _load();
       await widget.session.refreshProjectUnread();
     } catch (e) {
-      if (mounted) showAppToast(context, '읽음 처리하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('읽음 처리하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -122,8 +123,8 @@ class _ProjectNotificationsBellState extends State<ProjectNotificationsBell> {
           padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
           child: Row(
             children: [
-              const Text(
-                '알림',
+              Text(
+                tr('알림'),
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
               ),
               const Spacer(),
@@ -134,10 +135,10 @@ class _ProjectNotificationsBellState extends State<ProjectNotificationsBell> {
                     _menu.close();
                     widget.onOpenCenter!();
                   },
-                  child: const Text('알림 센터에서 보기'),
+                  child: Text(tr('알림 센터에서 보기')),
                 ),
               if (items != null && items.any((n) => !n.read))
-                TextButton(onPressed: _readAll, child: const Text('모두 읽음')),
+                TextButton(onPressed: _readAll, child: Text(tr('모두 읽음'))),
             ],
           ),
         ),
@@ -162,7 +163,7 @@ class _ProjectNotificationsBellState extends State<ProjectNotificationsBell> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 28),
             child: Center(
-              child: Text('알림이 없습니다', style: TextStyle(color: hint)),
+              child: Text(tr('알림이 없습니다'), style: TextStyle(color: hint)),
             ),
           )
         else
@@ -209,7 +210,7 @@ class _ProjectNotificationsBellState extends State<ProjectNotificationsBell> {
       builder: (context, controller, _) => ListenableBuilder(
         listenable: widget.session,
         builder: (context, _) => IconButton(
-          tooltip: '알림',
+          tooltip: tr('알림'),
           icon: Badge(
             isLabelVisible: widget.session.projectUnread > 0,
             backgroundColor: Colors.redAccent,
@@ -233,10 +234,12 @@ class _ProjectNotificationsBellState extends State<ProjectNotificationsBell> {
 /// "방금 / N분 전 / N시간 전 / N일 전 / M/D" — 프로젝트 알림 줄의 시각 표시(알림 센터의 프로젝트 탭도 쓴다).
 String projectNotificationAgo(DateTime t) {
   final d = DateTime.now().difference(t);
-  if (d.inMinutes < 1) return '방금';
-  if (d.inHours < 1) return '${d.inMinutes}분 전';
-  if (d.inDays < 1) return '${d.inHours}시간 전';
-  if (d.inDays < 7) return '${d.inDays}일 전';
+  if (d.inMinutes < 1) return tr('방금');
+  if (d.inHours < 1) {
+    return tr('{d.inMinutes}분 전', {'d.inMinutes': d.inMinutes});
+  }
+  if (d.inDays < 1) return tr('{d.inHours}시간 전', {'d.inHours': d.inHours});
+  if (d.inDays < 7) return tr('{d.inDays}일 전', {'d.inDays': d.inDays});
   return '${t.month}/${t.day}';
 }
 
@@ -268,7 +271,7 @@ class ProjectNotificationTile extends StatelessWidget {
       ),
       title: Text(
         // 제목이 비어 오면(모르는 종류 등) 프로젝트 이름으로 대신한다.
-        n.title.isNotEmpty ? n.title : (n.projectName ?? '프로젝트'),
+        n.title.isNotEmpty ? trServer(n.title) : (n.projectName ?? tr('프로젝트')),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
@@ -277,7 +280,7 @@ class ProjectNotificationTile extends StatelessWidget {
         ),
       ),
       subtitle: Text(
-        n.body,
+        trServer(n.body),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(fontSize: 12, color: n.read ? hint : null),
@@ -374,7 +377,7 @@ class _ProjectNotificationSettingsEditorState
       );
       if (mounted) setState(() => _policy = p);
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -386,7 +389,7 @@ class _ProjectNotificationSettingsEditorState
       );
       if (mounted) setState(() => _mine = m);
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -443,37 +446,45 @@ class _ProjectNotificationSettingsEditorState
         children: [
           Text(
             widget.canManage
-                ? '여기서 설정한 알림 정책은 이 프로젝트의 모든 멤버에게 적용됩니다.'
-                : '이 프로젝트의 알림 정책입니다. 바꾸려면 프로젝트 담당자나 팀 관리자여야 합니다.',
+                ? tr('여기서 설정한 알림 정책은 이 프로젝트의 모든 멤버에게 적용됩니다.')
+                : tr('이 프로젝트의 알림 정책입니다. 바꾸려면 프로젝트 담당자나 팀 관리자여야 합니다.'),
             style: TextStyle(color: theme.hintColor, fontSize: 12),
           ),
           const SizedBox(height: 12),
-          _card(context, '업무 변경 알림', '업무 항목이 바뀌면 담당자·참조자에게 알림을 보냅니다.', [
-            _row('status', '상태 변경'),
-            _row('priority', '우선순위 변경'),
-            _row('assigned', '담당자 변경'),
-            _row('referenced', '참조자 지정'),
-            _row('dueDate', '마감일 변경'),
-            _row('taskType', '유형 변경'),
-            _row('customField', '사용자 정의 필드 변경'),
+          _card(context, tr('업무 변경 알림'), tr('업무 항목이 바뀌면 담당자·참조자에게 알림을 보냅니다.'), [
+            _row('status', tr('상태 변경')),
+            _row('priority', tr('우선순위 변경')),
+            _row('assigned', tr('담당자 변경')),
+            _row('referenced', tr('참조자 지정')),
+            _row('dueDate', tr('마감일 변경')),
+            _row('taskType', tr('유형 변경')),
+            _row('customField', tr('사용자 정의 필드 변경')),
           ]),
-          _card(context, '업무 생성/삭제 알림', '업무가 생성되거나 삭제될 때 알림을 보냅니다.', [
-            _row('created', '업무 생성', sub: '새 업무가 만들어지면 프로젝트 담당자에게 알림'),
-            _row('deleted', '업무 삭제', sub: '업무가 삭제되면 프로젝트 담당자와 그 업무의 담당자에게 알림'),
+          _card(context, tr('업무 생성/삭제 알림'), tr('업무가 생성되거나 삭제될 때 알림을 보냅니다.'), [
+            _row('created', tr('업무 생성'), sub: tr('새 업무가 만들어지면 프로젝트 담당자에게 알림')),
+            _row(
+              'deleted',
+              tr('업무 삭제'),
+              sub: tr('업무가 삭제되면 프로젝트 담당자와 그 업무의 담당자에게 알림'),
+            ),
           ]),
-          _card(context, '댓글 알림', '댓글 관련 알림입니다.', [
-            _row('comment', '댓글 작성', sub: '댓글이 작성되면 업무 담당자·생성자·참조자에게 알림'),
+          _card(context, tr('댓글 알림'), tr('댓글 관련 알림입니다.'), [
+            _row(
+              'comment',
+              tr('댓글 작성'),
+              sub: tr('댓글이 작성되면 업무 담당자·생성자·참조자에게 알림'),
+            ),
           ]),
-          _card(context, '마감 알림', '마감이 다가오면 알림을 보냅니다.', [
-            _row('due', '마감 임박', sub: '담당한 업무의 마감 하루 전에 알림'),
+          _card(context, tr('마감 알림'), tr('마감이 다가오면 알림을 보냅니다.'), [
+            _row('due', tr('마감 임박'), sub: tr('담당한 업무의 마감 하루 전에 알림')),
           ]),
-          _card(context, '내 설정', '나에게만 적용됩니다(정책과 별개).', [
+          _card(context, tr('내 설정'), tr('나에게만 적용됩니다(정책과 별개).'), [
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              title: const Text('이 프로젝트 알림 끄기'),
-              subtitle: const Text(
-                '켜면 위 정책과 상관없이 내게는 알림이 오지 않습니다.',
+              title: Text(tr('이 프로젝트 알림 끄기')),
+              subtitle: Text(
+                tr('켜면 위 정책과 상관없이 내게는 알림이 오지 않습니다.'),
                 style: TextStyle(fontSize: 12),
               ),
               value: _mine!.muted,

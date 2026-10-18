@@ -9,6 +9,7 @@ import '../services/session.dart';
 import 'compact_menu_anchor.dart';
 import 'date_range_calendar_panel.dart';
 import 'filter_dropdown.dart';
+import '../l10n/tr.dart';
 
 /// 검색·파일·링크 패널 상단이 공유하는 조각들 — 기간 필터(직접 설정은 프로젝트 "새 업무"의 기간
 /// 달력), 멤버 필터, 정렬 드롭다운(설정 메뉴와 같은 모양), 파일 형식 메뉴, 결과 줄.
@@ -19,12 +20,12 @@ enum PeriodPreset { week, month, threeMonths, year, all, custom }
 
 extension PeriodPresetLabel on PeriodPreset {
   String get label => switch (this) {
-    PeriodPreset.week => '1주일',
-    PeriodPreset.month => '1개월',
-    PeriodPreset.threeMonths => '3개월',
-    PeriodPreset.year => '1년 (기본)',
-    PeriodPreset.all => '설정 안 함',
-    PeriodPreset.custom => '직접 설정',
+    PeriodPreset.week => tr('1주일'),
+    PeriodPreset.month => tr('1개월'),
+    PeriodPreset.threeMonths => tr('3개월'),
+    PeriodPreset.year => tr('1년 (기본)'),
+    PeriodPreset.all => tr('설정 안 함'),
+    PeriodPreset.custom => tr('직접 설정'),
   };
 }
 
@@ -161,7 +162,9 @@ class _PeriodPanelState extends State<_PeriodPanel> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              _start == null || _end != null ? '시작일을 선택하세요' : '종료일을 선택하세요',
+              _start == null || _end != null
+                  ? tr('시작일을 선택하세요')
+                  : tr('종료일을 선택하세요'),
               style: TextStyle(color: hint, fontSize: 12),
             ),
             const SizedBox(height: 6),
@@ -212,11 +215,11 @@ class MemberFilterButton extends StatelessWidget {
 
   String get _label {
     final id = selectedSenderId;
-    if (id == null) return '모든 멤버';
+    if (id == null) return tr('모든 멤버');
     for (final u in users ?? const <AppUser>[]) {
       if (u.id == id) return u.name;
     }
-    return '모든 멤버';
+    return tr('모든 멤버');
   }
 
   @override
@@ -280,7 +283,7 @@ class _MemberFilterPanelState extends State<_MemberFilterPanel> {
             children: [
               ListTile(
                 dense: true,
-                title: const Text('모든 멤버'),
+                title: Text(tr('모든 멤버')),
                 trailing: widget.selectedSenderId == null
                     ? const Icon(Icons.check, size: 18)
                     : null,
@@ -354,8 +357,8 @@ class PanelSortButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
-    final newest = spaced ? '최신 순' : '최신순';
-    final oldest = spaced ? '과거 순' : '과거순';
+    final newest = spaced ? tr('최신 순') : tr('최신순');
+    final oldest = spaced ? tr('과거 순') : tr('과거순');
     return CompactMenuAnchor<bool>(
       alignEnd: true,
       selected: newestFirst,
@@ -366,7 +369,7 @@ class PanelSortButton extends StatelessWidget {
       ],
       builder: (context, open, toggle) => _MenuLabelButton(
         buttonKey: const ValueKey('panel-sort'),
-        tooltip: '정렬',
+        tooltip: tr('정렬'),
         open: open,
         onTap: toggle,
         child: Row(
@@ -456,7 +459,7 @@ class PanelScopeButton extends StatelessWidget {
         if (t.id == id) return t.name;
       }
     }
-    return allTeams ? '모든 팀' : '현재 팀';
+    return allTeams ? tr('모든 팀') : tr('현재 팀');
   }
 
   @override
@@ -476,15 +479,15 @@ class PanelScopeButton extends StatelessWidget {
         }
       },
       entries: [
-        const CompactMenuOption(
+        CompactMenuOption(
           key: ValueKey('panel-scope-current'),
           value: _current,
-          label: '현재 팀',
+          label: tr('현재 팀'),
         ),
-        const CompactMenuOption(
+        CompactMenuOption(
           key: ValueKey('panel-scope-all'),
           value: _all,
-          label: '모든 팀',
+          label: tr('모든 팀'),
         ),
         if (teams.isNotEmpty && onTeamSelected != null) ...[
           const CompactMenuDivider(),
@@ -498,7 +501,7 @@ class PanelScopeButton extends StatelessWidget {
       ],
       builder: (context, open, toggle) => _MenuLabelButton(
         buttonKey: const ValueKey('panel-scope'),
-        tooltip: '검색 범위',
+        tooltip: tr('검색 범위'),
         open: open,
         onTap: toggle,
         child: Row(
@@ -556,7 +559,7 @@ class FileCategoryMenu extends StatelessWidget {
       ],
       builder: (context, open, toggle) => _MenuLabelButton(
         buttonKey: const ValueKey('panel-file-kind'),
-        tooltip: tooltip,
+        tooltip: tr(tooltip),
         open: open,
         onTap: toggle,
         padding: EdgeInsets.zero,
@@ -707,7 +710,7 @@ class _PanelFilterBarState extends State<PanelFilterBar> {
                   ? null
                   : IconButton(
                       icon: const Icon(Icons.close, size: 18),
-                      tooltip: '지우기',
+                      tooltip: tr('지우기'),
                       onPressed: () {
                         _controller.clear();
                         setState(() {});
@@ -884,7 +887,7 @@ class PanelKindButton<T> extends StatelessWidget {
           CompactMenuOption(key: itemKey?.call(v), value: i, label: labelOf(v)),
       ],
       builder: (context, open, toggle) => _MenuLabelButton(
-        tooltip: tooltip,
+        tooltip: tr(tooltip),
         open: open,
         onTap: toggle,
         child: Row(

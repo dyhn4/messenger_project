@@ -3,6 +3,7 @@ import 'package:flutter/painting.dart' show Color;
 import 'app_user.dart';
 import 'task_extras.dart';
 import 'text_format.dart';
+import '../l10n/tr.dart';
 
 /// 업무 상태 — server/src/projects.js의 TASK_STATUSES와 1:1로 대응한다(칸반보드의 열이 될 값).
 enum TaskStatus { todo, doing, done }
@@ -20,9 +21,9 @@ String taskStatusToWire(TaskStatus s) => switch (s) {
 };
 
 String taskStatusLabel(TaskStatus s) => switch (s) {
-  TaskStatus.todo => '할 일',
-  TaskStatus.doing => '진행 중',
-  TaskStatus.done => '완료',
+  TaskStatus.todo => tr('할 일'),
+  TaskStatus.doing => tr('진행 중'),
+  TaskStatus.done => tr('완료'),
 };
 
 enum TaskPriority { low, normal, high }
@@ -40,9 +41,9 @@ String taskPriorityToWire(TaskPriority p) => switch (p) {
 };
 
 String taskPriorityLabel(TaskPriority p) => switch (p) {
-  TaskPriority.low => '낮음',
-  TaskPriority.normal => '보통',
-  TaskPriority.high => '높음',
+  TaskPriority.low => tr('낮음'),
+  TaskPriority.normal => tr('보통'),
+  TaskPriority.high => tr('높음'),
 };
 
 /// 업무 유형(Bug/Feature/행사 등) — 프로젝트마다 이름과 색을 직접 관리한다(server task_types).
@@ -1061,41 +1062,41 @@ class AutomationAction {
 // 노드를 놓고 포트끼리 잇는다. 서버가 그래프를 따라 실행한다(설명: 서버 projectAutomation.js).
 
 /// 트리거 종류(언제 실행할지).
-const automationTriggerLabels = {
-  'field_changed': '필드 변경',
-  'task_created': '업무 생성',
-  'task_deleted': '업무 삭제',
-  'task_archived': '업무 보관',
-  'comment_added': '댓글 추가',
-  'checklist_completed': '체크리스트 완료',
+final automationTriggerLabels = {
+  'field_changed': tr('필드 변경'),
+  'task_created': tr('업무 생성'),
+  'task_deleted': tr('업무 삭제'),
+  'task_archived': tr('업무 보관'),
+  'comment_added': tr('댓글 추가'),
+  'checklist_completed': tr('체크리스트 완료'),
 };
 
 /// 액션 종류(무엇을 할지).
-const automationActionLabels = {
-  'set_field': '필드 변경',
-  'create_task': '업무 생성',
-  'archive_task': '업무 보관',
-  'chat_message': '채팅방 알림',
+final automationActionLabels = {
+  'set_field': tr('필드 변경'),
+  'create_task': tr('업무 생성'),
+  'archive_task': tr('업무 보관'),
+  'chat_message': tr('채팅방 알림'),
 };
 
 /// 트리거·조건·액션이 가리키는 업무 필드. 사용자 정의 필드는 `field:<id>`로 쓴다.
-const automationFieldLabels = {
-  'any': '모든 필드',
-  'status': '상태',
-  'priority': '우선순위',
-  'assignee': '담당자',
-  'type': '유형',
-  'startDate': '시작일',
-  'dueDate': '마감일',
-  'title': '제목',
+final automationFieldLabels = {
+  'any': tr('모든 필드'),
+  'status': tr('상태'),
+  'priority': tr('우선순위'),
+  'assignee': tr('담당자'),
+  'type': tr('유형'),
+  'startDate': tr('시작일'),
+  'dueDate': tr('마감일'),
+  'title': tr('제목'),
 };
 
 /// IF 조건의 비교 방법.
-const automationOpLabels = {
-  'eq': '같음',
-  'neq': '같지 않음',
-  'empty': '비어 있음',
-  'not_empty': '비어 있지 않음',
+final automationOpLabels = {
+  'eq': tr('같음'),
+  'neq': tr('같지 않음'),
+  'empty': tr('비어 있음'),
+  'not_empty': tr('비어 있지 않음'),
 };
 
 /// 필드 변경 트리거가 감지할 필드들. 지금은 `{fields: [...]}`로 저장하지만, 예전에 저장한 규칙은
@@ -1311,7 +1312,7 @@ class NoteComment {
     id: json['id'] as String,
     noteId: json['noteId'] as String,
     senderId: json['senderId'] as String?,
-    senderName: json['senderName'] as String? ?? '알 수 없음',
+    senderName: json['senderName'] as String? ?? tr('알 수 없음'),
     text: json['text'] as String,
     textFormat: parseTextFormat(json['textFormat']),
     parentCommentId: json['parentCommentId'] as String?,
@@ -1393,13 +1394,13 @@ class AutomationRunLog {
 // ── 프로젝트 템플릿 ─────────────────────────────────────────────────────
 
 /// 사용자 정의 필드 종류의 화면 이름.
-const fieldKindLabels = {
-  'text': '텍스트',
-  'number': '숫자',
-  'date': '날짜',
-  'select': '단일 선택',
-  'multiSelect': '다중 선택',
-  'progress': '진행률',
+final fieldKindLabels = {
+  'text': tr('텍스트'),
+  'number': tr('숫자'),
+  'date': tr('날짜'),
+  'select': tr('단일 선택'),
+  'multiSelect': tr('다중 선택'),
+  'progress': tr('진행률'),
 };
 
 /// 템플릿의 상태 한 개 — [category]가 done이면 "완료"로 집계된다.
@@ -1527,31 +1528,51 @@ class ProjectTemplate {
   });
 
   /// "새 템플릿 만들기"의 처음 모습 — 새 프로젝트의 기본 구성과 같게.
-  factory ProjectTemplate.blank() => const ProjectTemplate(
+  factory ProjectTemplate.blank() => ProjectTemplate(
     name: '',
     statuses: [
-      TemplateStatus(name: '할 일', color: '#5B8DEF', category: TaskStatus.todo),
       TemplateStatus(
-        name: '진행 중',
+        name: tr('할 일'),
+        color: '#5B8DEF',
+        category: TaskStatus.todo,
+      ),
+      TemplateStatus(
+        name: tr('진행 중'),
         color: '#F59E0B',
         category: TaskStatus.doing,
       ),
-      TemplateStatus(name: '완료', color: '#10B981', category: TaskStatus.done),
+      TemplateStatus(
+        name: tr('완료'),
+        color: '#10B981',
+        category: TaskStatus.done,
+      ),
     ],
     types: [
-      TemplateType(name: '기능', color: '#5B8DEF'),
-      TemplateType(name: '버그', color: '#EF4444'),
-      TemplateType(name: '개선', color: '#10B981'),
+      TemplateType(name: tr('기능'), color: '#5B8DEF'),
+      TemplateType(name: tr('버그'), color: '#EF4444'),
+      TemplateType(name: tr('개선'), color: '#10B981'),
     ],
     priorities: [
-      TemplatePriority(name: '긴급', color: '#EF4444', level: TaskPriority.high),
-      TemplatePriority(name: '높음', color: '#F59E0B', level: TaskPriority.high),
       TemplatePriority(
-        name: '보통',
+        name: tr('긴급'),
+        color: '#EF4444',
+        level: TaskPriority.high,
+      ),
+      TemplatePriority(
+        name: tr('높음'),
+        color: '#F59E0B',
+        level: TaskPriority.high,
+      ),
+      TemplatePriority(
+        name: tr('보통'),
         color: '#5B8DEF',
         level: TaskPriority.normal,
       ),
-      TemplatePriority(name: '낮음', color: '#10B981', level: TaskPriority.low),
+      TemplatePriority(
+        name: tr('낮음'),
+        color: '#10B981',
+        level: TaskPriority.low,
+      ),
     ],
   );
 

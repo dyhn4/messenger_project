@@ -6,6 +6,7 @@ import '../services/session.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/avatar_utils.dart';
 import '../widgets/integration_widgets.dart';
+import '../l10n/tr.dart';
 
 /// "서버 관리 > 슬래시 명령" — 팀마다 `/명령`을 등록한다(server/src/integrations.js). 대화방(토픽·그룹)에서 `/명령 내용`을 치면 서버가
 /// 등록한 주소로 서명한 요청(X-TangoTalk-Signature)을 보내고, 받은 답을 봇 메시지로 올리거나(in_channel) 부른 사람에게만 보여 준다.
@@ -42,7 +43,9 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
       });
       await _loadCommands();
     } catch (e) {
-      if (mounted) setState(() => _error = '팀 목록을 불러오지 못했습니다: $e');
+      if (mounted) {
+        setState(() => _error = tr('팀 목록을 불러오지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 
@@ -54,7 +57,9 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
       final list = await widget.session.teamCommands(teamId, refresh: true);
       if (mounted && teamId == _teamId) setState(() => _commands = list);
     } catch (e) {
-      if (mounted) setState(() => _error = '명령 목록을 불러오지 못했습니다: $e');
+      if (mounted) {
+        setState(() => _error = tr('명령 목록을 불러오지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 
@@ -72,8 +77,8 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
   Future<void> _revealSecret(String secret, {required bool created}) =>
       showSecretRevealDialog(
         context,
-        title: created ? '슬래시 명령을 만들었습니다' : '새 서명 비밀',
-        intro: '명령을 받는 서버에 이 서명 비밀을 넣으세요. 요청이 이 서버에서 온 것인지 확인하는 데 씁니다.',
+        title: created ? tr('슬래시 명령을 만들었습니다') : tr('새 서명 비밀'),
+        intro: tr('명령을 받는 서버에 이 서명 비밀을 넣으세요. 요청이 이 서버에서 온 것인지 확인하는 데 씁니다.'),
         secret: secret,
         children: const [CommandSignatureHelp()],
       );
@@ -97,7 +102,7 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
       );
       await _loadCommands();
       if (mounted) await _revealSecret(secret, created: true);
-    }, '명령을 만들지 못했습니다');
+    }, tr('명령을 만들지 못했습니다'));
   }
 
   Future<void> _edit(Integration c) async {
@@ -114,34 +119,39 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
         'description': input.description,
       });
       await _loadCommands();
-    }, '바꾸지 못했습니다');
+    }, tr('바꾸지 못했습니다'));
   }
 
   Future<void> _regenerate(Integration c) async {
     final ok = await confirmIntegrationDelete(
       context,
-      title: '서명 비밀 새로 만들기',
-      body: '/${c.command}의 지금 서명 비밀은 바로 못 쓰게 됩니다. 명령을 받는 서버에도 새 비밀을 넣어야 합니다.',
+      title: tr('서명 비밀 새로 만들기'),
+      body: tr(
+        '/{c.command}의 지금 서명 비밀은 바로 못 쓰게 됩니다. 명령을 받는 서버에도 새 비밀을 넣어야 합니다.',
+        {'c.command': c.command},
+      ),
     );
     if (!ok || !mounted) return;
     await _run(() async {
       final secret =
           await widget.session.api!.regenerateIntegration(c) as String;
       if (mounted) await _revealSecret(secret, created: false);
-    }, '새 서명 비밀을 만들지 못했습니다');
+    }, tr('새 서명 비밀을 만들지 못했습니다'));
   }
 
   Future<void> _delete(Integration c) async {
     final ok = await confirmIntegrationDelete(
       context,
-      title: '슬래시 명령 지우기',
-      body: '/${c.command} 명령을 지울까요? 이미 올라온 메시지는 그대로 남습니다.',
+      title: tr('슬래시 명령 지우기'),
+      body: tr('/{c.command} 명령을 지울까요? 이미 올라온 메시지는 그대로 남습니다.', {
+        'c.command': c.command,
+      }),
     );
     if (!ok || !mounted) return;
     await _run(() async {
       await widget.session.api!.deleteIntegration(c.id);
       await _loadCommands();
-    }, '지우지 못했습니다');
+    }, tr('지우지 못했습니다'));
   }
 
   @override
@@ -154,7 +164,7 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(_error!),
-            TextButton(onPressed: _loadTeams, child: const Text('다시 시도')),
+            TextButton(onPressed: _loadTeams, child: Text(tr('다시 시도'))),
           ],
         ),
       );
@@ -162,7 +172,7 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
     if (teams == null) return const Center(child: CircularProgressIndicator());
     if (teams.isEmpty) {
       return Center(
-        child: Text('팀이 없습니다.', style: TextStyle(color: hint)),
+        child: Text(tr('팀이 없습니다.'), style: TextStyle(color: hint)),
       );
     }
     final commands = _commands;
@@ -170,8 +180,9 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
       padding: const EdgeInsets.all(16),
       children: [
         Text(
-          '대화방(토픽·그룹)에서 /명령 내용을 치면 등록한 주소로 서명한 요청을 보내고, 받은 답을 봇 메시지로 올리거나 부른 사람에게만 '
-          '보여 줍니다. 배포 시작, 당번 확인, 사내 시스템 조회 같은 일을 대화방에서 바로 부를 수 있습니다.',
+          tr(
+            '대화방(토픽·그룹)에서 /명령 내용을 치면 등록한 주소로 서명한 요청을 보내고, 받은 답을 봇 메시지로 올리거나 부른 사람에게만 보여 줍니다. 배포 시작, 당번 확인, 사내 시스템 조회 같은 일을 대화방에서 바로 부를 수 있습니다.',
+          ),
           style: TextStyle(fontSize: 12, color: hint),
         ),
         const SizedBox(height: 12),
@@ -181,10 +192,7 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
               child: DropdownButtonFormField<String>(
                 key: const ValueKey('admin-commands-team'),
                 initialValue: _teamId,
-                decoration: const InputDecoration(
-                  labelText: '팀',
-                  isDense: true,
-                ),
+                decoration: InputDecoration(labelText: tr('팀'), isDense: true),
                 items: [
                   for (final t in teams)
                     DropdownMenuItem(value: t.id, child: Text(t.name)),
@@ -200,7 +208,7 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
               key: const ValueKey('admin-command-create'),
               onPressed: _busy || commands == null ? null : _create,
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('명령 만들기'),
+              label: Text(tr('명령 만들기')),
             ),
           ],
         ),
@@ -214,7 +222,10 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
           Padding(
             padding: const EdgeInsets.all(24),
             child: Center(
-              child: Text('이 팀에는 슬래시 명령이 없습니다.', style: TextStyle(color: hint)),
+              child: Text(
+                tr('이 팀에는 슬래시 명령이 없습니다.'),
+                style: TextStyle(color: hint),
+              ),
             ),
           )
         else
@@ -245,16 +256,16 @@ class _AdminCommandsTabState extends State<AdminCommandsTab> {
                     'regenerate' => _regenerate(c),
                     _ => _delete(c),
                   },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'edit', child: Text('바꾸기')),
+                  itemBuilder: (_) => [
+                    PopupMenuItem(value: 'edit', child: Text(tr('바꾸기'))),
                     PopupMenuItem(
                       value: 'regenerate',
-                      child: Text('서명 비밀 새로 만들기'),
+                      child: Text(tr('서명 비밀 새로 만들기')),
                     ),
                     PopupMenuItem(
                       value: 'delete',
                       child: Text(
-                        '지우기',
+                        tr('지우기'),
                         style: TextStyle(color: Colors.redAccent),
                       ),
                     ),
@@ -278,17 +289,12 @@ class CommandSignatureHelp extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 14),
-        const Text(
-          '받는 서버에서 할 일',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
+        Text(tr('받는 서버에서 할 일'), style: TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 4),
         Text(
-          '요청은 POST JSON {command, text, teamId, roomId, roomName, userId, username, userName, timestamp}입니다.\n'
-          '· 확인: X-TangoTalk-Signature가 "v1=" + HMAC-SHA256(서명 비밀, "<X-TangoTalk-Timestamp>.<본문>")의 16진수와 같은지, '
-          '시각이 5분 안인지 보세요.\n'
-          '· 답: 5초 안에 JSON {"text": "…"} — 기본은 부른 사람에게만 보이고, "response_type": "in_channel"이면 방에 올라갑니다. '
-          '그냥 글로 답해도 되고, 할 말이 없으면 빈 답(204).',
+          tr(
+            '요청은 POST JSON {command, text, teamId, roomId, roomName, userId, username, userName, timestamp}입니다.\n· 확인: X-TangoTalk-Signature가 "v1=" + HMAC-SHA256(서명 비밀, "<X-TangoTalk-Timestamp>.<본문>")의 16진수와 같은지, 시각이 5분 안인지 보세요.\n· 답: 5초 안에 JSON {"text": "…"} — 기본은 부른 사람에게만 보이고, "response_type": "in_channel"이면 방에 올라갑니다. 그냥 글로 답해도 되고, 할 말이 없으면 빈 답(204).',
+          ),
           style: small,
         ),
       ],
@@ -339,12 +345,14 @@ class _CommandEditDialogState extends State<_CommandEditDialog> {
         .replaceFirst(RegExp(r'^/'), '')
         .toLowerCase();
     if (!RegExp(r'^[a-z0-9][a-z0-9_-]{0,31}$').hasMatch(command)) {
-      setState(() => _error = '명령 이름은 영문 소문자·숫자·_·-로 32자까지 넣으세요(예: deploy).');
+      setState(
+        () => _error = tr('명령 이름은 영문 소문자·숫자·_·-로 32자까지 넣으세요(예: deploy).'),
+      );
       return;
     }
     final url = _url.text.trim();
     if (!url.startsWith('https://') && !url.startsWith('http://')) {
-      setState(() => _error = '주소는 http:// 또는 https://로 시작해야 합니다.');
+      setState(() => _error = tr('주소는 http:// 또는 https://로 시작해야 합니다.'));
       return;
     }
     final name = _name.text.trim();
@@ -363,7 +371,11 @@ class _CommandEditDialogState extends State<_CommandEditDialog> {
   Widget build(BuildContext context) {
     final editing = widget.initial != null;
     return AlertDialog(
-      title: Text(editing ? '/${widget.initial!.command} 바꾸기' : '슬래시 명령 만들기'),
+      title: Text(
+        editing
+            ? tr('/{p0} 바꾸기', {'p0': widget.initial!.command})
+            : tr('슬래시 명령 만들기'),
+      ),
       content: SizedBox(
         width: 420,
         child: SingleChildScrollView(
@@ -375,8 +387,8 @@ class _CommandEditDialogState extends State<_CommandEditDialog> {
                   key: const ValueKey('command-name'),
                   controller: _command,
                   autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: '명령',
+                  decoration: InputDecoration(
+                    labelText: tr('명령'),
                     prefixText: '/',
                     hintText: 'deploy',
                   ),
@@ -384,8 +396,8 @@ class _CommandEditDialogState extends State<_CommandEditDialog> {
               TextField(
                 key: const ValueKey('command-url'),
                 controller: _url,
-                decoration: const InputDecoration(
-                  labelText: '요청을 보낼 주소',
+                decoration: InputDecoration(
+                  labelText: tr('요청을 보낼 주소'),
                   hintText: 'https://ci.company.com/hooks/chat',
                 ),
               ),
@@ -393,23 +405,23 @@ class _CommandEditDialogState extends State<_CommandEditDialog> {
                 key: const ValueKey('command-bot-name'),
                 controller: _name,
                 maxLength: 40,
-                decoration: const InputDecoration(labelText: '봇 이름(비우면 명령 이름)'),
+                decoration: InputDecoration(labelText: tr('봇 이름(비우면 명령 이름)')),
               ),
               TextField(
                 key: const ValueKey('command-emoji'),
                 controller: _emoji,
-                decoration: const InputDecoration(
-                  labelText: '아이콘(이모지 하나)',
-                  hintText: '비우면 🤖',
+                decoration: InputDecoration(
+                  labelText: tr('아이콘(이모지 하나)'),
+                  hintText: tr('비우면 🤖'),
                 ),
               ),
               TextField(
                 key: const ValueKey('command-description'),
                 controller: _description,
                 maxLength: 100,
-                decoration: const InputDecoration(
-                  labelText: '설명(입력칸 자동 완성에 보임)',
-                  hintText: '예: 서버에 배포합니다',
+                decoration: InputDecoration(
+                  labelText: tr('설명(입력칸 자동 완성에 보임)'),
+                  hintText: tr('예: 서버에 배포합니다'),
                 ),
               ),
               if (_error != null)
@@ -430,12 +442,12 @@ class _CommandEditDialogState extends State<_CommandEditDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('command-confirm'),
           onPressed: _submit,
-          child: Text(editing ? '저장' : '만들기'),
+          child: Text(editing ? tr('저장') : tr('만들기')),
         ),
       ],
     );

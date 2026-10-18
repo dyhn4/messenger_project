@@ -3,6 +3,8 @@
 // 정한 시각이 되면 서버가 "나와의 대화"에 탱고톡 봇 메시지로 원본 메시지 카드([ReminderCard])를 올린다. 앱은 카드의
 // "메시지로 이동"으로 원본을 연다.
 
+import '../l10n/tr.dart';
+
 /// 리마인더가 울릴 때 올라오는 카드 — 원본 메시지의 스냅샷.
 class ReminderCard {
   final String messageId;
@@ -108,12 +110,12 @@ class MessageReminder {
 
 /// "나중에 알림"의 빠른 선택지 — [now] 기준 시각. "내일 오전 9시", "다음 주 월요일 오전 9시"는 이 기기 시각 기준.
 List<({String label, DateTime at})> reminderPresets(DateTime now) => [
-  (label: '20분 뒤', at: now.add(const Duration(minutes: 20))),
-  (label: '1시간 뒤', at: now.add(const Duration(hours: 1))),
-  (label: '3시간 뒤', at: now.add(const Duration(hours: 3))),
-  (label: '내일 오전 9시', at: DateTime(now.year, now.month, now.day + 1, 9)),
+  (label: tr('20분 뒤'), at: now.add(const Duration(minutes: 20))),
+  (label: tr('1시간 뒤'), at: now.add(const Duration(hours: 1))),
+  (label: tr('3시간 뒤'), at: now.add(const Duration(hours: 3))),
+  (label: tr('내일 오전 9시'), at: DateTime(now.year, now.month, now.day + 1, 9)),
   (
-    label: '다음 주 월요일 오전 9시',
+    label: tr('다음 주 월요일 오전 9시'),
     at: DateTime(now.year, now.month, now.day + 8 - now.weekday, 9),
   ),
 ];

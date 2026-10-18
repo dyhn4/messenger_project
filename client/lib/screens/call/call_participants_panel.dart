@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'call_logic.dart';
 import 'call_stage.dart';
+import '../../l10n/tr.dart';
 
 /// 오른쪽 패널(좁은 화면에서는 시트)의 머리줄 — 제목과 닫기 단추.
 class CallPanelHeader extends StatelessWidget {
@@ -32,7 +33,7 @@ class CallPanelHeader extends StatelessWidget {
             ),
           ),
           IconButton(
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             icon: const Icon(Icons.close, size: 20),
             onPressed: onClose,
           ),
@@ -69,10 +70,15 @@ class CallParticipantsPanel extends StatelessWidget {
       color: Theme.of(context).colorScheme.surface,
       child: Column(
         children: [
-          CallPanelHeader(title: '참가자 (${people.length})', onClose: onClose),
+          CallPanelHeader(
+            title: tr('참가자 ({people.length})', {
+              'people.length': people.length,
+            }),
+            onClose: onClose,
+          ),
           Expanded(
             child: sorted.isEmpty
-                ? const Center(child: Text('참가자가 없습니다.'))
+                ? Center(child: Text(tr('참가자가 없습니다.')))
                 : ListView.builder(
                     itemCount: sorted.length,
                     itemBuilder: (context, i) {
@@ -129,7 +135,9 @@ class CallParticipantRow extends StatelessWidget {
         children: [
           Flexible(
             child: Text(
-              person.isMe ? '${person.name} (나)' : person.name,
+              person.isMe
+                  ? tr('{person.name} (나)', {'person.name': person.name})
+                  : person.name,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -145,7 +153,7 @@ class CallParticipantRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                '진행자',
+                tr('진행자'),
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
@@ -205,10 +213,10 @@ class CallParticipantRow extends StatelessWidget {
     if (toggle == null) return icon;
     // 다른 사람의 마이크는 끄기만 바로 되고, 켜기는 그 사람에게 요청한다(본인이 수락해야 켜진다).
     final tooltip = person.isMe
-        ? (person.micOn ? '내 마이크 끄기' : '내 마이크 켜기')
+        ? (person.micOn ? tr('내 마이크 끄기') : tr('내 마이크 켜기'))
         : (person.micOn
-              ? '${person.name}님의 마이크 끄기'
-              : '${person.name}님에게 마이크 켜기 요청');
+              ? tr('{person.name}님의 마이크 끄기', {'person.name': person.name})
+              : tr('{person.name}님에게 마이크 켜기 요청', {'person.name': person.name}));
     return IconButton(
       key: ValueKey('participant-mic-${person.id}'),
       tooltip: tooltip,

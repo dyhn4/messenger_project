@@ -43,6 +43,7 @@ import '../models/web_certificate_status.dart';
 import 'chat_socket.dart' show SecretAcceptedEvent, SecretInviteEvent;
 import 'device_kind.dart';
 import 'invite_share.dart' show rememberWebAppUrl;
+import '../l10n/tr.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -51,7 +52,7 @@ class ApiException implements Exception {
   final int? statusCode;
   const ApiException(this.message, {this.statusCode});
   @override
-  String toString() => message;
+  String toString() => trServer(message);
 }
 
 /// 메일로 확인 코드를 보냈다는 서버 답 — [email]은 일부만 보이는 받는 주소(모르면 null), 코드는 [expiresIn] 동안 쓸 수 있고
@@ -174,7 +175,7 @@ class SecretChatRefusedException extends ApiException {
 
 class UploadCancelledException implements Exception {
   @override
-  String toString() => '업로드가 취소되었습니다.';
+  String toString() => tr('업로드가 취소되었습니다.');
 }
 
 /// GET /api/users/me의 `teamPositions` 항목 — 부서·직책 관리 범위가 '팀 단위'일 때, 내가
@@ -565,7 +566,7 @@ class ApiClient {
       future.timeout(
         _requestTimeout,
         onTimeout: () =>
-            throw const ApiException('요청이 시간 초과되었습니다. 네트워크 연결을 확인하고 다시 시도하세요.'),
+            throw ApiException(tr('요청이 시간 초과되었습니다. 네트워크 연결을 확인하고 다시 시도하세요.')),
       );
 
   Future<http.Response> _send(Future<http.Response> Function() request) async {
@@ -611,7 +612,11 @@ class ApiClient {
           .get(_uri('/server-info'), headers: _authHeaders)
           .timeout(const Duration(seconds: 5));
       if (res.statusCode != 200) {
-        throw ApiException('서버 정보를 가져오지 못했습니다(${res.statusCode}).');
+        throw ApiException(
+          tr('서버 정보를 가져오지 못했습니다({res.statusCode}).', {
+            'res.statusCode': res.statusCode,
+          }),
+        );
       }
       final body =
           jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
@@ -744,7 +749,7 @@ class ApiClient {
     );
     final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     if (res.statusCode >= 400) {
-      throw ApiException((body['error'] as String?) ?? '요청이 실패했습니다.');
+      throw ApiException((body['error'] as String?) ?? tr('요청이 실패했습니다.'));
     }
     return (body['available'] as bool) ? null : body['error'] as String?;
   }
@@ -808,7 +813,7 @@ class ApiClient {
         : const <String, dynamic>{};
     if (res.statusCode >= 400) {
       throw ApiException(
-        (body['error'] as String?) ?? '요청이 실패했습니다.',
+        (body['error'] as String?) ?? tr('요청이 실패했습니다.'),
         statusCode: res.statusCode,
       );
     }
@@ -845,7 +850,7 @@ class ApiClient {
     if (challenge != null) throw challenge;
     if (res.statusCode >= 400) {
       throw ApiException(
-        (body['error'] as String?) ?? '요청이 실패했습니다.',
+        (body['error'] as String?) ?? tr('요청이 실패했습니다.'),
         statusCode: res.statusCode,
       );
     }
@@ -1214,7 +1219,7 @@ class ApiClient {
     );
     final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     if (res.statusCode >= 400) {
-      throw ApiException((body['error'] as String?) ?? '세션이 만료되었습니다.');
+      throw ApiException((body['error'] as String?) ?? tr('세션이 만료되었습니다.'));
     }
     return body['accessToken'] as String;
   }
@@ -1278,7 +1283,7 @@ class ApiClient {
     );
     final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     if (res.statusCode >= 400) {
-      throw ApiException((body['error'] as String?) ?? '요청이 실패했습니다.');
+      throw ApiException((body['error'] as String?) ?? tr('요청이 실패했습니다.'));
     }
     return body['question'] as String?;
   }
@@ -1302,7 +1307,7 @@ class ApiClient {
     if (res.statusCode >= 400) {
       final body =
           jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-      throw ApiException((body['error'] as String?) ?? '요청이 실패했습니다.');
+      throw ApiException((body['error'] as String?) ?? tr('요청이 실패했습니다.'));
     }
   }
 
@@ -1328,7 +1333,7 @@ class ApiClient {
     if (res.statusCode >= 400) {
       final body =
           jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-      throw ApiException((body['error'] as String?) ?? '요청이 실패했습니다.');
+      throw ApiException((body['error'] as String?) ?? tr('요청이 실패했습니다.'));
     }
   }
 
@@ -1339,7 +1344,7 @@ class ApiClient {
     final body = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       throw ApiException(
-        (body is Map ? body['error'] as String? : null) ?? '요청이 실패했습니다.',
+        (body is Map ? body['error'] as String? : null) ?? tr('요청이 실패했습니다.'),
       );
     }
     return body;
@@ -1356,7 +1361,8 @@ class ApiClient {
     final decoded = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       throw ApiException(
-        (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+        (decoded is Map ? decoded['error'] as String? : null) ??
+            tr('요청이 실패했습니다.'),
         statusCode: res.statusCode,
       );
     }
@@ -1374,7 +1380,8 @@ class ApiClient {
     final decoded = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       throw ApiException(
-        (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+        (decoded is Map ? decoded['error'] as String? : null) ??
+            tr('요청이 실패했습니다.'),
         statusCode: res.statusCode,
       );
     }
@@ -1392,7 +1399,8 @@ class ApiClient {
     final decoded = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       throw ApiException(
-        (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+        (decoded is Map ? decoded['error'] as String? : null) ??
+            tr('요청이 실패했습니다.'),
         statusCode: res.statusCode,
       );
     }
@@ -1413,7 +1421,8 @@ class ApiClient {
     final decoded = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       throw ApiException(
-        (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+        (decoded is Map ? decoded['error'] as String? : null) ??
+            tr('요청이 실패했습니다.'),
         statusCode: res.statusCode,
       );
     }
@@ -1440,7 +1449,7 @@ class ApiClient {
       case 'DELETE':
         return _delete(path, body: body);
     }
-    throw ArgumentError('지원하지 않는 HTTP 메서드: $method');
+    throw ArgumentError(tr('지원하지 않는 HTTP 메서드: {method}', {'method': method}));
   }
 
   /// 회원 목록 — 계정 등급 관리자·서버 운영자는 서버 전체(조직도), 그 밖에는 팀을 같이 쓰는 사람과 자기
@@ -1653,7 +1662,9 @@ class ApiClient {
       ),
     );
     if (res.statusCode == 404) return null;
-    final fallback = '웹 인증서 상태를 가져오지 못했습니다(${res.statusCode}).';
+    final fallback = tr('웹 인증서 상태를 가져오지 못했습니다({res.statusCode}).', {
+      'res.statusCode': res.statusCode,
+    });
     final Object? body;
     try {
       body = jsonDecode(utf8.decode(res.bodyBytes));
@@ -1704,7 +1715,7 @@ class ApiClient {
       () => _client.get(_uri('/api/admin/backup'), headers: _authHeaders),
     );
     if (res.statusCode == 404) return null;
-    return BackupSettings.fromJson(_decodeDdns(res, what: '백업 설정'));
+    return BackupSettings.fromJson(_decodeDdns(res, what: tr('백업 설정')));
   }
 
   /// 백업 설정 변경 — 넘긴 항목만 바뀐다. [destination]에 빈 문자열을 넘기면 외부 위치를 지운다. 백업 암호([password])나
@@ -1737,7 +1748,10 @@ class ApiClient {
     http.Response res, {
     String what = 'DDNS 설정',
   }) {
-    final fallback = '$what을 가져오지 못했습니다(${res.statusCode}).';
+    final fallback = tr('{what}을 가져오지 못했습니다({res.statusCode}).', {
+      'what': tr(what),
+      'res.statusCode': res.statusCode,
+    });
     final Object? body;
     try {
       body = jsonDecode(utf8.decode(res.bodyBytes));
@@ -1758,7 +1772,7 @@ class ApiClient {
       () => _client.get(_uri('/api/admin/mail'), headers: _authHeaders),
     );
     if (res.statusCode == 404) return null;
-    return MailSettings.fromJson(_decodeDdns(res, what: '메일 설정'));
+    return MailSettings.fromJson(_decodeDdns(res, what: tr('메일 설정')));
   }
 
   /// 메일 설정 변경 — 넘긴 항목만 바뀐다. [password]에 빈 문자열을 넘기면 지우고, null이면 그대로 둔다. [port]를 지우려면
@@ -4038,7 +4052,7 @@ class ApiClient {
     final userId = body is Map ? body['userId'] : null;
     final key = body is Map ? body['signingPublicKey'] : null;
     if (userId is! String || key is! String) {
-      throw const ApiException('상대 기기 정보를 확인할 수 없습니다.');
+      throw ApiException(tr('상대 기기 정보를 확인할 수 없습니다.'));
     }
     return (userId: userId, signingPublicKey: key);
   }
@@ -4070,7 +4084,8 @@ class ApiClient {
     final decoded = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       throw ApiException(
-        (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+        (decoded is Map ? decoded['error'] as String? : null) ??
+            tr('요청이 실패했습니다.'),
         statusCode: res.statusCode,
       );
     }
@@ -4162,7 +4177,7 @@ class ApiClient {
     final decoded = _decodeSecretChatBody(res);
     if (res.statusCode >= 400) throw ApiException(_secretChatError(decoded));
     if (decoded is! Map<String, dynamic>) {
-      throw const ApiException('요청이 실패했습니다.');
+      throw ApiException(tr('요청이 실패했습니다.'));
     }
     return (room: Room.fromJson(decoded), created: res.statusCode == 201);
   }
@@ -4203,7 +4218,7 @@ class ApiClient {
   }
 
   static String _secretChatError(Object? body) =>
-      (body is Map ? body['error'] as String? : null) ?? '요청이 실패했습니다.';
+      (body is Map ? body['error'] as String? : null) ?? tr('요청이 실패했습니다.');
 
   Future<void> rejectSecretChat(String roomId) async {
     await _post('/api/secret-chats/$roomId/reject', const {});
@@ -4823,7 +4838,7 @@ class ApiClient {
       return http.Response.fromStream(await _client.send(req));
     });
     if (res.statusCode >= 400) {
-      String message = '이모티콘을 올리지 못했습니다.';
+      String message = tr('이모티콘을 올리지 못했습니다.');
       try {
         message =
             (jsonDecode(utf8.decode(res.bodyBytes)) as Map)['error']
@@ -4934,7 +4949,7 @@ class ApiClient {
     });
     final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     if (res.statusCode >= 400) {
-      throw ApiException((body['error'] as String?) ?? '업로드에 실패했습니다.');
+      throw ApiException((body['error'] as String?) ?? tr('업로드에 실패했습니다.'));
     }
     return UploadResult(
       url: body['url'] as String,

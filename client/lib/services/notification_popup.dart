@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'main_window_methods.dart';
 import 'notification_popup_style.dart';
+import '../l10n/tr.dart';
 
 /// PC(Windows) 새 메시지·프로젝트 알림 창 — Windows 기본 알림(토스트)은 OS가 그려서 높이가 100px쯤 되고 줄일 방법이
 /// 없어서(앱이 줄 수 있는 건 제목·본문·그림뿐), 앱이 직접 그린 낮은 카드(기본 270×50)를 화면 오른쪽 아래에 띄운다.
@@ -554,7 +555,7 @@ class _PopupCardState extends State<_PopupCard> {
                             padding: EdgeInsets.zero,
                             iconSize: 16,
                             visualDensity: VisualDensity.compact,
-                            tooltip: '닫기',
+                            tooltip: tr('닫기'),
                             icon: Icon(
                               Icons.close,
                               color: theme.colorScheme.onSurfaceVariant,

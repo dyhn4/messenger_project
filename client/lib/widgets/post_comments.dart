@@ -8,6 +8,7 @@ import '../services/time_format.dart';
 import 'app_toast.dart';
 import 'avatar_utils.dart';
 import 'compact_menu.dart';
+import '../l10n/tr.dart';
 
 /// 공지·할 일 상세가 같이 쓰는 단순 댓글(의견만 남기는 댓글 — 고치고 지울 수는 있다) 조각 — `댓글 N` 제목, 댓글 한 줄
 /// (⋯ 수정하기 · 삭제하기), 맨 아래 고정된 입력칸. 메시지 댓글(comment_input_bar.dart)과 달리 첨부·멘션이 없다.
@@ -49,8 +50,8 @@ class PostCommentCount extends StatelessWidget {
       key: textKey,
       TextSpan(
         children: [
-          const TextSpan(
-            text: '댓글 ',
+          TextSpan(
+            text: tr('댓글 '),
             style: TextStyle(fontWeight: FontWeight.w700),
           ),
           TextSpan(
@@ -96,7 +97,7 @@ class PostCommentList<T> extends StatelessWidget {
       return Padding(
         padding: emptyPadding,
         child: Text(
-          '아직 댓글이 없습니다.',
+          tr('아직 댓글이 없습니다.'),
           style: TextStyle(fontSize: 13, color: Theme.of(context).hintColor),
         ),
       );
@@ -205,7 +206,7 @@ class _PostCommentTileState extends State<PostCommentTile> {
     if (controller == null || onEdit == null || _busy) return;
     final text = controller.text.trim();
     if (text.isEmpty) {
-      showAppToast(context, '댓글 내용을 입력하세요.');
+      showAppToast(context, tr('댓글 내용을 입력하세요.'));
       return;
     }
     if (text == widget.text) return _cancelEdit();
@@ -214,7 +215,7 @@ class _PostCommentTileState extends State<PostCommentTile> {
       await onEdit(text);
       if (mounted) _cancelEdit();
     } catch (e) {
-      if (mounted) showAppToast(context, '댓글을 수정하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('댓글을 수정하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -227,17 +228,17 @@ class _PostCommentTileState extends State<PostCommentTile> {
       context: context,
       routeSettings: widget.menuRouteSettings,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('댓글 삭제'),
-        content: const Text('이 댓글을 삭제할까요? 되돌릴 수 없습니다.'),
+        title: Text(tr('댓글 삭제')),
+        content: Text(tr('이 댓글을 삭제할까요? 되돌릴 수 없습니다.')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           TextButton(
             key: const ValueKey('post-comment-delete-confirm'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+            child: Text(tr('삭제'), style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -247,7 +248,7 @@ class _PostCommentTileState extends State<PostCommentTile> {
     try {
       await onDelete();
     } catch (e) {
-      if (mounted) showAppToast(context, '댓글을 삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('댓글을 삭제하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -293,7 +294,9 @@ class _PostCommentTileState extends State<PostCommentTile> {
                           ),
                         ),
                         Text(
-                          widget.editedAt != null ? '$time (수정됨)' : time,
+                          widget.editedAt != null
+                              ? tr('{time} (수정됨)', {'time': time})
+                              : time,
                           style: TextStyle(fontSize: 12, color: hint),
                         ),
                       ],
@@ -324,7 +327,7 @@ class _PostCommentTileState extends State<PostCommentTile> {
     if (!canEdit && !canDelete) return const SizedBox.shrink();
     return PopupMenuButton<_CommentAction>(
       key: ValueKey('post-comment-more-${widget.commentId}'),
-      tooltip: '더보기',
+      tooltip: tr('더보기'),
       enabled: !_busy,
       padding: EdgeInsets.zero,
       iconSize: 18,
@@ -354,7 +357,7 @@ class _PostCommentTileState extends State<PostCommentTile> {
           CompactMenu.item(
             context,
             icon: Icons.edit_outlined,
-            label: '수정하기',
+            label: tr('수정하기'),
             value: _CommentAction.edit,
           ),
         if (canEdit && canDelete) CompactMenu.divider,
@@ -362,7 +365,7 @@ class _PostCommentTileState extends State<PostCommentTile> {
           CompactMenu.item(
             context,
             icon: Icons.delete_outline,
-            label: '삭제하기',
+            label: tr('삭제하기'),
             color: Colors.redAccent,
             value: _CommentAction.delete,
           ),
@@ -413,7 +416,7 @@ class _PostCommentTileState extends State<PostCommentTile> {
               key: const ValueKey('post-comment-edit-cancel'),
               onPressed: _busy ? null : _cancelEdit,
               style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-              child: const Text('취소'),
+              child: Text(tr('취소')),
             ),
             const SizedBox(width: 4),
             FilledButton(
@@ -428,7 +431,7 @@ class _PostCommentTileState extends State<PostCommentTile> {
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('저장'),
+                  : Text(tr('저장')),
             ),
           ],
         ),
@@ -517,7 +520,7 @@ class PostCommentInput extends StatelessWidget {
             minLines: 1,
             maxLines: 4,
             decoration: InputDecoration(
-              hintText: '댓글을 입력하세요....',
+              hintText: tr('댓글을 입력하세요....'),
               hintStyle: TextStyle(color: theme.hintColor),
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(
@@ -535,7 +538,7 @@ class PostCommentInput extends StatelessWidget {
               prefixIcon: IconButton(
                 icon: const Icon(Icons.emoji_emotions_outlined, size: 20),
                 onPressed: () => _showEmojiPicker(context),
-                tooltip: '이모티콘',
+                tooltip: tr('이모티콘'),
               ),
               prefixIconConstraints: const BoxConstraints(minWidth: 44),
               suffixIcon: sending
@@ -554,7 +557,7 @@ class PostCommentInput extends StatelessWidget {
                         size: 20,
                         color: theme.colorScheme.primary,
                       ),
-                      tooltip: '댓글 등록',
+                      tooltip: tr('댓글 등록'),
                       onPressed: onSubmit,
                     ),
               suffixIconConstraints: const BoxConstraints(minWidth: 44),

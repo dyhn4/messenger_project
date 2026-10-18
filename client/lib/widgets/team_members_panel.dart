@@ -6,6 +6,7 @@ import 'muted_scrollbar.dart';
 import 'pagination.dart';
 import 'user_avatar.dart';
 import 'user_status_dialogs.dart';
+import '../l10n/tr.dart';
 
 /// 상단 "팀 멤버" 버튼으로 여는 우측 패널(side_panels.dart의 'members'). 검색 패널과 같은 틀(헤더+검색창+목록)을 쓰고,
 /// 각 멤버를 카드로 보여준다. 카드를 누르면 프로필 플로팅 다이얼로그가 뜬다.
@@ -91,7 +92,9 @@ class _TeamMembersPanelState extends State<TeamMembersPanel> {
               children: [
                 Expanded(
                   child: Text(
-                    _users == null ? '팀 멤버' : '팀 멤버 총 ${_users!.length}명',
+                    _users == null
+                        ? tr('팀 멤버')
+                        : tr('팀 멤버 총 {p0}명', {'p0': _users!.length}),
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
@@ -106,8 +109,8 @@ class _TeamMembersPanelState extends State<TeamMembersPanel> {
           Padding(
             padding: const EdgeInsets.all(16),
             child: TextField(
-              decoration: const InputDecoration(
-                hintText: '멤버 검색',
+              decoration: InputDecoration(
+                hintText: tr('멤버 검색'),
                 isDense: true,
                 prefixIcon: Icon(Icons.search, size: 18),
                 border: OutlineInputBorder(),
@@ -124,7 +127,7 @@ class _TeamMembersPanelState extends State<TeamMembersPanel> {
                 : _users == null
                 ? const Center(child: CircularProgressIndicator())
                 : list.isEmpty
-                ? const Center(child: Text('검색 결과가 없습니다.'))
+                ? Center(child: Text(tr('검색 결과가 없습니다.')))
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [

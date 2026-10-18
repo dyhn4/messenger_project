@@ -13,6 +13,7 @@ import '../../services/app_links.dart';
 import '../../services/session.dart';
 import '../../widgets/esc_to_minimize.dart';
 import 'project_dialog.dart';
+import '../../l10n/tr.dart';
 
 /// 창 생성 인자(JSON)의 "type" 값 — 지금은 "프로젝트" 창 하나뿐이지만, 나중에 다른 종류의
 /// 서브 창이 생기면 이 값으로 구분한다.
@@ -198,11 +199,11 @@ Future<void> runProjectWindow(WindowController controller) async {
   // window_manager 예제/README가 늘 이 순서(waitUntilReadyToShow를 먼저 걸어두고 그 다음
   // runApp)를 쓴다 — 창이 기본 크기(800×600, 왼쪽 위)로 잠깐 보였다가 크기가 바뀌는 깜빡임을
   // 피하려는 목적이라, 그대로 따른다.
-  const windowOptions = WindowOptions(
+  final windowOptions = WindowOptions(
     size: Size(1080, 760),
     minimumSize: Size(720, 560),
     center: true,
-    title: 'TangoTalk 프로젝트',
+    title: tr('TangoTalk 프로젝트'),
   );
   windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.show();
@@ -234,7 +235,7 @@ class _ProjectWindowApp extends StatelessWidget {
     return ListenableBuilder(
       listenable: session.settings,
       builder: (context, _) => MaterialApp(
-        title: 'TangoTalk 프로젝트',
+        title: tr('TangoTalk 프로젝트'),
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
           useMaterial3: true,
@@ -283,19 +284,19 @@ class _ProjectWindowApp extends StatelessWidget {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            session.error ?? '로그인이 필요합니다.',
+                            session.error ?? tr('로그인이 필요합니다.'),
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            '메신저 창에서 로그인한 뒤 "프로젝트"를 다시 열어주세요.',
+                            tr('메신저 창에서 로그인한 뒤 "프로젝트"를 다시 열어주세요.'),
                             textAlign: TextAlign.center,
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 16),
                           FilledButton(
                             onPressed: session.init,
-                            child: const Text('다시 시도'),
+                            child: Text(tr('다시 시도')),
                           ),
                         ],
                       ),
@@ -323,11 +324,11 @@ class _LockedCover extends StatelessWidget {
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: const [
+          children: [
             Icon(Icons.lock, size: 90, color: Colors.white),
             SizedBox(height: 16),
             Text(
-              '현재 화면 잠금모드입니다.\n메신저 창에서 비밀번호를 입력해 잠금을 해제해주세요.',
+              tr('현재 화면 잠금모드입니다.\n메신저 창에서 비밀번호를 입력해 잠금을 해제해주세요.'),
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white, fontSize: 15, height: 1.5),
             ),

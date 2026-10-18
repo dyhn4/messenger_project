@@ -7,6 +7,7 @@ import '../../../services/calendar_controller.dart';
 import '../../../widgets/app_toast.dart';
 import '../calendar_common.dart';
 import 'calendar_management_common.dart';
+import '../../../l10n/tr.dart';
 
 /// 검색어를 멈추고 이만큼 지나면 서버에 묻는다(글자마다 요청하지 않게).
 const kCalendarSearchDebounce = Duration(milliseconds: 300);
@@ -18,7 +19,7 @@ Future<void> showCalendarSubscribe(
 ) {
   return showCalendarSheet<void>(
     context,
-    title: '구독할 캘린더 찾기',
+    title: tr('구독할 캘린더 찾기'),
     child: CalendarSubscribeView(controller: controller),
   );
 }
@@ -88,7 +89,7 @@ class _CalendarSubscribeViewState extends State<CalendarSubscribeView> {
       setState(() {
         _results = null;
         _loading = false;
-        _error = calendarErrorText(e, '검색하지 못했습니다. 잠시 후 다시 시도하세요.');
+        _error = calendarErrorText(e, tr('검색하지 못했습니다. 잠시 후 다시 시도하세요.'));
       });
     }
   }
@@ -115,12 +116,15 @@ class _CalendarSubscribeViewState extends State<CalendarSubscribeView> {
               x,
         ];
       });
-      showAppToast(context, "'${r.name}' 캘린더를 구독했습니다.");
+      showAppToast(
+        context,
+        tr('\'{r.name}\' 캘린더를 구독했습니다.', {'r.name': r.name}),
+      );
     } catch (e) {
       if (mounted) {
         showAppToast(
           context,
-          calendarErrorText(e, '구독하지 못했습니다. 잠시 후 다시 시도하세요.'),
+          calendarErrorText(e, tr('구독하지 못했습니다. 잠시 후 다시 시도하세요.')),
         );
       }
     } finally {
@@ -129,8 +133,10 @@ class _CalendarSubscribeViewState extends State<CalendarSubscribeView> {
   }
 
   static String _kindLabel(CalendarSearchResult r) {
-    if (r.kind == 'personal') return '기본 캘린더';
-    return r.ownerName == null ? '공유 캘린더' : '공유 캘린더 · 소유자 ${r.ownerName}';
+    if (r.kind == 'personal') return tr('기본 캘린더');
+    return r.ownerName == null
+        ? tr('공유 캘린더')
+        : tr('공유 캘린더 · 소유자 {r.ownerName}', {'r.ownerName': r.ownerName});
   }
 
   @override
@@ -144,9 +150,9 @@ class _CalendarSubscribeViewState extends State<CalendarSubscribeView> {
           key: const ValueKey('cal-subscribe-search'),
           controller: _query,
           autofocus: true,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             isDense: true,
-            hintText: '캘린더 이름으로 검색',
+            hintText: tr('캘린더 이름으로 검색'),
             prefixIcon: Icon(Icons.search, size: 20),
             border: OutlineInputBorder(),
           ),
@@ -185,7 +191,9 @@ class _CalendarSubscribeViewState extends State<CalendarSubscribeView> {
         padding: const EdgeInsets.all(24),
         child: Center(
           child: Text(
-            _query.text.trim().isEmpty ? '구독할 수 있는 캘린더가 없습니다.' : '검색 결과가 없습니다.',
+            _query.text.trim().isEmpty
+                ? tr('구독할 수 있는 캘린더가 없습니다.')
+                : tr('검색 결과가 없습니다.'),
             style: TextStyle(color: theme.hintColor),
           ),
         ),
@@ -212,7 +220,7 @@ class _CalendarSubscribeViewState extends State<CalendarSubscribeView> {
           subtitle: Text(_kindLabel(r)),
           trailing: r.subscribed
               ? Text(
-                  '구독 중',
+                  tr('구독 중'),
                   key: ValueKey('cal-subscribed-${r.id}'),
                   style: TextStyle(color: theme.hintColor),
                 )
@@ -221,7 +229,7 @@ class _CalendarSubscribeViewState extends State<CalendarSubscribeView> {
                   onPressed: _pending.contains(r.id)
                       ? null
                       : () => _subscribe(r),
-                  child: const Text('구독하기'),
+                  child: Text(tr('구독하기')),
                 ),
         );
       },

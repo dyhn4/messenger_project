@@ -21,6 +21,7 @@ import 'notification_popup_style.dart';
 import 'web_notifications.dart';
 import 'win32_window.dart'
     if (dart.library.js_interop) 'win32_window_stub.dart';
+import '../l10n/tr.dart';
 
 /// 비밀 대화 자물쇠 배지를 아바타의 어느 모서리에 그릴지 — _badgeWithLock 문서 참고.
 enum _BadgeCorner { topLeft, bottomRight }
@@ -139,10 +140,10 @@ class NotificationService {
       title: title,
       body: body,
       notificationDetails: NotificationDetails(
-        android: const AndroidNotificationDetails(
+        android: AndroidNotificationDetails(
           'mail_updates',
-          '메일 알림',
-          channelDescription: '연결한 메일 계정의 새 메일',
+          tr('메일 알림'),
+          channelDescription: tr('연결한 메일 계정의 새 메일'),
           importance: Importance.high,
           priority: Priority.high,
         ),
@@ -186,10 +187,10 @@ class NotificationService {
       title: title,
       body: body,
       notificationDetails: NotificationDetails(
-        android: const AndroidNotificationDetails(
+        android: AndroidNotificationDetails(
           'project_updates',
-          '프로젝트 알림',
-          channelDescription: '업무 배정·댓글·마감 임박 등 프로젝트 알림',
+          tr('프로젝트 알림'),
+          channelDescription: tr('업무 배정·댓글·마감 임박 등 프로젝트 알림'),
           importance: Importance.high,
           priority: Priority.high,
         ),
@@ -249,10 +250,10 @@ class NotificationService {
       title: title,
       body: body,
       notificationDetails: NotificationDetails(
-        android: const AndroidNotificationDetails(
+        android: AndroidNotificationDetails(
           'approval_updates',
-          '결재 알림',
-          channelDescription: '결재 요청·승인·반려 등 전자결재 알림',
+          tr('결재 알림'),
+          channelDescription: tr('결재 요청·승인·반려 등 전자결재 알림'),
           importance: Importance.high,
           priority: Priority.high,
         ),
@@ -280,8 +281,10 @@ class NotificationService {
       return showWebNotification(
         title: callerName,
         body: conversationTitle == null
-            ? '화상회의 요청'
-            : '$conversationTitle · 화상회의 요청',
+            ? tr('화상회의 요청')
+            : tr('{conversationTitle} · 화상회의 요청', {
+                'conversationTitle': conversationTitle,
+              }),
         tag: '$callPayloadPrefix$roomId',
         payload: '$callPayloadPrefix$roomId',
       );
@@ -289,8 +292,8 @@ class NotificationService {
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
         'calls',
-        '화상회의 수신',
-        channelDescription: '걸려온 화상회의 알림',
+        tr('화상회의 수신'),
+        channelDescription: tr('걸려온 화상회의 알림'),
         importance: Importance.max,
         priority: Priority.max,
         category: AndroidNotificationCategory.call,
@@ -306,8 +309,10 @@ class NotificationService {
       id: 'call:$roomId'.hashCode,
       title: callerName,
       body: conversationTitle == null
-          ? '화상회의 요청'
-          : '$conversationTitle · 화상회의 요청',
+          ? tr('화상회의 요청')
+          : tr('{conversationTitle} · 화상회의 요청', {
+              'conversationTitle': conversationTitle,
+            }),
       notificationDetails: details,
       payload: '$callPayloadPrefix$roomId',
     );
@@ -455,8 +460,8 @@ class NotificationService {
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
         'messages',
-        '새 메시지',
-        channelDescription: '새 채팅 메시지 알림',
+        tr('새 메시지'),
+        channelDescription: tr('새 채팅 메시지 알림'),
         importance: Importance.high,
         priority: Priority.high,
         shortcutId: roomId,
@@ -468,7 +473,7 @@ class NotificationService {
         // 런처 아이콘 배지 숫자 — 안 지운 이 방 메시지 개수(위 _appendHistory 참고).
         number: history?.length,
         styleInformation: MessagingStyleInformation(
-          const Person(name: '나'),
+          Person(name: tr('나')),
           conversationTitle: conversationTitle,
           // conversationTitle은 groupConversation이 true일 때만 화면에 표시된다.
           groupConversation: conversationTitle != null,
@@ -612,7 +617,9 @@ class NotificationService {
       await _plugin.cancel(id: _messageSummaryId);
       return;
     }
-    final summary = '${titles.length}개 대화방의 새 메시지';
+    final summary = tr('{titles.length}개 대화방의 새 메시지', {
+      'titles.length': titles.length,
+    });
     await _plugin.show(
       id: _messageSummaryId,
       title: 'TangoTalk',
@@ -620,8 +627,8 @@ class NotificationService {
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           'messages',
-          '새 메시지',
-          channelDescription: '새 채팅 메시지 알림',
+          tr('새 메시지'),
+          channelDescription: tr('새 채팅 메시지 알림'),
           importance: Importance.high,
           priority: Priority.high,
           groupKey: _messageGroupKey,

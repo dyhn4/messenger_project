@@ -5,6 +5,7 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import 'task_config_manager.dart'
     show ConfigBubble, ConfigSection, ReorderableBubbleList, configAction;
+import '../../l10n/tr.dart';
 
 const _typePalette = <String>[
   '#E53935',
@@ -73,7 +74,7 @@ class _ProjectTypeEditorState extends State<ProjectTypeEditor> {
       }
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -81,17 +82,21 @@ class _ProjectTypeEditorState extends State<ProjectTypeEditor> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('유형 삭제'),
-        content: Text("'${type.name}' 유형을 삭제할까요? 이 유형이던 업무는 남고 유형만 비워집니다."),
+        title: Text(tr('유형 삭제')),
+        content: Text(
+          tr('\'{type.name}\' 유형을 삭제할까요? 이 유형이던 업무는 남고 유형만 비워집니다.', {
+            'type.name': type.name,
+          }),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       ),
@@ -101,7 +106,7 @@ class _ProjectTypeEditorState extends State<ProjectTypeEditor> {
       await widget.session.api!.deleteTaskType(type.id);
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -114,7 +119,7 @@ class _ProjectTypeEditorState extends State<ProjectTypeEditor> {
         for (final t in list) t.id,
       ]);
     } catch (e) {
-      if (mounted) showAppToast(context, '순서를 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('순서를 바꾸지 못했습니다: {e}', {'e': e}));
       await _load();
     }
   }
@@ -127,11 +132,11 @@ class _ProjectTypeEditorState extends State<ProjectTypeEditor> {
         : types == null
         ? const Center(child: CircularProgressIndicator())
         : ConfigSection(
-            title: '유형',
-            description: '업무를 분류하는 꼬리표입니다(버그·기능 등). 끌어서 순서를 바꿀 수 있습니다.',
-            addLabel: '추가',
+            title: tr('유형'),
+            description: tr('업무를 분류하는 꼬리표입니다(버그·기능 등). 끌어서 순서를 바꿀 수 있습니다.'),
+            addLabel: tr('추가'),
             onAdd: _edit,
-            emptyHint: '등록된 유형이 없습니다.',
+            emptyHint: tr('등록된 유형이 없습니다.'),
             children: [
               ReorderableBubbleList<TaskType>(
                 items: types,
@@ -143,12 +148,12 @@ class _ProjectTypeEditorState extends State<ProjectTypeEditor> {
                   actions: [
                     configAction(
                       Icons.edit_outlined,
-                      '수정',
+                      tr('수정'),
                       () => _edit(existing: type),
                     ),
                     configAction(
                       Icons.delete_outline,
-                      '삭제',
+                      tr('삭제'),
                       () => _delete(type),
                     ),
                   ],
@@ -181,7 +186,7 @@ class _TypeEditDialogState extends State<_TypeEditDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.existing == null ? '유형 추가' : '유형 수정'),
+      title: Text(widget.existing == null ? tr('유형 추가') : tr('유형 수정')),
       content: SizedBox(
         width: 340,
         child: Column(
@@ -192,14 +197,14 @@ class _TypeEditDialogState extends State<_TypeEditDialog> {
               controller: _name,
               autofocus: true,
               maxLength: 20,
-              decoration: const InputDecoration(
-                labelText: '유형 이름',
+              decoration: InputDecoration(
+                labelText: tr('유형 이름'),
                 border: OutlineInputBorder(),
               ),
               onSubmitted: (_) => _submit(),
             ),
             const SizedBox(height: 8),
-            const Text('색'),
+            Text(tr('색')),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -239,9 +244,9 @@ class _TypeEditDialogState extends State<_TypeEditDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
-        FilledButton(onPressed: _submit, child: const Text('저장')),
+        FilledButton(onPressed: _submit, child: Text(tr('저장'))),
       ],
     );
   }

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/room.dart';
 import '../screens/message_forward_screen.dart' show canForwardTo;
 import '../services/session.dart';
+import '../l10n/tr.dart';
 
 /// 화면 캡처 "파일 업로드" 대화상자에서 고른 결과.
 class CaptureUploadChoice {
@@ -95,7 +96,7 @@ class _CaptureUploadDialogState extends State<_CaptureUploadDialog> {
                 children: [
                   Expanded(
                     child: Text(
-                      '파일 업로드',
+                      tr('파일 업로드'),
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -108,10 +109,7 @@ class _CaptureUploadDialogState extends State<_CaptureUploadDialog> {
                 ],
               ),
               const SizedBox(height: 12),
-              const Text(
-                '공유 대화방',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
+              Text(tr('공유 대화방'), style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               DropdownButtonFormField<Room>(
                 initialValue: _rooms.firstWhere(
@@ -141,7 +139,7 @@ class _CaptureUploadDialogState extends State<_CaptureUploadDialog> {
                 },
               ),
               const SizedBox(height: 16),
-              const Text('파일', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(tr('파일'), style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -167,7 +165,7 @@ class _CaptureUploadDialogState extends State<_CaptureUploadDialog> {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text('메시지', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(tr('메시지'), style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               TextField(
                 controller: _message,
@@ -193,14 +191,14 @@ class _CaptureUploadDialogState extends State<_CaptureUploadDialog> {
                 children: [
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('취소'),
+                    child: Text(tr('취소')),
                   ),
                   const SizedBox(width: 8),
                   FilledButton(
                     onPressed: () => Navigator.of(
                       context,
                     ).pop(CaptureUploadChoice(_room, _message.text.trim())),
-                    child: const Text('업로드'),
+                    child: Text(tr('업로드')),
                   ),
                 ],
               ),

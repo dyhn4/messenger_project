@@ -4,6 +4,7 @@ import '../models/message.dart';
 import '../models/message_reaction.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
+import '../l10n/tr.dart';
 
 /// 메시지 공감(이모지 반응) — 말풍선 아래의 공감 줄([MessageReactionBar])과 고르는 줄([ReactionPicker]).
 /// 카카오톡 공감처럼 한 사람이 한 메시지에 하나만 고르고(같은 것을 다시 누르면 빠짐), 고를 수 있는 이모지는
@@ -26,14 +27,14 @@ bool canReactToMessage(Session session, Message message) {
 
 /// 공감한 사람의 이름 — 그 방 멤버에서 찾고, 나는 내 이름, 못 찾으면(나간 사람) "알 수 없음".
 String reactorName(Session session, String roomId, String userId) {
-  if (userId == session.userId) return session.name ?? '나';
+  if (userId == session.userId) return session.name ?? tr('나');
   for (final r in session.rooms) {
     if (r.id != roomId) continue;
     for (final m in r.members) {
       if (m.id == userId) return m.name;
     }
   }
-  return '알 수 없음';
+  return tr('알 수 없음');
 }
 
 /// 공감을 누르거나 바꾼다 — 실패하면 알린다(화면은 Session이 원래대로 되돌린다).
@@ -46,7 +47,9 @@ Future<void> reactToMessage(
   try {
     await session.toggleMessageReaction(message, emoji);
   } catch (e) {
-    if (context.mounted) showAppToast(context, '공감을 남기지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('공감을 남기지 못했습니다: {e}', {'e': e}));
+    }
   }
 }
 
@@ -227,7 +230,7 @@ class _ReactionPickerState extends State<ReactionPicker> {
           width: _cell,
           child: IconButton(
             key: const ValueKey('pick-reaction-more'),
-            tooltip: _expanded ? '접기' : '공감 더 보기',
+            tooltip: _expanded ? tr('접기') : tr('공감 더 보기'),
             icon: Icon(
               _expanded ? Icons.expand_less : Icons.add,
               size: widget.emojiSize,
@@ -292,7 +295,7 @@ class ReactionAddButton extends StatelessWidget {
       ],
       builder: (context, controller, _) => IconButton(
         key: const ValueKey('add-reaction'),
-        tooltip: '공감',
+        tooltip: tr('공감'),
         visualDensity: VisualDensity.compact,
         icon: const Icon(Icons.add_reaction_outlined, size: 20),
         onPressed: () =>
@@ -315,7 +318,9 @@ void showReactorsSheet(BuildContext context, Session session, Message message) {
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         children: [
           Text(
-            '공감 ${reactions.fold<int>(0, (n, r) => n + r.count)}',
+            tr('공감 {p0}', {
+              'p0': reactions.fold<int>(0, (n, r) => n + r.count),
+            }),
             style: Theme.of(
               sheetContext,
             ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),

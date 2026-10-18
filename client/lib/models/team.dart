@@ -1,4 +1,5 @@
 import '../widgets/avatar_utils.dart' show initialsOf;
+import '../l10n/tr.dart';
 
 /// 계정 등급. **서버 운영자만** 바꿀 수 있고(관리자 콘솔), 팀이 아니라 계정에 붙는다 —
 /// 어느 팀에 있든 같은 등급이다. 자세한 설명은 README.md의 "권한 등급" 참고.
@@ -19,15 +20,15 @@ AccountRole accountRoleFromWire(String? s) => switch (s) {
 
 extension AccountRoleLabel on AccountRole {
   String get label => switch (this) {
-    AccountRole.admin => '관리자',
-    AccountRole.member => '정회원',
-    AccountRole.guest => '준회원',
+    AccountRole.admin => tr('관리자'),
+    AccountRole.member => tr('정회원'),
+    AccountRole.guest => tr('준회원'),
   };
 
   String get description => switch (this) {
-    AccountRole.admin => '자기가 속한 팀의 설정·팀원·콘텐츠 관리 + 방·팀 만들기',
-    AccountRole.member => '방 만들기·참여·대화 등 일반 협업 기능 전부',
-    AccountRole.guest => '초대받은 방에서만 활동(방 생성·토픽 참여·대화 시작 불가)',
+    AccountRole.admin => tr('자기가 속한 팀의 설정·팀원·콘텐츠 관리 + 방·팀 만들기'),
+    AccountRole.member => tr('방 만들기·참여·대화 등 일반 협업 기능 전부'),
+    AccountRole.guest => tr('초대받은 방에서만 활동(방 생성·토픽 참여·대화 시작 불가)'),
   };
 
   String get wire => name;
@@ -58,10 +59,10 @@ enum TopicCreationPolicy {
 
 extension TopicCreationPolicyLabel on TopicCreationPolicy {
   String get label => switch (this) {
-    TopicCreationPolicy.member => '정회원 이상',
-    TopicCreationPolicy.admin => '관리자 이상',
-    TopicCreationPolicy.owner => '소유자만',
-    TopicCreationPolicy.designated => '지정',
+    TopicCreationPolicy.member => tr('정회원 이상'),
+    TopicCreationPolicy.admin => tr('관리자 이상'),
+    TopicCreationPolicy.owner => tr('소유자만'),
+    TopicCreationPolicy.designated => tr('지정'),
   };
 
   String get wire => name;
@@ -80,9 +81,9 @@ const editDeleteWindowOptions = [300, 1800, 3600, 86400, 604800];
 
 /// "5분"/"24시간"처럼 사람이 읽는 표기(서버 formatWindow와 같은 규칙).
 String formatEditDeleteWindow(int seconds) {
-  if (seconds % 86400 == 0) return '${seconds ~/ 86400}일';
-  if (seconds % 3600 == 0) return '${seconds ~/ 3600}시간';
-  return '${(seconds / 60).round()}분';
+  if (seconds % 86400 == 0) return tr('{p0}일', {'p0': seconds ~/ 86400});
+  if (seconds % 3600 == 0) return tr('{p0}시간', {'p0': seconds ~/ 3600});
+  return tr('{p0}분', {'p0': (seconds / 60).round()});
 }
 
 /// 사내 메신저의 팀(워크스페이스). 방/조직도/검색/파일이 전부 이 단위로 나뉘고,

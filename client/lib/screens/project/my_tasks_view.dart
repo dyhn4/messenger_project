@@ -7,6 +7,7 @@ import 'filter_controls.dart';
 import 'project_forms.dart';
 import 'task_filter.dart' show QuickFilter, quickFilterLabel;
 import 'task_views.dart';
+import '../../l10n/tr.dart';
 
 /// "내 업무" 필터 — 빠른 필터링(미완료/완료/지연) 하나와 "필터 추가"로 꺼내는 프로젝트·시작일·마감일.
 /// 비어 있는 항목은 "전체".
@@ -92,10 +93,10 @@ int compareTaskKeys(Task a, Task b) {
 const _keep = Object();
 
 /// "필터 추가"로 꺼낼 수 있는 필터(순서대로 보인다).
-const _extraFilters = [
-  (id: 'project', label: '프로젝트'),
-  (id: 'start', label: '시작일'),
-  (id: 'due', label: '마감일'),
+final _extraFilters = [
+  (id: 'project', label: tr('프로젝트')),
+  (id: 'start', label: tr('시작일')),
+  (id: 'due', label: tr('마감일')),
 ];
 
 /// 프로젝트 → "내 업무": 내가 담당자이거나 참조자로 걸린 업무를 리스트/캘린더로 본다.
@@ -164,7 +165,7 @@ class _MyTasksViewState extends State<MyTasksView> {
 
   Future<void> _newTask() async {
     if (_projects.isEmpty) {
-      showAppToast(context, '참여 중인 프로젝트가 없어서 업무를 만들 수 없습니다.');
+      showAppToast(context, tr('참여 중인 프로젝트가 없어서 업무를 만들 수 없습니다.'));
       return;
     }
     final created = await showNewTaskDialog(
@@ -276,13 +277,13 @@ class _MyTasksViewState extends State<MyTasksView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '내 업무',
+                      tr('내 업무'),
                       style: Theme.of(context).textTheme.headlineSmall
                           ?.copyWith(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '내가 담당자이거나 참조된 업무가 표시됩니다.',
+                      tr('내가 담당자이거나 참조된 업무가 표시됩니다.'),
                       style: TextStyle(color: hint),
                     ),
                   ],
@@ -291,7 +292,7 @@ class _MyTasksViewState extends State<MyTasksView> {
               FilledButton.icon(
                 onPressed: _newTask,
                 icon: const Icon(Icons.add, size: 18),
-                label: const Text('새 업무'),
+                label: Text(tr('새 업무')),
               ),
             ],
           ),
@@ -303,8 +304,10 @@ class _MyTasksViewState extends State<MyTasksView> {
             alignment: Alignment.centerRight,
             child: FilterPanelButton(
               label: _filters.activeCount == 0
-                  ? '필터링'
-                  : '필터링 ${_filters.activeCount}',
+                  ? tr('필터링')
+                  : tr('필터링 {_filters.activeCount}', {
+                      '_filters.activeCount': _filters.activeCount,
+                    }),
               panelBuilder: _filterPanel,
             ),
           ),
@@ -318,8 +321,8 @@ class _MyTasksViewState extends State<MyTasksView> {
             emptyText:
                 _filters.quick != QuickFilter.archived &&
                     all.every((t) => t.archived)
-                ? '담당하거나 참조된 업무가 없습니다.'
-                : '조건에 맞는 업무가 없습니다.',
+                ? tr('담당하거나 참조된 업무가 없습니다.')
+                : tr('조건에 맞는 업무가 없습니다.'),
             // 표에서 배지로 유형·우선순위·상태를 바꾸면 목록을 다시 읽는다.
             onChanged: _load,
           ),

@@ -5,6 +5,7 @@ import '../services/secret_peer_store.dart';
 import '../services/session.dart';
 import 'room_options_menu.dart' show showLeaveRoomDialog;
 import 'secret_safety_number_dialog.dart';
+import '../l10n/tr.dart';
 
 /// 비밀 대화방 맨 위의 보안 안내 한 줄(필요할 때만) — 위에서부터 하나만 보인다:
 ///  1. 멈춤(빨강): 상대 기기의 보안 확인에 실패해 이 대화를 멈췄다(서버가 가로채려 했을 수 있다). 되돌리는 방법은
@@ -102,7 +103,7 @@ class _SecretSecurityBannerState extends State<SecretSecurityBanner> {
               ),
               if (onClose != null)
                 IconButton(
-                  tooltip: '닫기',
+                  tooltip: tr('닫기'),
                   visualDensity: VisualDensity.compact,
                   iconSize: 18,
                   color: foreground,
@@ -131,35 +132,41 @@ class _SecretSecurityBannerState extends State<SecretSecurityBanner> {
       foreground: fg,
       icon: Icons.gpp_bad_outlined,
       body: [
-        const Text(
-          '상대 기기의 보안 확인에 실패해 이 비밀 대화를 멈췄습니다.',
+        Text(
+          tr('상대 기기의 보안 확인에 실패해 이 비밀 대화를 멈췄습니다.'),
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 2),
-        const Text(
-          '서버(또는 중간의 누군가)가 이 대화를 가로채려 했을 수 있어 메시지를 더 주고받지 않습니다. '
-          '이 비밀 대화를 끝내고 새로 시작한 뒤, 상대와 직접 만나거나 전화로 "보안 코드"를 비교해 주세요.',
+        Text(
+          tr(
+            '서버(또는 중간의 누군가)가 이 대화를 가로채려 했을 수 있어 메시지를 더 주고받지 않습니다. 이 비밀 대화를 끝내고 새로 시작한 뒤, 상대와 직접 만나거나 전화로 "보안 코드"를 비교해 주세요.',
+          ),
         ),
         // 이 기기에 고정해 둔 키로 확인이 안 돼 멈춘 경우 — 같은 상대 기기와 새로 시작해도 같은 키로 다시 멈춘다.
         // 상대가 앱을 다시 설치하는 등으로 같은 기기 id의 키가 바뀌었다면, 그 키를 지우는 것 말고는 다시 대화할
         // 길이 없다(버튼은 확인 창을 거친다).
         if (trust.canResetPeerKey) ...[
           const SizedBox(height: 2),
-          const Text(
-            '같은 상대 기기와 새로 시작해도 다시 멈춘다면, 상대가 앱을 다시 설치하는 등으로 기기 키가 바뀌었는지 상대에게 '
-            '직접 확인한 뒤 "상대 기기 키 다시 받기"를 눌러 주세요.',
+          Text(
+            tr(
+              '같은 상대 기기와 새로 시작해도 다시 멈춘다면, 상대가 앱을 다시 설치하는 등으로 기기 키가 바뀌었는지 상대에게 직접 확인한 뒤 "상대 기기 키 다시 받기"를 눌러 주세요.',
+            ),
           ),
         ] else if (trust.peerKeyAlreadyReset) ...[
           const SizedBox(height: 2),
-          const Text(
-            '이 상대 기기의 키는 다시 받기로 했습니다. 이 대화를 끝내고 새 비밀 대화를 시작한 뒤 보안 코드를 꼭 비교해 주세요.',
+          Text(
+            tr(
+              '이 상대 기기의 키는 다시 받기로 했습니다. 이 대화를 끝내고 새 비밀 대화를 시작한 뒤 보안 코드를 꼭 비교해 주세요.',
+            ),
             key: ValueKey('secret-security-key-reset-done'),
           ),
         ],
         if (reason != null) ...[
           const SizedBox(height: 2),
           Text(
-            '원인: ${reason.description}',
+            tr('원인: {reason.description}', {
+              'reason.description': reason.description,
+            }),
             style: TextStyle(fontSize: 12, color: fg.withValues(alpha: 0.8)),
           ),
         ],
@@ -169,7 +176,7 @@ class _SecretSecurityBannerState extends State<SecretSecurityBanner> {
           style: buttonStyle,
           onPressed: () =>
               showLeaveRoomDialog(context, widget.session, widget.room),
-          child: const Text('비밀 대화 끝내기'),
+          child: Text(tr('비밀 대화 끝내기')),
         ),
         if (trust.canResetPeerKey)
           TextButton(
@@ -181,7 +188,7 @@ class _SecretSecurityBannerState extends State<SecretSecurityBanner> {
               widget.room,
               codeMismatch: false,
             ),
-            child: const Text('상대 기기 키 다시 받기'),
+            child: Text(tr('상대 기기 키 다시 받기')),
           ),
       ],
     );
@@ -196,8 +203,10 @@ class _SecretSecurityBannerState extends State<SecretSecurityBanner> {
       background: dark ? const Color(0xFF3A3000) : Colors.amber.shade50,
       foreground: fg,
       icon: Icons.phonelink_lock_outlined,
-      body: const [
-        Text('상대의 기기가 바뀌었습니다. 예전에 확인한 보안 코드와 달라졌으니, 상대와 보안 코드를 다시 비교해 주세요.'),
+      body: [
+        Text(
+          tr('상대의 기기가 바뀌었습니다. 예전에 확인한 보안 코드와 달라졌으니, 상대와 보안 코드를 다시 비교해 주세요.'),
+        ),
       ],
       actions: [
         TextButton(
@@ -210,7 +219,7 @@ class _SecretSecurityBannerState extends State<SecretSecurityBanner> {
             widget.session,
             widget.room,
           ),
-          child: const Text('보안 코드 확인'),
+          child: Text(tr('보안 코드 확인')),
         ),
       ],
       onClose: () =>
@@ -226,9 +235,11 @@ class _SecretSecurityBannerState extends State<SecretSecurityBanner> {
       background: scheme.surfaceContainerHighest,
       foreground: scheme.onSurfaceVariant,
       icon: Icons.info_outline,
-      body: const [
+      body: [
         Text(
-          '상대가 예전 버전의 앱을 쓰고 있어 이 대화의 보안 확인이 일부만 이뤄집니다. 상대에게 앱을 업데이트해 달라고 알려 주세요.',
+          tr(
+            '상대가 예전 버전의 앱을 쓰고 있어 이 대화의 보안 확인이 일부만 이뤄집니다. 상대에게 앱을 업데이트해 달라고 알려 주세요.',
+          ),
         ),
       ],
       onClose: () => widget.session.dismissSecretLegacyNotice(widget.room.id),
@@ -243,11 +254,11 @@ class _SecretSecurityBannerState extends State<SecretSecurityBanner> {
       background: scheme.surfaceContainerHighest,
       foreground: scheme.onSurfaceVariant,
       icon: Icons.info_outline,
-      body: const [
+      body: [
         Text(
-          '이 비밀 대화는 예전 방식으로 맺어져 있습니다. 상대도 최신 앱으로 업데이트했다면, 이 대화를 끝내고 새로 시작해 '
-          '더 안전하고 메시지가 더 안정적으로 오가는 새 방식으로 바꿀 수 있습니다(대화를 끝내면 이 대화의 메시지는 '
-          '지워집니다).',
+          tr(
+            '이 비밀 대화는 예전 방식으로 맺어져 있습니다. 상대도 최신 앱으로 업데이트했다면, 이 대화를 끝내고 새로 시작해 더 안전하고 메시지가 더 안정적으로 오가는 새 방식으로 바꿀 수 있습니다(대화를 끝내면 이 대화의 메시지는 지워집니다).',
+          ),
         ),
       ],
       onClose: () => widget.session.dismissSecretProtocolNotice(widget.room.id),

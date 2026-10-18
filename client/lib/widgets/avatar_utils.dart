@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
 Color? parseHexColor(String? hex) {
   if (hex == null || hex.isEmpty) return null;
@@ -85,8 +86,8 @@ class BotBadge extends StatelessWidget {
         color: automationAvatarColor.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: const Text(
-        '봇',
+      child: Text(
+        tr('봇'),
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w600,

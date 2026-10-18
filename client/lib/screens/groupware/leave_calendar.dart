@@ -5,6 +5,7 @@ import '../../models/groupware_resources.dart';
 import '../../services/api_client.dart' show ApiException;
 import '../../services/groupware_api.dart';
 import 'groupware_screen.dart' show GroupwareChanges;
+import '../../l10n/tr.dart';
 
 /// 휴가 탭의 달력 보기 — 한 달 격자(일요일부터, 캘린더 화면과 같다)에 승인된 휴가·출장과 내가 올린 결재 중 휴가(점선)·공휴일을 보이고,
 /// 날을 누르면 그날 누가 쉬는지 아래에 펼친다(서버 GET /groupware/leave/month).
@@ -23,7 +24,15 @@ class LeaveMonthCalendar extends StatefulWidget {
   State<LeaveMonthCalendar> createState() => _LeaveMonthCalendarState();
 }
 
-const _weekdayLabels = ['일', '월', '화', '수', '목', '금', '토'];
+final _weekdayLabels = [
+  tr('일'),
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+];
 
 /// 칸 하나에 보일 이름 수 — 넘치면 "+n".
 const _namesPerCell = 2;
@@ -65,7 +74,7 @@ class _LeaveMonthCalendarState extends State<LeaveMonthCalendar> {
     } catch (e) {
       if (mounted) {
         setState(
-          () => _error = e is ApiException ? e.message : '휴가 달력을 받지 못했습니다.',
+          () => _error = e is ApiException ? trServer(e.message) : tr('휴가 달력을 받지 못했습니다.'),
         );
       }
     }
@@ -100,25 +109,28 @@ class _LeaveMonthCalendarState extends State<LeaveMonthCalendar> {
             children: [
               IconButton(
                 key: const ValueKey('leave-cal-prev'),
-                tooltip: '지난달',
+                tooltip: tr('지난달'),
                 icon: const Icon(Icons.chevron_left),
                 onPressed: () => _shift(-1),
               ),
               Text(
-                '${_month.year}년 ${_month.month}월',
+                tr('{_month.year}년 {_month.month}월', {
+                  '_month.year': _month.year,
+                  '_month.month': _month.month,
+                }),
                 key: const ValueKey('leave-cal-month'),
                 style: theme.textTheme.titleMedium,
               ),
               IconButton(
                 key: const ValueKey('leave-cal-next'),
-                tooltip: '다음 달',
+                tooltip: tr('다음 달'),
                 icon: const Icon(Icons.chevron_right),
                 onPressed: () => _shift(1),
               ),
               const Spacer(),
-              _Legend(color: theme.colorScheme.tertiary, label: '휴가'),
+              _Legend(color: theme.colorScheme.tertiary, label: tr('휴가')),
               const SizedBox(width: 8),
-              _Legend(color: Colors.blue.shade400, label: '출장'),
+              _Legend(color: Colors.blue.shade400, label: tr('출장')),
             ],
           ),
         ),
@@ -353,7 +365,7 @@ class _DayDetail extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: Text(
-                '쉬거나 출장 간 사람이 없습니다.',
+                tr('쉬거나 출장 간 사람이 없습니다.'),
                 style: TextStyle(color: theme.hintColor),
               ),
             ),
@@ -368,7 +380,7 @@ class _DayDetail extends StatelessWidget {
                 color: theme.colorScheme.tertiary,
               ),
               title: Text(
-                '${l.name} · ${l.label}${l.pending ? ' (결재 중)' : ''}',
+                '${l.name} · ${l.label}${l.pending ? tr(' (결재 중)') : ''}',
               ),
               subtitle: Text(range(l.startDate, l.endDate)),
             ),
@@ -383,7 +395,12 @@ class _DayDetail extends StatelessWidget {
                 color: Colors.blue.shade400,
               ),
               title: Text(
-                '${t.name} · 출장${(t.destination ?? '').isEmpty ? '' : ' (${t.destination})'}',
+                tr('{t.name} · 출장{p0}', {
+                  't.name': t.name,
+                  'p0': (t.destination ?? '').isEmpty
+                      ? ''
+                      : ' (${t.destination})',
+                }),
               ),
               subtitle: Text(range(t.startDate, t.endDate)),
             ),

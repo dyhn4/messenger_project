@@ -8,6 +8,7 @@ import 'api_client.dart' show ApiException;
 import 'calendar_api.dart';
 import 'calendar_move.dart';
 import 'calendar_search.dart';
+import '../l10n/tr.dart';
 
 /// 캘린더 화면의 상태: 선택한 팀의 캘린더 목록, 보이는 구간의 일정 캐시, 숨김 토글, 소켓
 /// `calendar:changed` 수신 시 새로고침.
@@ -186,7 +187,7 @@ class CalendarController extends ChangeNotifier {
       error = null;
     } catch (e) {
       if (epoch != _epoch) return;
-      error = _message(e, '캘린더를 불러오지 못했습니다.');
+      error = _message(e, tr('캘린더를 불러오지 못했습니다.'));
     } finally {
       if (epoch == _epoch) {
         loadingCalendars = false;
@@ -255,7 +256,7 @@ class CalendarController extends ChangeNotifier {
         error = null;
       } catch (e) {
         if (epoch != _eventsEpoch) return;
-        error = _message(e, '일정을 불러오지 못했습니다.');
+        error = _message(e, tr('일정을 불러오지 못했습니다.'));
       } finally {
         if (epoch == _eventsEpoch) {
           if (identical(_inflight[key], future)) _inflight.remove(key);
@@ -442,7 +443,7 @@ class CalendarController extends ChangeNotifier {
   Future<void> moveEvent(EventOccurrence event, EventMove move) async {
     final id = event.eventId;
     if (id == null || !canDragEvent(event)) {
-      throw StateError('옮길 수 없는 일정입니다.');
+      throw StateError(tr('옮길 수 없는 일정입니다.'));
     }
     final snapshot = Map<DateTime, List<EventOccurrence>>.of(_chunks);
     final epoch = _eventsEpoch;
@@ -601,7 +602,7 @@ class CalendarController extends ChangeNotifier {
       apiProvider().removeMember(calendarId, userId);
 
   String _message(Object e, String fallback) =>
-      e is ApiException ? e.message : fallback;
+      e is ApiException ? trServer(e.message) : fallback;
 
   @override
   void notifyListeners() {

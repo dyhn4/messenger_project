@@ -7,6 +7,7 @@ import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/attachment_widgets.dart' show formatFileSize;
+import '../l10n/tr.dart';
 
 /// 관리자 콘솔 "백업" 탭 — 서버 전체 백업(DB·설정·인증서, 외부 위치를 정하면 첨부파일까지)의 설정과 상태.
 ///
@@ -100,10 +101,14 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
   void _toastFinished(BackupSettings settings) {
     final status = settings.status;
     final message = switch (status.result) {
-      'ok' => '백업했습니다.',
-      'partial' => '서버 PC에는 백업했지만 외부 위치 복사에 실패했습니다: ${status.error ?? ''}',
-      'failed' => '백업에 실패했습니다: ${status.error ?? '알 수 없는 이유'}',
-      _ => '백업이 끝났습니다.',
+      'ok' => tr('백업했습니다.'),
+      'partial' => tr('서버 PC에는 백업했지만 외부 위치 복사에 실패했습니다: {p0}', {
+        'p0': status.error ?? '',
+      }),
+      'failed' => tr('백업에 실패했습니다: {p0}', {
+        'p0': status.error ?? tr('알 수 없는 이유'),
+      }),
+      _ => tr('백업이 끝났습니다.'),
     };
     showAppToast(context, message.trim(), duration: const Duration(seconds: 4));
   }
@@ -118,9 +123,9 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
       );
       if (!mounted) return;
       setState(() => _apply(settings));
-      showAppToast(context, '저장했습니다.');
+      showAppToast(context, tr('저장했습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -130,14 +135,21 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
     final current = _settings?.destination ?? '';
     final next = clear ? '' : _destination.text.trim();
     if (next == current) {
-      showAppToast(context, clear ? '외부 위치가 정해져 있지 않습니다.' : '바뀐 내용이 없습니다.');
+      showAppToast(
+        context,
+        clear ? tr('외부 위치가 정해져 있지 않습니다.') : tr('바뀐 내용이 없습니다.'),
+      );
       return;
     }
     final accountPassword = await _askAccountPassword(
-      clear ? '외부 백업 위치 지우기' : '외부 백업 위치 저장',
+      clear ? tr('외부 백업 위치 지우기') : tr('외부 백업 위치 저장'),
       clear
-          ? '외부 위치를 지우면 백업이 서버 PC에만 남고, 첨부파일은 백업되지 않습니다. 이미 외부 위치에 있는 백업은 지우지 않습니다.'
-          : '서버가 그 위치에 실제로 쓸 수 있는지 확인한 뒤 저장합니다. NAS가 꺼져 있으면 확인에 시간이 걸릴 수 있습니다.',
+          ? tr(
+              '외부 위치를 지우면 백업이 서버 PC에만 남고, 첨부파일은 백업되지 않습니다. 이미 외부 위치에 있는 백업은 지우지 않습니다.',
+            )
+          : tr(
+              '서버가 그 위치에 실제로 쓸 수 있는지 확인한 뒤 저장합니다. NAS가 꺼져 있으면 확인에 시간이 걸릴 수 있습니다.',
+            ),
     );
     if (accountPassword == null || !mounted) return;
     setState(() => _saving = true);
@@ -151,12 +163,16 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
       showAppToast(
         context,
         next.isEmpty
-            ? '외부 백업 위치를 지웠습니다.'
-            : '외부 백업 위치를 저장했습니다. 다음 백업부터 그곳에도 복사합니다.',
+            ? tr('외부 백업 위치를 지웠습니다.')
+            : tr('외부 백업 위치를 저장했습니다. 다음 백업부터 그곳에도 복사합니다.'),
       );
     } catch (e) {
       if (mounted) {
-        showAppToast(context, '실패: $e', duration: const Duration(seconds: 5));
+        showAppToast(
+          context,
+          tr('실패: {e}', {'e': e}),
+          duration: const Duration(seconds: 5),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -186,12 +202,14 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
       showAppToast(
         context,
         settings.passwordConfigured
-            ? '백업 암호를 바꿨습니다. 다음 백업부터 새 암호를 씁니다.'
-            : '백업 암호를 정했습니다. 이제 매일 ${updated.hour}시에 백업합니다.',
+            ? tr('백업 암호를 바꿨습니다. 다음 백업부터 새 암호를 씁니다.')
+            : tr('백업 암호를 정했습니다. 이제 매일 {updated.hour}시에 백업합니다.', {
+                'updated.hour': updated.hour,
+              }),
         duration: const Duration(seconds: 4),
       );
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -203,9 +221,9 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
       final settings = await widget.session.api!.runBackupNow();
       if (!mounted) return;
       setState(() => _apply(settings, fields: false));
-      showAppToast(context, '백업을 시작했습니다.');
+      showAppToast(context, tr('백업을 시작했습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _starting = false);
     }
@@ -229,9 +247,9 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '회원·대화·설정이 든 DB와 서버 설정·인증서를 매일 백업합니다. NAS나 외장 드라이브를 외부 백업 위치로 정하면 '
-            '그곳에 백업을 복사하고 첨부파일까지 맞춰 두어, 서버 PC가 고장 나도 새 PC에서 그대로 되살릴 수 있습니다. '
-            '백업은 백업 암호로 암호화됩니다.',
+            tr(
+              '회원·대화·설정이 든 DB와 서버 설정·인증서를 매일 백업합니다. NAS나 외장 드라이브를 외부 백업 위치로 정하면 그곳에 백업을 복사하고 첨부파일까지 맞춰 두어, 서버 PC가 고장 나도 새 PC에서 그대로 되살릴 수 있습니다. 백업은 백업 암호로 암호화됩니다.',
+            ),
             style: theme.textTheme.bodySmall?.copyWith(color: hint),
           ),
           const SizedBox(height: 12),
@@ -260,7 +278,7 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
     if (settings == null) {
       return [
         Text(
-          '이 서버 버전은 백업 기능을 지원하지 않습니다. 서버를 업데이트하세요.',
+          tr('이 서버 버전은 백업 기능을 지원하지 않습니다. 서버를 업데이트하세요.'),
           style: TextStyle(color: theme.colorScheme.error),
         ),
       ];
@@ -302,15 +320,17 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
       const Divider(height: 32),
 
       // ── 백업 암호 ──
-      _SectionTitle('백업 암호'),
+      _SectionTitle(tr('백업 암호')),
       Row(
         children: [
           Expanded(
             child: Text(
               settings.passwordConfigured
-                  ? '설정됨 — 복원할 때 이 암호가 필요합니다. 잃어버리면 백업을 열 수 없으니 안전한 곳에 적어 두세요.'
+                  ? tr(
+                      '설정됨 — 복원할 때 이 암호가 필요합니다. 잃어버리면 백업을 열 수 없으니 안전한 곳에 적어 두세요.',
+                    )
                   : settings.passwordError ??
-                        '아직 정하지 않았습니다 — 암호를 정해야 백업을 시작합니다.',
+                        tr('아직 정하지 않았습니다 — 암호를 정해야 백업을 시작합니다.'),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: settings.passwordConfigured
                     ? hint
@@ -324,17 +344,19 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
           const SizedBox(width: 8),
           OutlinedButton(
             onPressed: busy ? null : _setPassword,
-            child: Text(settings.passwordConfigured ? '암호 바꾸기' : '암호 정하기'),
+            child: Text(
+              settings.passwordConfigured ? tr('암호 바꾸기') : tr('암호 정하기'),
+            ),
           ),
         ],
       ),
       const Divider(height: 32),
 
       // ── 자동 백업 ──
-      _SectionTitle('자동 백업'),
+      _SectionTitle(tr('자동 백업')),
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
-        title: const Text('매일 자동으로 백업'),
+        title: Text(tr('매일 자동으로 백업')),
         value: _enabled,
         onChanged: busy ? null : (v) => setState(() => _enabled = v),
       ),
@@ -343,14 +365,17 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
           Expanded(
             child: DropdownButtonFormField<int>(
               initialValue: _hour,
-              decoration: const InputDecoration(
-                labelText: '백업 시각(서버 PC 기준)',
+              decoration: InputDecoration(
+                labelText: tr('백업 시각(서버 PC 기준)'),
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
               items: [
                 for (var h = 0; h < 24; h++)
-                  DropdownMenuItem(value: h, child: Text('매일 $h시')),
+                  DropdownMenuItem(
+                    value: h,
+                    child: Text(tr('매일 {h}시', {'h': h})),
+                  ),
               ],
               onChanged: busy
                   ? null
@@ -361,14 +386,17 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
           Expanded(
             child: DropdownButtonFormField<int>(
               initialValue: _keep,
-              decoration: const InputDecoration(
-                labelText: '보관 개수',
+              decoration: InputDecoration(
+                labelText: tr('보관 개수'),
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
               items: [
                 for (final n in _keepChoices(settings))
-                  DropdownMenuItem(value: n, child: Text('최근 $n개')),
+                  DropdownMenuItem(
+                    value: n,
+                    child: Text(tr('최근 {n}개', {'n': n})),
+                  ),
               ],
               onChanged: busy
                   ? null
@@ -382,28 +410,30 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
         alignment: Alignment.centerRight,
         child: FilledButton(
           onPressed: busy ? null : _saveSchedule,
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ),
       const Divider(height: 32),
 
       // ── 외부 백업 위치 ──
-      _SectionTitle('외부 백업 위치'),
+      _SectionTitle(tr('외부 백업 위치')),
       Text(
         settings.fromServerPc
-            ? '외장 드라이브(예: E:\\TangoTalk백업)나 NAS 공유 폴더(예: \\\\NAS\\backup)를 넣으세요. 그 안에 '
-                  '"TangoTalk-Backup" 폴더를 만들어 씁니다. NAS는 서버 PC(컴퓨터 계정)에 쓰기 권한이 있어야 합니다.'
-            : '외장 드라이브 경로(예: E:\\TangoTalk백업)를 넣으세요. NAS 공유 폴더(\\\\…)는 보안상 서버 PC에서 연 '
-                  '관리자 콘솔에서만 정할 수 있습니다.',
+            ? tr(
+                '외장 드라이브(예: E:\\TangoTalk백업)나 NAS 공유 폴더(예: \\\\NAS\\backup)를 넣으세요. 그 안에 "TangoTalk-Backup" 폴더를 만들어 씁니다. NAS는 서버 PC(컴퓨터 계정)에 쓰기 권한이 있어야 합니다.',
+              )
+            : tr(
+                '외장 드라이브 경로(예: E:\\TangoTalk백업)를 넣으세요. NAS 공유 폴더(\\\\…)는 보안상 서버 PC에서 연 관리자 콘솔에서만 정할 수 있습니다.',
+              ),
         style: theme.textTheme.bodySmall?.copyWith(color: hint),
       ),
       const SizedBox(height: 8),
       TextField(
         controller: _destination,
         enabled: !busy,
-        decoration: const InputDecoration(
-          labelText: '외부 백업 위치',
-          hintText: r'E:\TangoTalk백업',
+        decoration: InputDecoration(
+          labelText: tr('외부 백업 위치'),
+          hintText: tr('E:\\TangoTalk백업'),
           border: OutlineInputBorder(),
           isDense: true,
         ),
@@ -415,7 +445,7 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
           if (settings.destination != null)
             TextButton(
               onPressed: busy ? null : () => _saveDestination(clear: true),
-              child: const Text('지우기'),
+              child: Text(tr('지우기')),
             ),
           const SizedBox(width: 8),
           FilledButton(
@@ -426,14 +456,18 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('확인 후 저장'),
+                : Text(tr('확인 후 저장')),
           ),
         ],
       ),
       const Divider(height: 32),
 
       // ── 백업 목록 ──
-      _SectionTitle('서버 PC의 백업 (${settings.backups.length})'),
+      _SectionTitle(
+        tr('서버 PC의 백업 ({settings.backups.length})', {
+          'settings.backups.length': settings.backups.length,
+        }),
+      ),
       Text(
         settings.localDir,
         style: theme.textTheme.bodySmall?.copyWith(color: hint),
@@ -442,7 +476,7 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
       if (settings.backups.isEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text('아직 백업이 없습니다.', style: TextStyle(color: hint)),
+          child: Text(tr('아직 백업이 없습니다.'), style: TextStyle(color: hint)),
         )
       else
         for (final b in settings.backups)
@@ -458,19 +492,18 @@ class _AdminBackupTabState extends State<AdminBackupTab> {
             ),
             subtitle: Text(b.name),
             trailing: Text(
-              '${b.kind == 'scheduled' ? '자동' : '수동'} · ${formatFileSize(b.bytes)}',
+              '${b.kind == 'scheduled' ? tr('자동') : tr('수동')} · ${formatFileSize(b.bytes)}',
               style: theme.textTheme.bodySmall,
             ),
           ),
       const Divider(height: 32),
 
       // ── 복원 안내 ──
-      _SectionTitle('복원'),
+      _SectionTitle(tr('복원')),
       Text(
-        '복원은 서버 PC에서 시작 메뉴 "TangoTalk 서버 → 복원"을 실행해 백업 폴더(tangotalk_날짜_시각) 안의 '
-        'manifest.json을 고르면 됩니다. 서버 PC가 고장 났다면 새 PC에 TangoTalk 서버를 설치한 뒤, 외부 백업 위치의 '
-        'TangoTalk-Backup 폴더에서 같은 방법으로 복원하세요 — DB·설정·인증서와 첨부파일이 함께 돌아오고, 앱은 다시 '
-        '페어링하지 않아도 됩니다(서버 주소가 같다면). 복원할 때 백업 암호가 필요합니다.',
+        tr(
+          '복원은 서버 PC에서 시작 메뉴 "TangoTalk 서버 → 복원"을 실행해 백업 폴더(tangotalk_날짜_시각) 안의 manifest.json을 고르면 됩니다. 서버 PC가 고장 났다면 새 PC에 TangoTalk 서버를 설치한 뒤, 외부 백업 위치의 TangoTalk-Backup 폴더에서 같은 방법으로 복원하세요 — DB·설정·인증서와 첨부파일이 함께 돌아오고, 앱은 다시 페어링하지 않아도 됩니다(서버 주소가 같다면). 복원할 때 백업 암호가 필요합니다.',
+        ),
         style: theme.textTheme.bodySmall?.copyWith(color: hint),
       ),
       const SizedBox(height: 8),
@@ -545,7 +578,7 @@ class _BackupStatusCard extends StatelessWidget {
               Expanded(
                 child: Text.rich(
                   TextSpan(
-                    text: '서버 백업',
+                    text: tr('서버 백업'),
                     children: [
                       TextSpan(
                         text: '  ·  $label',
@@ -559,7 +592,7 @@ class _BackupStatusCard extends StatelessWidget {
                 ),
               ),
               IconButton(
-                tooltip: '새로 고침',
+                tooltip: tr('새로 고침'),
                 onPressed: onRefresh,
                 icon: const Icon(Icons.refresh, size: 18),
               ),
@@ -572,7 +605,7 @@ class _BackupStatusCard extends StatelessWidget {
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('지금 백업'),
+                    : Text(tr('지금 백업')),
               ),
               const SizedBox(width: 6),
             ],
@@ -603,16 +636,20 @@ class _BackupStatusCard extends StatelessWidget {
 /// 상태 카드 제목 옆의 아이콘·색·글.
 (IconData, Color, String) backupStatusLook(BackupSettings s, ThemeData theme) {
   if (s.run.busy) {
-    return (Icons.cloud_sync_outlined, theme.colorScheme.primary, '백업 중');
+    return (Icons.cloud_sync_outlined, theme.colorScheme.primary, tr('백업 중'));
   }
   if (!s.passwordConfigured) {
-    return (Icons.error_outline, theme.colorScheme.error, '설정 필요');
+    return (Icons.error_outline, theme.colorScheme.error, tr('설정 필요'));
   }
   return switch (s.status.result) {
-    'ok' => (Icons.cloud_done_outlined, Colors.green.shade700, '정상'),
-    'partial' => (Icons.warning_amber_rounded, Colors.orange.shade800, '일부 실패'),
-    'failed' => (Icons.error_outline, theme.colorScheme.error, '실패'),
-    _ => (Icons.cloud_queue_outlined, theme.hintColor, '아직 없음'),
+    'ok' => (Icons.cloud_done_outlined, Colors.green.shade700, tr('정상')),
+    'partial' => (
+      Icons.warning_amber_rounded,
+      Colors.orange.shade800,
+      tr('일부 실패'),
+    ),
+    'failed' => (Icons.error_outline, theme.colorScheme.error, tr('실패')),
+    _ => (Icons.cloud_queue_outlined, theme.hintColor, tr('아직 없음')),
   };
 }
 
@@ -623,26 +660,39 @@ List<String> backupStatusLines(BackupSettings s) {
   final external = status.external;
   return [
     if (run.running)
-      '${run.phase ?? '백업 중'}'
+      '${run.phase ?? tr('백업 중')}'
           '${run.total != null && run.total! > 0 ? ' (${run.done ?? 0}/${run.total})' : ''}',
-    if (run.elsewhere) '서버 PC의 시작 메뉴 "백업"이 백업하고 있습니다.',
+    if (run.elsewhere) tr('서버 PC의 시작 메뉴 "백업"이 백업하고 있습니다.'),
     if (status.lastSuccessAt != null)
-      '마지막 백업: ${formatDateTime(status.lastSuccessAt!)}'
-          '${status.lastBackupBytes != null ? ' · ${formatFileSize(status.lastBackupBytes!)}' : ''}',
+      tr('마지막 백업: {p0}{p1}', {
+        'p0': formatDateTime(status.lastSuccessAt!),
+        'p1': status.lastBackupBytes != null
+            ? ' · ${formatFileSize(status.lastBackupBytes!)}'
+            : '',
+      }),
     if (status.result == 'failed' && status.lastAttemptAt != null)
-      '실패: ${formatDateTime(status.lastAttemptAt!)} — ${status.error ?? '알 수 없는 이유'}',
+      tr('실패: {p0} — {p1}', {
+        'p0': formatDateTime(status.lastAttemptAt!),
+        'p1': status.error ?? tr('알 수 없는 이유'),
+      }),
     if (external != null && external.ok)
-      '외부 위치: ${external.path} — 첨부파일 ${external.uploadsTotal ?? 0}개'
-          '${external.uploadsBytes != null ? '(${formatFileSize(external.uploadsBytes!)})' : ''}',
+      tr('외부 위치: {external.path} — 첨부파일 {p0}개{p1}', {
+        'external.path': external.path,
+        'p0': external.uploadsTotal ?? 0,
+        'p1': external.uploadsBytes != null
+            ? '(${formatFileSize(external.uploadsBytes!)})'
+            : '',
+      }),
     if (external != null && !external.ok) ...[
-      '외부 위치 복사 실패: ${external.error ?? '알 수 없는 이유'}',
+      tr('외부 위치 복사 실패: {p0}', {'p0': external.error ?? tr('알 수 없는 이유')}),
       if (external.lastOkAt != null)
-        '마지막 외부 복사 성공: ${formatDateTime(external.lastOkAt!)}',
+        tr('마지막 외부 복사 성공: {p0}', {'p0': formatDateTime(external.lastOkAt!)}),
     ],
-    if (s.nextRunAt != null) '다음 자동 백업: ${formatDateTime(s.nextRunAt!)}',
+    if (s.nextRunAt != null)
+      tr('다음 자동 백업: {p0}', {'p0': formatDateTime(s.nextRunAt!)}),
     if (s.passwordConfigured && !s.enabled)
-      '자동 백업이 꺼져 있습니다 — "지금 백업"으로만 백업합니다.',
-    '※ 서버가 꺼져 있던 동안 놓친 백업은 서버를 켜고 10분쯤 뒤에 합니다.',
+      tr('자동 백업이 꺼져 있습니다 — "지금 백업"으로만 백업합니다.'),
+    tr('※ 서버가 꺼져 있던 동안 놓친 백업은 서버를 켜고 10분쯤 뒤에 합니다.'),
   ];
 }
 
@@ -681,9 +731,9 @@ class _AccountPasswordDialogState extends State<_AccountPasswordDialog> {
               controller: _controller,
               obscureText: true,
               autofocus: true,
-              decoration: const InputDecoration(
-                labelText: '내 계정 비밀번호',
-                helperText: '본인 확인을 위해 로그인 비밀번호를 한 번 더 넣으세요.',
+              decoration: InputDecoration(
+                labelText: tr('내 계정 비밀번호'),
+                helperText: tr('본인 확인을 위해 로그인 비밀번호를 한 번 더 넣으세요.'),
                 border: OutlineInputBorder(),
               ),
               onSubmitted: (v) => Navigator.of(context).pop(v),
@@ -694,11 +744,11 @@ class _AccountPasswordDialogState extends State<_AccountPasswordDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(_controller.text),
-          child: const Text('확인'),
+          child: Text(tr('확인')),
         ),
       ],
     );
@@ -735,11 +785,13 @@ class _BackupPasswordDialogState extends State<_BackupPasswordDialog> {
   void _submit() {
     final pw = _password.text;
     final problem = pw.trim().length < widget.minLength
-        ? '백업 암호는 ${widget.minLength}자 이상으로 정하세요.'
+        ? tr('백업 암호는 {widget.minLength}자 이상으로 정하세요.', {
+            'widget.minLength': widget.minLength,
+          })
         : pw != _confirm.text
-        ? '두 칸의 암호가 다릅니다.'
+        ? tr('두 칸의 암호가 다릅니다.')
         : _account.text.isEmpty
-        ? '내 계정 비밀번호를 넣으세요.'
+        ? tr('내 계정 비밀번호를 넣으세요.')
         : null;
     if (problem != null) {
       setState(() => _problem = problem);
@@ -752,7 +804,7 @@ class _BackupPasswordDialogState extends State<_BackupPasswordDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
-      title: Text(widget.changing ? '백업 암호 바꾸기' : '백업 암호 정하기'),
+      title: Text(widget.changing ? tr('백업 암호 바꾸기') : tr('백업 암호 정하기')),
       content: SizedBox(
         width: 400,
         child: SingleChildScrollView(
@@ -767,8 +819,14 @@ class _BackupPasswordDialogState extends State<_BackupPasswordDialog> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  '이 암호를 잃어버리면 백업을 복원할 수 없습니다. 서버 PC가 아닌 안전한 곳에 적어 두세요.'
-                  '${widget.changing ? '\n이미 만든 백업은 그때의 암호로만 복원됩니다.' : ''}',
+                  tr(
+                    '이 암호를 잃어버리면 백업을 복원할 수 없습니다. 서버 PC가 아닌 안전한 곳에 적어 두세요.{p0}',
+                    {
+                      'p0': widget.changing
+                          ? tr('\n이미 만든 백업은 그때의 암호로만 복원됩니다.')
+                          : '',
+                    },
+                  ),
                   style: theme.textTheme.bodySmall,
                 ),
               ),
@@ -778,8 +836,10 @@ class _BackupPasswordDialogState extends State<_BackupPasswordDialog> {
                 obscureText: true,
                 autofocus: true,
                 decoration: InputDecoration(
-                  labelText: '새 백업 암호',
-                  helperText: '${widget.minLength}자 이상',
+                  labelText: tr('새 백업 암호'),
+                  helperText: tr('{widget.minLength}자 이상', {
+                    'widget.minLength': widget.minLength,
+                  }),
                   border: const OutlineInputBorder(),
                 ),
               ),
@@ -787,8 +847,8 @@ class _BackupPasswordDialogState extends State<_BackupPasswordDialog> {
               TextField(
                 controller: _confirm,
                 obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: '새 백업 암호 확인',
+                decoration: InputDecoration(
+                  labelText: tr('새 백업 암호 확인'),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -796,9 +856,9 @@ class _BackupPasswordDialogState extends State<_BackupPasswordDialog> {
               TextField(
                 controller: _account,
                 obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: '내 계정 비밀번호',
-                  helperText: '본인 확인을 위해 로그인 비밀번호를 한 번 더 넣으세요.',
+                decoration: InputDecoration(
+                  labelText: tr('내 계정 비밀번호'),
+                  helperText: tr('본인 확인을 위해 로그인 비밀번호를 한 번 더 넣으세요.'),
                   border: OutlineInputBorder(),
                 ),
                 onSubmitted: (_) => _submit(),
@@ -817,9 +877,9 @@ class _BackupPasswordDialogState extends State<_BackupPasswordDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
-        FilledButton(onPressed: _submit, child: const Text('저장')),
+        FilledButton(onPressed: _submit, child: Text(tr('저장'))),
       ],
     );
   }

@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/app_links.dart';
 import '../../widgets/rich_text_format.dart';
+import '../../l10n/tr.dart';
 
 // 노트 본문 ↔ 편집기(서식을 입힌 평문) 변환, 그리고 본문 그리기.
 //
@@ -183,7 +184,7 @@ List<TextFormatRun> _toRuns(List<int> flags, List<String?> hrefs) {
     }
     final image = _imageLine.firstMatch(line.trim());
     if (image != null) {
-      final name = image.group(1)!.isEmpty ? '그림' : image.group(1)!;
+      final name = image.group(1)!.isEmpty ? tr('그림') : image.group(1)!;
       b.add('$noteImagePrefix$name', lf, '$noteImageHref${image.group(2)}');
     } else if (line.trim() == '---' || line.trim() == '***') {
       b.add(noteRule, lf);

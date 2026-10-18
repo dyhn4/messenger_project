@@ -12,6 +12,7 @@ import '../../widgets/app_toast.dart';
 import '../../widgets/retrying_network_image.dart';
 import 'approval_forms.dart' show ApprovalDateField;
 import 'groupware_screen.dart' show GroupwareChanges, GroupwareSectionHeader;
+import '../../l10n/tr.dart';
 
 /// 내 결재 설정(서명·도장, 대결)과 관리 탭의 결재 통계.
 
@@ -21,9 +22,9 @@ import 'groupware_screen.dart' show GroupwareChanges, GroupwareSectionHeader;
 /// 칸 순서: [오른쪽 위, 오른쪽 아래, 왼쪽 위, 왼쪽 아래].
 List<String> stampGlyphs(String name) {
   final chars = name.trim().characters.toList();
-  if (chars.isEmpty) return const ['인'];
+  if (chars.isEmpty) return [tr('인')];
   if (chars.length > 4) return [chars.join()];
-  final glyphs = chars.length == 4 ? chars : [...chars, '인'];
+  final glyphs = chars.length == 4 ? chars : [...chars, tr('인')];
   // 한 글자 이름 + 인이면 세로 두 칸, 두 글자 이름 + 인이면 오른쪽 둘·왼쪽 하나, 세 글자 이름 + 인(또는 네 글자)이면 네 칸.
   return glyphs;
 }
@@ -136,10 +137,10 @@ class _SignatureDialogState extends State<_SignatureDialog> {
       final url = await widget.api.setSignature(up.url);
       if (mounted) {
         setState(() => _url = url);
-        showAppToast(context, '서명을 정했습니다.');
+        showAppToast(context, tr('서명을 정했습니다.'));
       }
     } catch (e) {
-      if (mounted) showAppToast(context, '서명을 정하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('서명을 정하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -169,7 +170,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
       final url = await widget.api.setSignature(up.url);
       if (mounted) setState(() => _url = url);
     } catch (e) {
-      if (mounted) showAppToast(context, '서명을 정하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('서명을 정하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -181,7 +182,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
       await widget.api.deleteSignature();
       if (mounted) setState(() => _url = null);
     } catch (e) {
-      if (mounted) showAppToast(context, '지우지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('지우지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -191,7 +192,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
     return AlertDialog(
-      title: const Text('내 서명·도장'),
+      title: Text(tr('내 서명·도장')),
       content: SizedBox(
         width: 380,
         child: Column(
@@ -199,7 +200,9 @@ class _SignatureDialogState extends State<_SignatureDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '결재를 승인하면 이 그림이 결재란에 들어갑니다(그때의 그림이 남아 나중에 바꿔도 지난 결재는 그대로). 없으면 "승인" 도장 글자로 보입니다.',
+              tr(
+                '결재를 승인하면 이 그림이 결재란에 들어갑니다(그때의 그림이 남아 나중에 바꿔도 지난 결재는 그대로). 없으면 "승인" 도장 글자로 보입니다.',
+              ),
               style: TextStyle(fontSize: 12, color: hint),
             ),
             const SizedBox(height: 12),
@@ -214,7 +217,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
                   ? const CircularProgressIndicator()
                   : _url == null
                   ? Text(
-                      '정한 서명이 없습니다.',
+                      tr('정한 서명이 없습니다.'),
                       key: const ValueKey('signature-none'),
                       style: TextStyle(color: hint),
                     )
@@ -234,25 +237,25 @@ class _SignatureDialogState extends State<_SignatureDialog> {
                   key: const ValueKey('signature-draw'),
                   onPressed: _busy ? null : _draw,
                   icon: const Icon(Icons.draw_outlined, size: 18),
-                  label: const Text('그리기'),
+                  label: Text(tr('그리기')),
                 ),
                 OutlinedButton.icon(
                   key: const ValueKey('signature-stamp'),
                   onPressed: _busy ? null : _stamp,
                   icon: const Icon(Icons.approval_outlined, size: 18),
-                  label: const Text('이름 도장 만들기'),
+                  label: Text(tr('이름 도장 만들기')),
                 ),
                 OutlinedButton.icon(
                   key: const ValueKey('signature-upload'),
                   onPressed: _busy ? null : _pickImage,
                   icon: const Icon(Icons.image_outlined, size: 18),
-                  label: const Text('그림 올리기'),
+                  label: Text(tr('그림 올리기')),
                 ),
                 if (_url != null)
                   TextButton(
                     key: const ValueKey('signature-clear'),
                     onPressed: _busy ? null : _clear,
-                    child: const Text('지우기'),
+                    child: Text(tr('지우기')),
                   ),
               ],
             ),
@@ -262,7 +265,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );
@@ -300,7 +303,7 @@ class _SignaturePadDialogState extends State<SignaturePadDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('서명 그리기'),
+      title: Text(tr('서명 그리기')),
       content: Container(
         width: _size.width,
         height: _size.height,
@@ -319,16 +322,16 @@ class _SignaturePadDialogState extends State<SignaturePadDialog> {
       actions: [
         TextButton(
           onPressed: () => setState(_strokes.clear),
-          child: const Text('다시 그리기'),
+          child: Text(tr('다시 그리기')),
         ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('signature-pad-save'),
           onPressed: _save,
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ],
     );
@@ -410,7 +413,7 @@ class _DelegationsDialogState extends State<_DelegationsDialog> {
       final list = await widget.api.delegations();
       if (mounted) setState(() => _list = list);
     } catch (e) {
-      if (mounted) showAppToast(context, '불러오지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('불러오지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -438,9 +441,9 @@ class _DelegationsDialogState extends State<_DelegationsDialog> {
       );
       await _load();
       widget.changes.bump();
-      if (mounted) showAppToast(context, '대결을 맡겼습니다.');
+      if (mounted) showAppToast(context, tr('대결을 맡겼습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -453,7 +456,7 @@ class _DelegationsDialogState extends State<_DelegationsDialog> {
       await _load();
       widget.changes.bump();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -467,9 +470,9 @@ class _DelegationsDialogState extends State<_DelegationsDialog> {
     final mine = list?.where((d) => d.userId == me).toList() ?? const [];
     final toMe = list?.where((d) => d.delegateId == me).toList() ?? const [];
     String period(ApprovalDelegation d) =>
-        '${d.startDate} ~ ${d.endDate}${d.activeOn(widget.ctx.today) ? ' · 지금 효력' : ''}${d.reason == null ? '' : ' · ${d.reason}'}';
+        '${d.startDate} ~ ${d.endDate}${d.activeOn(widget.ctx.today) ? tr(' · 지금 효력') : ''}${d.reason == null ? '' : ' · ${d.reason}'}';
     return AlertDialog(
-      title: const Text('대결(부재) 설정'),
+      title: Text(tr('대결(부재) 설정')),
       content: SizedBox(
         width: 420,
         child: list == null
@@ -481,28 +484,34 @@ class _DelegationsDialogState extends State<_DelegationsDialog> {
                 shrinkWrap: true,
                 children: [
                   Text(
-                    '자리를 비우는 동안 내 차례가 된 결재를 대신 승인·반려할 사람을 정합니다. 대신 한 결재에는 누가 했는지 함께 남습니다.',
+                    tr(
+                      '자리를 비우는 동안 내 차례가 된 결재를 대신 승인·반려할 사람을 정합니다. 대신 한 결재에는 누가 했는지 함께 남습니다.',
+                    ),
                     style: TextStyle(fontSize: 12, color: hint),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '내가 맡긴 대결',
+                    tr('내가 맡긴 대결'),
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
                   if (mine.isEmpty)
                     Padding(
                       padding: const EdgeInsets.all(8),
-                      child: Text('없음', style: TextStyle(color: hint)),
+                      child: Text(tr('없음'), style: TextStyle(color: hint)),
                     ),
                   for (final d in mine)
                     ListTile(
                       key: ValueKey('delegation-${d.id}'),
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      title: Text('${d.delegateName}님이 대신'),
+                      title: Text(
+                        tr('{d.delegateName}님이 대신', {
+                          'd.delegateName': d.delegateName,
+                        }),
+                      ),
                       subtitle: Text(period(d)),
                       trailing: IconButton(
-                        tooltip: '거두기',
+                        tooltip: tr('거두기'),
                         icon: const Icon(Icons.close),
                         onPressed: _busy ? null : () => _remove(d),
                       ),
@@ -510,14 +519,16 @@ class _DelegationsDialogState extends State<_DelegationsDialog> {
                   if (toMe.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     Text(
-                      '내가 맡은 대결',
+                      tr('내가 맡은 대결'),
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                     for (final d in toMe)
                       ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        title: Text('${d.userName}님 대신'),
+                        title: Text(
+                          tr('{d.userName}님 대신', {'d.userName': d.userName}),
+                        ),
                         subtitle: Text(period(d)),
                       ),
                   ],
@@ -527,13 +538,13 @@ class _DelegationsDialogState extends State<_DelegationsDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
         FilledButton.icon(
           key: const ValueKey('delegation-add'),
           onPressed: _busy || list == null ? null : _add,
           icon: const Icon(Icons.add, size: 18),
-          label: const Text('대결 맡기기'),
+          label: Text(tr('대결 맡기기')),
         ),
       ],
     );
@@ -565,7 +576,7 @@ class _DelegationEditDialogState extends State<_DelegationEditDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('대결 맡기기'),
+      title: Text(tr('대결 맡기기')),
       content: SizedBox(
         width: 380,
         child: Column(
@@ -575,7 +586,7 @@ class _DelegationEditDialogState extends State<_DelegationEditDialog> {
             DropdownButtonFormField<String>(
               key: const ValueKey('delegation-delegate'),
               initialValue: _delegateId,
-              decoration: const InputDecoration(labelText: '대신 결재할 사람'),
+              decoration: InputDecoration(labelText: tr('대신 결재할 사람')),
               items: [
                 for (final c in widget.candidates)
                   DropdownMenuItem(
@@ -592,7 +603,7 @@ class _DelegationEditDialogState extends State<_DelegationEditDialog> {
               children: [
                 ApprovalDateField(
                   key: const ValueKey('delegation-start'),
-                  label: '시작',
+                  label: tr('시작'),
                   value: _start,
                   onChanged: (v) => setState(() {
                     _start = v;
@@ -601,7 +612,7 @@ class _DelegationEditDialogState extends State<_DelegationEditDialog> {
                 ),
                 ApprovalDateField(
                   key: const ValueKey('delegation-end'),
-                  label: '끝',
+                  label: tr('끝'),
                   value: _end,
                   onChanged: (v) => setState(() => _end = v),
                 ),
@@ -611,9 +622,9 @@ class _DelegationEditDialogState extends State<_DelegationEditDialog> {
               key: const ValueKey('delegation-reason'),
               controller: _reason,
               maxLength: 100,
-              decoration: const InputDecoration(
-                labelText: '사유(선택)',
-                hintText: '예: 출장, 휴가',
+              decoration: InputDecoration(
+                labelText: tr('사유(선택)'),
+                hintText: tr('예: 출장, 휴가'),
               ),
             ),
             if (_error != null)
@@ -627,13 +638,13 @@ class _DelegationEditDialogState extends State<_DelegationEditDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('delegation-save'),
           onPressed: () {
             if (_delegateId == null) {
-              return setState(() => _error = '대신 결재할 사람을 고르세요.');
+              return setState(() => _error = tr('대신 결재할 사람을 고르세요.'));
             }
             final reason = _reason.text.trim();
             Navigator.of(context).pop((
@@ -643,7 +654,7 @@ class _DelegationEditDialogState extends State<_DelegationEditDialog> {
               reason: reason.isEmpty ? null : reason,
             ));
           },
-          child: const Text('맡기기'),
+          child: Text(tr('맡기기')),
         ),
       ],
     );
@@ -731,19 +742,19 @@ class _ApprovalStatsSectionState extends State<ApprovalStatsSection> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         GroupwareSectionHeader(
-          '결재 통계',
+          tr('결재 통계'),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                tooltip: '이전 달',
+                tooltip: tr('이전 달'),
                 icon: const Icon(Icons.chevron_left),
                 onPressed: () => _shift(-1),
               ),
               Text(_month, key: const ValueKey('gw-stats-month')),
               IconButton(
                 key: const ValueKey('gw-stats-next'),
-                tooltip: '다음 달',
+                tooltip: tr('다음 달'),
                 icon: const Icon(Icons.chevron_right),
                 onPressed: _month == widget.ctx.today.substring(0, 7)
                     ? null
@@ -765,12 +776,26 @@ class _ApprovalStatsSectionState extends State<ApprovalStatsSection> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      '올린 결재 ${s.totals.total}건 · 승인 ${s.totals.approved} · 반려 ${s.totals.rejected} · 진행 중 ${s.totals.pending}'
-                      ' · 끝날 때까지 평균 ${hoursText(s.totals.avgHours)}',
+                      tr(
+                        '올린 결재 {s.totals.total}건 · 승인 {s.totals.approved} · 반려 {s.totals.rejected} · 진행 중 {s.totals.pending} · 끝날 때까지 평균 {p0}',
+                        {
+                          's.totals.total': s.totals.total,
+                          's.totals.approved': s.totals.approved,
+                          's.totals.rejected': s.totals.rejected,
+                          's.totals.pending': s.totals.pending,
+                          'p0': hoursText(s.totals.avgHours),
+                        },
+                      ),
                       key: const ValueKey('gw-stats-totals'),
                     ),
                     const SizedBox(height: 8),
-                    cells(['종류', '건수', '승인', '반려', '평균'], head: true),
+                    cells([
+                      tr('종류'),
+                      tr('건수'),
+                      tr('승인'),
+                      tr('반려'),
+                      tr('평균'),
+                    ], head: true),
                     for (final k in s.byKind)
                       cells([
                         k.label,
@@ -780,7 +805,14 @@ class _ApprovalStatsSectionState extends State<ApprovalStatsSection> {
                         hoursText(k.avgHours),
                       ], key: ValueKey('gw-stats-kind-${k.label}')),
                     const SizedBox(height: 10),
-                    cells(['결재자', '결정', '반려', '대결', '대기', '평균 응답'], head: true),
+                    cells([
+                      tr('결재자'),
+                      tr('결정'),
+                      tr('반려'),
+                      tr('대결'),
+                      tr('대기'),
+                      tr('평균 응답'),
+                    ], head: true),
                     for (final a in s.byApprover)
                       cells([
                         a.name,
@@ -793,7 +825,7 @@ class _ApprovalStatsSectionState extends State<ApprovalStatsSection> {
                     if (s.byKind.isEmpty)
                       Padding(
                         padding: const EdgeInsets.all(8),
-                        child: Text('이 달에 올린 결재가 없습니다.', style: small),
+                        child: Text(tr('이 달에 올린 결재가 없습니다.'), style: small),
                       ),
                   ],
                 ),

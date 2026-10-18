@@ -1,11 +1,16 @@
+import '../l10n/tr.dart';
+
 /// 북마크 종류 — 팀 북마크는 팀 모두에게, 개인 북마크는 나에게만 보인다. 한 번 만들면 바꿀 수 없다.
 enum BookmarkKind {
   team('team', '팀 북마크'),
   personal('personal', '개인 북마크');
 
   final String wire;
-  final String label;
-  const BookmarkKind(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const BookmarkKind(this.wire, this._labelKo);
 
   static BookmarkKind fromWire(String? s) =>
       s == 'personal' ? BookmarkKind.personal : BookmarkKind.team;

@@ -84,6 +84,7 @@ export '../models/scheduled_message.dart';
 export 'poll_actions.dart';
 // 할 일(To-Do) 호출 손잡이(session.todoApi)와 소켓 토스트 문구.
 export 'todo_actions.dart';
+import '../l10n/tr.dart';
 
 enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
 
@@ -143,7 +144,7 @@ class Session extends ChangeNotifier {
   static const _kRememberedUsername = 'remembered_username';
   static const _kKeepSignedInPref = 'keep_signed_in_pref';
   static const _kWebPushEnabled = 'web_push_enabled';
-  static const _secretPreviewPlaceholder = '새 메시지가 있습니다';
+  static final _secretPreviewPlaceholder = tr('새 메시지가 있습니다');
 
   // FCM 백그라운드 핸들러(main.dart)는 이 Session과 완전히 별개의 격리된 isolate에서
   // 돌아서 activeRoomId/appInForeground 필드에 전혀 접근할 수 없다 — 그래서 그 값이
@@ -324,12 +325,12 @@ class Session extends ChangeNotifier {
     store: chatDrafts,
     push: (roomId, draft, deviceId) async {
       final client = api;
-      if (client == null) throw const ApiException('연결되어 있지 않습니다.');
+      if (client == null) throw ApiException(tr('연결되어 있지 않습니다.'));
       return client.putDraft(roomId, DraftSync.draftToJson(draft, deviceId));
     },
     fetchAll: () async {
       final client = api;
-      if (client == null) throw const ApiException('연결되어 있지 않습니다.');
+      if (client == null) throw ApiException(tr('연결되어 있지 않습니다.'));
       return client.fetchDrafts();
     },
     deviceId: () => deviceIdentity?.deviceId,
@@ -930,7 +931,7 @@ class Session extends ChangeNotifier {
     final testClient = ApiClient(baseUrl: normalized, httpClient: pinnedClient);
     final ok = await testClient.checkHealth();
     if (!ok) {
-      error = '서버에 연결할 수 없습니다. 주소를 확인하세요 (예: https://192.168.0.62:3000)';
+      error = tr('서버에 연결할 수 없습니다. 주소를 확인하세요 (예: https://192.168.0.62:3000)');
       notifyListeners();
       return false;
     }
@@ -1171,7 +1172,9 @@ class Session extends ChangeNotifier {
           : 'update-setup.exe';
       final response = await api!.downloadUpdate(platformPath);
       if (response.statusCode != 200) {
-        throw '다운로드에 실패했습니다 (${response.statusCode}).';
+        throw tr('다운로드에 실패했습니다 ({response.statusCode}).', {
+          'response.statusCode': response.statusCode,
+        });
       }
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}${AppPlatform.pathSeparator}$fileName');
@@ -1208,11 +1211,13 @@ class Session extends ChangeNotifier {
       } else {
         final result = await OpenFile.open(file.path);
         if (result.type != ResultType.done) {
-          throw '설치 파일을 열 수 없습니다: ${result.message}';
+          throw tr('설치 파일을 열 수 없습니다: {result.message}', {
+            'result.message': result.message,
+          });
         }
       }
     } catch (e) {
-      updateError = '업데이트 설치 실패: $e';
+      updateError = tr('업데이트 설치 실패: {e}', {'e': e});
     } finally {
       updateDownloading = false;
       notifyListeners();
@@ -1231,7 +1236,7 @@ class Session extends ChangeNotifier {
     DateTime? until,
     required String fileName,
   }) async {
-    if (api == null) throw const ApiException('연결되어 있지 않습니다.');
+    if (api == null) throw ApiException(tr('연결되어 있지 않습니다.'));
     final response = await api!.exportRoomChat(
       roomId,
       since: since,
@@ -1239,7 +1244,7 @@ class Session extends ChangeNotifier {
     );
     if (response.statusCode != 200) {
       final body = await response.stream.bytesToString();
-      var message = '내보내기에 실패했습니다.';
+      var message = tr('내보내기에 실패했습니다.');
       try {
         final decoded = jsonDecode(body) as Map<String, dynamic>;
         message = decoded['error'] as String? ?? message;
@@ -1505,7 +1510,7 @@ class Session extends ChangeNotifier {
     final documentId = n['documentId'] as String?;
     if (documentId == null) return;
     notifications.showApprovalNotification(
-      title: n['title'] as String? ?? '결재',
+      title: n['title'] as String? ?? tr('결재'),
       body: n['body'] as String? ?? '',
       documentId: documentId,
       teamId: n['teamId'] as String?,
@@ -1543,8 +1548,12 @@ class Session extends ChangeNotifier {
         : const {};
     final from = first['from'] as String? ?? '';
     final subject = first['subject'] as String? ?? '';
-    final title = count > 1 ? '새 메일 $count통' : '새 메일 — $from';
-    final body = count > 1 ? '$from: $subject 외' : subject;
+    final title = count > 1
+        ? tr('새 메일 {count}통', {'count': count})
+        : tr('새 메일 — {from}', {'from': from});
+    final body = count > 1
+        ? tr('{from}: {subject} 외', {'from': from, 'subject': subject})
+        : subject;
     _showToast('$title · $body');
     if (_quietNotifications) return;
     notifications.showMailNotification(title: title, body: body);
@@ -1553,7 +1562,7 @@ class Session extends ChangeNotifier {
   /// 소켓 `attendance:reminder` — 출근(또는 퇴근)을 아직 안 눌렀다는 알림. 앱이 켜져 있으면 서버 푸시가 오지 않으니 여기서 띄운다
   /// (토스트 + 기기 알림 — 문서 id가 빈 결재 알림이라 누르면 그룹웨어 화면, main.dart).
   void handleAttendanceReminder(Map<String, dynamic> data) {
-    final title = data['title'] as String? ?? '출퇴근';
+    final title = data['title'] as String? ?? tr('출퇴근');
     final body = data['body'] as String? ?? '';
     _showToast(body.isEmpty ? title : '$title — $body');
     if (_quietNotifications) return;
@@ -1999,7 +2008,7 @@ class Session extends ChangeNotifier {
           (data['unreadCount'] as num?)?.toInt() ?? projectUnread + 1;
       if (!_quietNotifications) {
         notifications.showProjectNotification(
-          title: data['title'] as String? ?? '프로젝트',
+          title: data['title'] as String? ?? tr('프로젝트'),
           body: data['body'] as String? ?? '',
           projectId: data['projectId'] as String? ?? '',
         );
@@ -2075,8 +2084,14 @@ class Session extends ChangeNotifier {
         currentTeam = null; // 보고 있던 팀에서 빠졌으면 팀 선택 화면으로 돌아간다.
         _forceClearActiveRoom();
         _onCurrentTeamChanged();
-        final where = e.teamName == null ? '팀' : "'${e.teamName}' 팀";
-        _showToast(e.deleted ? '$where이 삭제되었습니다.' : '$where에서 나가졌습니다.');
+        final where = e.teamName == null
+            ? tr('팀')
+            : tr('\'{e.teamName}\' 팀', {'e.teamName': e.teamName});
+        _showToast(
+          e.deleted
+              ? tr('{where}이 삭제되었습니다.', {'where': where})
+              : tr('{where}에서 나가졌습니다.', {'where': where}),
+        );
       }
       notifyListeners();
     });
@@ -2181,7 +2196,7 @@ class Session extends ChangeNotifier {
       // 기기에서 통화 중이면 그 기기가 알린다). 통화 화면이든 잠깐 다른 화면에 나와 있든 보이도록
       // 앱 전체 알약 알림으로 띄운다.
       if (callController.roomId != e.roomId) return;
-      _showToast('${e.name}님이 화상회의를 거절했습니다');
+      _showToast(tr('{e.name}님이 화상회의를 거절했습니다', {'e.name': e.name}));
     });
     _callMicSub?.cancel();
     _callMicSub = chatSocket.callMicRequests.listen((request) {
@@ -2286,14 +2301,19 @@ class Session extends ChangeNotifier {
       final teamBadge = teamTag == null ? '' : ' [$teamTag]';
       notifications.showMessage(
         title: initiator != null
-            ? '${initiator.name} [비밀대화 요청]$teamBadge'
-            : '비밀대화 요청$teamBadge',
-        body: '비밀 대화(종단간 암호화)를 요청했습니다.',
+            ? tr('{initiator.name} [비밀대화 요청]{teamBadge}', {
+                'initiator.name': initiator.name,
+                'teamBadge': teamBadge,
+              })
+            : tr('비밀대화 요청{teamBadge}', {'teamBadge': teamBadge}),
+        body: tr('비밀 대화(종단간 암호화)를 요청했습니다.'),
         roomId: e.roomId,
         flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
         flashWindowFrame: settings.flashWindowFrame,
         senderName: initiator?.name,
-        conversationTitle: teamTag == null ? '비밀대화 요청' : '비밀대화 요청 · $teamTag',
+        conversationTitle: teamTag == null
+            ? tr('비밀대화 요청')
+            : tr('비밀대화 요청 · {teamTag}', {'teamTag': teamTag}),
         avatarType: initiator?.avatarType ?? 'initial',
         avatarEmoji: initiator?.avatarEmoji,
         avatarColor: initiator?.avatarColor,
@@ -2332,7 +2352,7 @@ class Session extends ChangeNotifier {
       _controllers.remove(e.roomId)?.dispose();
       if (_activeRoomId == e.roomId) _forceClearActiveRoom();
       notifyListeners();
-      if (iAmInitiator) _showToast('상대방이 요청을 거절했습니다.');
+      if (iAmInitiator) _showToast(tr('상대방이 요청을 거절했습니다.'));
     });
     _secretLeftSub?.cancel();
     _secretLeftSub = chatSocket.secretLeft.listen((e) async {
@@ -2342,7 +2362,7 @@ class Session extends ChangeNotifier {
       _controllers.remove(e.roomId)?.dispose();
       if (_activeRoomId == e.roomId) _forceClearActiveRoom();
       notifyListeners();
-      _showToast('비밀 대화가 종료되었습니다.');
+      _showToast(tr('비밀 대화가 종료되었습니다.'));
     });
     _secretSettingsSub?.cancel();
     _secretSettingsSub = chatSocket.secretSettings.listen((e) {
@@ -2912,7 +2932,7 @@ class Session extends ChangeNotifier {
   /// 것은 없고, 로컬 상태만 정리한다.
   Future<void> _forceLogout() async {
     await logout();
-    error = '세션이 만료되었습니다. 다시 로그인해주세요.';
+    error = tr('세션이 만료되었습니다. 다시 로그인해주세요.');
     notifyListeners();
   }
 
@@ -2957,7 +2977,7 @@ class Session extends ChangeNotifier {
       outcome = await secretSessionManager!.acceptInvite(invite);
     } catch (e) {
       notifyListeners();
-      _showToast('비밀 대화를 수락하지 못했습니다: $e');
+      _showToast(tr('비밀 대화를 수락하지 못했습니다: {e}', {'e': e}));
       return;
     } finally {
       _secretAcceptsInFlight.remove(invite.roomId);
@@ -2996,10 +3016,17 @@ class Session extends ChangeNotifier {
     final who = room == null ? '' : "'${room.displayName(userId ?? '')}' ";
     switch (outcome) {
       case SecretHandshakeOutcome.blocked:
-        _showToast('$who비밀 대화: 상대 기기의 보안 확인에 실패해 대화를 멈췄습니다. 대화방의 안내를 확인해 주세요.');
+        _showToast(
+          tr('{who}비밀 대화: 상대 기기의 보안 확인에 실패해 대화를 멈췄습니다. 대화방의 안내를 확인해 주세요.', {
+            'who': who,
+          }),
+        );
       case SecretHandshakeOutcome.establishedOnChangedDevice:
         _showToast(
-          '$who비밀 대화: 상대의 기기가 바뀌었습니다. 더보기의 "보안 코드 확인"에서 보안 코드를 다시 비교해 주세요.',
+          tr(
+            '{who}비밀 대화: 상대의 기기가 바뀌었습니다. 더보기의 "보안 코드 확인"에서 보안 코드를 다시 비교해 주세요.',
+            {'who': who},
+          ),
         );
       case SecretHandshakeOutcome.established:
       case SecretHandshakeOutcome.ignored:
@@ -3157,7 +3184,7 @@ class Session extends ChangeNotifier {
       }
     }
     if (envelope == null) {
-      throw ApiException('비밀 대화가 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.');
+      throw ApiException(tr('비밀 대화가 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.'));
     }
     return envelope;
   }
@@ -3408,8 +3435,8 @@ class Session extends ChangeNotifier {
   /// GET /rooms/:id/messages가 방이 없을 때(404)·내가 멤버가 아닐 때(403) 주는 문구(server/src/rooms.js — 처음부터 같은
   /// 문구라 예전 서버도 같다). ApiException에는 상태 코드가 없어서 문구로 가린다 — 문구가 바뀌면 "없어진 방"을
   /// 알아보지 못해 정리를 건너뛸 뿐, 있는 방을 지우지는 않는다.
-  static const _roomNotFoundError = '방을 찾을 수 없습니다.';
-  static const _notRoomMemberError = '이 방의 멤버가 아닙니다.';
+  static final _roomNotFoundError = tr('방을 찾을 수 없습니다.');
+  static final _notRoomMemberError = tr('이 방의 멤버가 아닙니다.');
 
   /// 방 화면 없이 최근 히스토리만 받아 맞출 때의 쪽 크기 — 방 화면(RoomChatController)이 처음 받는 쪽과 같다.
   static const _secretSyncPageSize = 50;
@@ -3688,7 +3715,7 @@ class Session extends ChangeNotifier {
   }
 
   /// 보드 게시글의 한 줄 미리보기 — 서버 push.js의 알림 문구와 같다.
-  String _postPreview(Message m) => '게시글: ${m.title ?? ''}';
+  String _postPreview(Message m) => tr('게시글: {p0}', {'p0': m.title ?? ''});
 
   /// 투표의 한 줄 미리보기("[투표] 제목") — 서버 push.js·방 목록 미리보기와 같다.
   String _pollPreview(Message m) => pollPreviewText(m.poll?.title ?? m.text);
@@ -3723,7 +3750,7 @@ class Session extends ChangeNotifier {
       // 나와의 대화엔 남이 쓰지 않는다 — 들어오는 건 봇 안내(팀 참여 등)뿐이라 방 이름으로 알린다.
       RoomType.dm => room!.isSelf ? selfRoomName : '1:1',
       // 이름 없는 그룹채팅은 멤버 이름을 전부 나열하지 않고 "그룹채팅"이라고만 표시한다.
-      RoomType.group => room!.name ?? '그룹채팅',
+      RoomType.group => room!.name ?? tr('그룹채팅'),
       RoomType.topic => room!.displayName(userId ?? ''),
     };
     // 비밀 대화는 서버가 어차피 내용을 복호화할 수 없어서 서버발 미리보기 자체가 불가능하지만,
@@ -3739,8 +3766,8 @@ class Session extends ChangeNotifier {
                   : m.isPoll
                   ? _pollPreview(m)
                   : m.text ?? '',
-            MessageType.image => '사진을 보냈습니다',
-            MessageType.file => m.fileName ?? '파일을 보냈습니다',
+            MessageType.image => tr('사진을 보냈습니다'),
+            MessageType.file => m.fileName ?? tr('파일을 보냈습니다'),
             MessageType.sticker => stickerPreviewText(m.text),
             MessageType.system => '',
             MessageType.comment =>
@@ -3812,15 +3839,15 @@ class Session extends ChangeNotifier {
     final roomTag = switch (room?.type) {
       null => null,
       RoomType.dm => room!.isSelf ? selfRoomName : '1:1',
-      RoomType.group => room!.name ?? '그룹채팅',
+      RoomType.group => room!.name ?? tr('그룹채팅'),
       RoomType.topic => room!.displayName(userId ?? ''),
     };
     final preview = room?.isSecret == true || !_shouldPreviewFor(room)
         ? _secretPreviewPlaceholder
         : switch (c.type) {
             MessageType.text => c.text ?? '',
-            MessageType.image => '사진을 보냈습니다',
-            MessageType.file => c.fileName ?? '파일을 보냈습니다',
+            MessageType.image => tr('사진을 보냈습니다'),
+            MessageType.file => c.fileName ?? tr('파일을 보냈습니다'),
             MessageType.sticker => stickerPreviewText(c.text),
             MessageType.system || MessageType.comment => '', // 댓글엔 나올 수 없는 타입.
           };
@@ -3835,7 +3862,9 @@ class Session extends ChangeNotifier {
       }
     }
 
-    final tag = roomTag != null ? '$roomTag·댓글' : '댓글';
+    final tag = roomTag != null
+        ? tr('{roomTag}·댓글', {'roomTag': roomTag})
+        : tr('댓글');
     final teamTag = _teamTagFor(room);
     if (_quietNotifications) return;
     notifications.showMessage(
@@ -3901,7 +3930,7 @@ class Session extends ChangeNotifier {
       }
     }
     final roomTag = room.displayName(userId ?? '');
-    final tag = '$roomTag·공지';
+    final tag = tr('{roomTag}·공지', {'roomTag': roomTag});
     final teamTag = _teamTagFor(room);
     if (_quietNotifications) return;
     notifications.showMessage(
@@ -4053,7 +4082,10 @@ class Session extends ChangeNotifier {
           '${n.actorName ?? ''} [$roomTag]${teamTag == null ? '' : ' [$teamTag]'}',
       body: room.isSecret
           ? _secretPreviewPlaceholder
-          : '${n.actorName ?? ''}님이 회원님을 멘션했습니다: ${n.preview}',
+          : tr('{p0}님이 회원님을 멘션했습니다: {n.preview}', {
+              'p0': n.actorName ?? '',
+              'n.preview': n.preview,
+            }),
       roomId: room.id,
       flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
       flashWindowFrame: settings.flashWindowFrame,
@@ -4174,7 +4206,7 @@ class Session extends ChangeNotifier {
   /// 애초에 이 화면들에 들어갈 수 없으므로, 여기서는 currentTeam이 있다고 보고 진행한다.
   String get _requireTeamId {
     final team = currentTeam;
-    if (team == null) throw StateError('팀을 먼저 선택해야 합니다.');
+    if (team == null) throw StateError(tr('팀을 먼저 선택해야 합니다.'));
     return team.id;
   }
 
@@ -4459,7 +4491,7 @@ class Session extends ChangeNotifier {
     this.email = me.email;
     emailVerified = me.emailVerified;
     notifyListeners();
-    if (email != null) _showToast('이메일이 변경되었습니다.');
+    if (email != null) _showToast(tr('이메일이 변경되었습니다.'));
   }
 
   /// 서버에 메일 기능이 켜졌는지 다시 묻는다 — 앱을 켤 때, 서버 주소를 바꿀 때, 로그인 화면을 열 때(관리자가 그사이 켜거나 껐을
@@ -4610,7 +4642,7 @@ class Session extends ChangeNotifier {
       token: token!,
       deviceId: deviceIdentity?.deviceId,
     );
-    _showToast('비밀번호가 변경되었습니다.');
+    _showToast(tr('비밀번호가 변경되었습니다.'));
   }
 
   Future<void> leaveRoom(
@@ -4826,11 +4858,11 @@ class Session extends ChangeNotifier {
     String path, {
     required String fileName,
   }) async {
-    if (api == null) throw const ApiException('연결되어 있지 않습니다.');
+    if (api == null) throw ApiException(tr('연결되어 있지 않습니다.'));
     final response = await api!.downloadAuthed(path);
     if (response.statusCode != 200) {
       final body = await response.stream.bytesToString();
-      var message = '내려받기에 실패했습니다.';
+      var message = tr('내려받기에 실패했습니다.');
       try {
         final decoded = jsonDecode(body) as Map<String, dynamic>;
         message = decoded['error'] as String? ?? message;
@@ -5104,7 +5136,7 @@ class Session extends ChangeNotifier {
     final room = roomId == null ? null : _findRoom(roomId);
     if (room != null) return room.displayName(userId ?? '');
     final name = snapshot?.trim();
-    return name == null || name.isEmpty ? '대화방' : name;
+    return name == null || name.isEmpty ? tr('대화방') : name;
   }
 
   /// 지금 팀의 내 예약을 서버에서 다시 받는다. 실패하면 예외를 그대로 던진다(목록 화면이 안내할 수
@@ -5246,7 +5278,7 @@ class Session extends ChangeNotifier {
     final sendTitle = _scheduledTitleFor(room, title);
     final trimmedText = text.trim();
     _checkScheduled([
-      if (room?.isSecret == true) '비밀 대화에는 예약할 수 없습니다.',
+      if (room?.isSecret == true) tr('비밀 대화에는 예약할 수 없습니다.'),
       if (room != null)
         validateScheduledTitle(sendTitle, isBoard: room.isBoard),
       validateScheduledText(text),
@@ -5254,7 +5286,9 @@ class Session extends ChangeNotifier {
       validateScheduledSendAt(sendAt),
       if (_scheduledLoaded &&
           scheduledMessages.length >= scheduledMessageMaxCount)
-        '예약 메시지는 최대 $scheduledMessageMaxCount건까지 만들 수 있습니다.',
+        tr('예약 메시지는 최대 {scheduledMessageMaxCount}건까지 만들 수 있습니다.', {
+          'scheduledMessageMaxCount': scheduledMessageMaxCount,
+        }),
     ]);
     final created = await _scheduledOp(
       () => api!.createScheduledMessage(
@@ -5299,7 +5333,7 @@ class Session extends ChangeNotifier {
     }
     final trimmedText = text?.trim();
     _checkScheduled([
-      if (roomId != null && room?.isSecret == true) '비밀 대화에는 예약할 수 없습니다.',
+      if (roomId != null && room?.isSecret == true) tr('비밀 대화에는 예약할 수 없습니다.'),
       if (room != null && room.isBoard && (title != null || roomId != null))
         validateScheduledTitle(sendTitle ?? existing?.title, isBoard: true),
       if (text != null) validateScheduledText(text),
@@ -5457,7 +5491,7 @@ class Session extends ChangeNotifier {
     UploadCancelToken? cancelToken,
   }) async {
     final client = api;
-    if (client == null) throw const ApiException('연결되어 있지 않습니다.');
+    if (client == null) throw ApiException(tr('연결되어 있지 않습니다.'));
     return uploadPlainFiles(
       client,
       files,
@@ -5474,7 +5508,7 @@ class Session extends ChangeNotifier {
     final existing = _controllers[room.id];
     if (existing != null) return existing;
     if (_findRoom(room.id) == null) {
-      throw const ApiException('이 토픽에 더 이상 참여하고 있지 않습니다.');
+      throw ApiException(tr('이 토픽에 더 이상 참여하고 있지 않습니다.'));
     }
     return controllerFor(room);
   }

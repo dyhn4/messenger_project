@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/session.dart';
+import '../l10n/tr.dart';
 
 /// "새 버전이 있습니다" 대화상자. 기존엔 MaterialBanner(화면 위쪽 얇은 줄)로만 알려서
 /// 놓치기 쉬웠던 걸, 눈에 잘 띄는 모달 대화상자로 바꿨다. "다운로드"(브라우저로 넘겨서
@@ -23,26 +24,26 @@ class UpdateDialog extends StatelessWidget {
         final progress = session.updateDownloadProgress;
         final error = session.updateError;
         return AlertDialog(
-          title: const Row(
+          title: Row(
             children: [
               Icon(Icons.system_update_outlined),
               SizedBox(width: 8),
-              Text('업데이트 안내'),
+              Text(tr('업데이트 안내')),
             ],
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('새 버전(v$version)이 있습니다.'),
+              Text(tr('새 버전(v{version})이 있습니다.', {'version': version})),
               if (downloading) ...[
                 const SizedBox(height: 16),
                 LinearProgressIndicator(value: progress),
                 const SizedBox(height: 8),
                 Text(
                   progress != null
-                      ? '다운로드 중... ${(progress * 100).round()}%'
-                      : '다운로드 중...',
+                      ? tr('다운로드 중... {p0}%', {'p0': (progress * 100).round()})
+                      : tr('다운로드 중...'),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -58,7 +59,7 @@ class UpdateDialog extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: downloading ? null : () => Navigator.of(context).pop(),
-              child: const Text('나중에'),
+              child: Text(tr('나중에')),
             ),
             FilledButton(
               onPressed: downloading
@@ -78,7 +79,7 @@ class UpdateDialog extends StatelessWidget {
                       height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('지금 설치'),
+                  : Text(tr('지금 설치')),
             ),
           ],
         );

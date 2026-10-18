@@ -13,6 +13,7 @@ import '../../widgets/user_avatar.dart';
 import 'task_comments_section.dart';
 import 'task_extras_sections.dart';
 import 'task_views.dart' show formatYmd;
+import '../../l10n/tr.dart';
 
 /// 미니 모드일 때의 패널 폭 — 목록과 나란히 두기에 답답하지 않은 선.
 const kTaskPanelWidth = 420.0;
@@ -138,7 +139,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
       await _load();
       widget.onChanged?.call();
     } catch (e) {
-      if (mounted) showAppToast(context, '바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('바꾸지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -155,10 +156,15 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
     try {
       final copy = await widget.session.api!.copyTask(widget.taskId);
       widget.onChanged?.call();
-      if (mounted) showAppToast(context, '${copy.key ?? '업무'}로 복사했습니다.');
+      if (mounted) {
+        showAppToast(
+          context,
+          tr('{p0}로 복사했습니다.', {'p0': copy.key ?? tr('업무')}),
+        );
+      }
       widget.onOpenTask(copy.id);
     } catch (e) {
-      if (mounted) showAppToast(context, '복사하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('복사하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -174,13 +180,13 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
         if (p.id != task.projectId && !p.archived) p,
     ];
     if (targets.isEmpty) {
-      showAppToast(context, '옮길 다른 프로젝트가 없습니다.');
+      showAppToast(context, tr('옮길 다른 프로젝트가 없습니다.'));
       return;
     }
     final picked = await showDialog<Project>(
       context: context,
       builder: (c) => SimpleDialog(
-        title: const Text('어느 프로젝트로 옮길까요?'),
+        title: Text(tr('어느 프로젝트로 옮길까요?')),
         children: [
           for (final p in targets)
             SimpleDialogOption(
@@ -193,7 +199,12 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
     if (picked == null) return;
     await _apply(() async {
       await widget.session.api!.moveTask(task.id, picked.id);
-      if (mounted) showAppToast(context, '${picked.name}(으)로 옮겼습니다.');
+      if (mounted) {
+        showAppToast(
+          context,
+          tr('{picked.name}(으)로 옮겼습니다.', {'picked.name': picked.name}),
+        );
+      }
     });
   }
 
@@ -205,7 +216,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
     await _apply(() async {
       await widget.session.api!.setTaskArchived(task.id, archive);
       if (mounted) {
-        showAppToast(context, archive ? '업무를 보관했습니다.' : '보관을 해제했습니다.');
+        showAppToast(context, archive ? tr('업무를 보관했습니다.') : tr('보관을 해제했습니다.'));
       }
     });
   }
@@ -217,21 +228,26 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('업무 삭제'),
+        title: Text(tr('업무 삭제')),
         content: Text(
           subtasks == 0
-              ? "'${task.title}'을(를) 삭제할까요? 되돌릴 수 없습니다."
-              : "'${task.title}'을(를) 삭제할까요? 하위 업무 $subtasks개도 같이 삭제됩니다. 되돌릴 수 없습니다.",
+              ? tr('\'{task.title}\'을(를) 삭제할까요? 되돌릴 수 없습니다.', {
+                  'task.title': task.title,
+                })
+              : tr(
+                  '\'{task.title}\'을(를) 삭제할까요? 하위 업무 {subtasks}개도 같이 삭제됩니다. 되돌릴 수 없습니다.',
+                  {'task.title': task.title, 'subtasks': subtasks},
+                ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       ),
@@ -242,7 +258,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
       widget.onChanged?.call();
       widget.onClose();
     } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -259,7 +275,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
         ),
       ),
     );
-    if (mounted) showAppToast(context, '링크를 복사했습니다.');
+    if (mounted) showAppToast(context, tr('링크를 복사했습니다.'));
   }
 
   // ── 조각들 ────────────────────────────────────────────────────────────
@@ -276,7 +292,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               builder: (context) {
                 final color = parseTypeColor(_project?.color);
                 return Tooltip(
-                  message: '링크 복사',
+                  message: tr('링크 복사'),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(999),
                     onTap: () => _copyLink(task),
@@ -317,17 +333,17 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                   leadingIcon: const Icon(Icons.copy_outlined, size: 16),
                   onPressed: _copy,
                   // 메뉴 이름 오른쪽에 20px 여백 — 메뉴 폭이 글자에 딱 붙지 않게.
-                  child: const Padding(
+                  child: Padding(
                     padding: EdgeInsets.only(right: 20),
-                    child: Text('업무 복사'),
+                    child: Text(tr('업무 복사')),
                   ),
                 ),
                 MenuItemButton(
                   leadingIcon: const Icon(Icons.open_with, size: 16),
                   onPressed: _move,
-                  child: const Padding(
+                  child: Padding(
                     padding: EdgeInsets.only(right: 20),
-                    child: Text('업무 이동'),
+                    child: Text(tr('업무 이동')),
                   ),
                 ),
                 MenuItemButton(
@@ -335,7 +351,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                   onPressed: _toggleArchive,
                   child: Padding(
                     padding: const EdgeInsets.only(right: 20),
-                    child: Text(task.archived ? '보관 해제' : '업무 보관'),
+                    child: Text(task.archived ? tr('보관 해제') : tr('업무 보관')),
                   ),
                 ),
                 MenuItemButton(
@@ -345,10 +361,10 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                     color: Colors.redAccent,
                   ),
                   onPressed: _delete,
-                  child: const Padding(
+                  child: Padding(
                     padding: EdgeInsets.only(right: 20),
                     child: Text(
-                      '업무 삭제',
+                      tr('업무 삭제'),
                       style: TextStyle(color: Colors.redAccent),
                     ),
                   ),
@@ -356,7 +372,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               ],
               builder: (context, controller, _) => IconButton(
                 icon: const Icon(Icons.more_horiz, size: 20),
-                tooltip: '업무 메뉴',
+                tooltip: tr('업무 메뉴'),
                 onPressed: () =>
                     controller.isOpen ? controller.close() : controller.open(),
               ),
@@ -366,12 +382,12 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               widget.expanded ? Icons.close_fullscreen : Icons.open_in_full,
               size: 18,
             ),
-            tooltip: widget.expanded ? '작게 보기' : '크게 보기',
+            tooltip: widget.expanded ? tr('작게 보기') : tr('크게 보기'),
             onPressed: widget.onToggleExpand,
           ),
           IconButton(
             icon: const Icon(Icons.close, size: 20),
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             onPressed: widget.onClose,
           ),
         ],
@@ -405,7 +421,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
         if (!_readOnly)
           IconButton(
             icon: const Icon(Icons.edit_outlined, size: 18),
-            tooltip: '제목 수정',
+            tooltip: tr('제목 수정'),
             visualDensity: VisualDensity.compact,
             onPressed: () => setState(
               () => _editingTitle = TextEditingController(text: task.title),
@@ -465,7 +481,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
           const SizedBox(width: 8),
         ],
         Text(
-          name ?? '없음',
+          name ?? tr('없음'),
           style: TextStyle(
             fontSize: 13,
             color: name == null ? theme.hintColor : null,
@@ -523,9 +539,9 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
         task.assigneeId != me &&
         members.any((m) => m.id == me);
     return _row(
-      '담당자',
+      tr('담당자'),
       _readOnly
-          ? Text(assignee?.name ?? '미배정')
+          ? Text(assignee?.name ?? tr('미배정'))
           : MenuAnchor(
               menuChildren: [
                 MenuItemButton(
@@ -535,7 +551,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                       clearAssignee: true,
                     ),
                   ),
-                  child: const Text('미배정'),
+                  child: Text(tr('미배정')),
                 ),
                 for (final m in members)
                   MenuItemButton(
@@ -562,7 +578,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                     ),
                     child: assignee == null
                         ? Text(
-                            '미배정',
+                            tr('미배정'),
                             style: TextStyle(
                               fontSize: 13,
                               color: Theme.of(context).hintColor,
@@ -596,7 +612,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               onPressed: () => _apply(
                 () => widget.session.api!.updateTask(task.id, assigneeId: me),
               ),
-              child: const Text('나에게 할당'),
+              child: Text(tr('나에게 할당')),
             )
           : null,
     );
@@ -605,7 +621,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
   Widget _periodRow(Task task) {
     final hint = Theme.of(context).hintColor;
     Widget label(DateTime? value, bool due) => Text(
-      value == null ? (due ? '마감일' : '시작일') : formatYmd(value),
+      value == null ? (due ? tr('마감일') : tr('시작일')) : formatYmd(value),
       style: TextStyle(fontSize: 13, color: value == null ? hint : null),
     );
     Widget one(DateTime? value, bool due) => _readOnly
@@ -627,7 +643,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
             child: label(value, due),
           );
     return _row(
-      '기간',
+      tr('기간'),
       Row(
         children: [
           Icon(Icons.calendar_today_outlined, size: 13, color: hint),
@@ -648,7 +664,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
         _referenceRow(task),
         _periodRow(task),
         _row(
-          '상태',
+          tr('상태'),
           _picker(
             name: task.statusLabel,
             color: parseTypeColor(task.statusColor),
@@ -665,13 +681,16 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               // 반복 업무를 끝냈으면 서버가 다음 회차를 만들었다.
               final next = updated.nextRecurrenceKey;
               if (next != null && mounted) {
-                showAppToast(context, '반복 업무 — 다음 회차 $next를 만들었습니다.');
+                showAppToast(
+                  context,
+                  tr('반복 업무 — 다음 회차 {next}를 만들었습니다.', {'next': next}),
+                );
               }
             }),
           ),
         ),
         _row(
-          '유형',
+          tr('유형'),
           _picker(
             name: task.typeName,
             color: task.typeName == null
@@ -679,7 +698,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                 : parseTypeColor(task.typeColor),
             currentId: task.typeId,
             options: [
-              (id: null, name: '없음', color: Colors.grey),
+              (id: null, name: tr('없음'), color: Colors.grey),
               for (final t in _types)
                 (id: t.id, name: t.name, color: parseTypeColor(t.color)),
             ],
@@ -693,7 +712,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
           ),
         ),
         _row(
-          '우선순위',
+          tr('우선순위'),
           _picker(
             // 아직 안 고른 우선순위는 "없음"으로 — 목록의 "—"와 같은 상태다.
             name: task.priorityName,
@@ -711,10 +730,10 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
           ),
         ),
         // 반복 — 완료하면 다음 회차 업무가 생긴다(task_extras_sections.dart).
-        _row('반복', _recurrenceButton(task)),
+        _row(tr('반복'), _recurrenceButton(task)),
         // 상위 업무 칸은 하위 업무일 때만 보여준다 — 일반 업무는 부모의 "새 하위 업무"로
         // 하위가 되고, 여기서는 어느 업무에 딸려 있는지 확인하고 바꾸는 용도다.
-        if (task.parentTaskId != null) _row('상위 업무', _parentRow(task)),
+        if (task.parentTaskId != null) _row(tr('상위 업무'), _parentRow(task)),
       ],
     );
   }
@@ -729,7 +748,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
         Icon(Icons.repeat, size: 14, color: rule == null ? hint : null),
         const SizedBox(width: 6),
         Text(
-          rule?.label ?? '반복 안 함',
+          rule?.label ?? tr('반복 안 함'),
           key: const ValueKey('task-recurrence-label'),
           style: TextStyle(fontSize: 13, color: rule == null ? hint : null),
         ),
@@ -819,7 +838,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
         if (!task.referenceIds.contains(m.id)) m,
     ];
     return _row(
-      '참조',
+      tr('참조'),
       Wrap(
         spacing: 6,
         runSpacing: 6,
@@ -847,16 +866,16 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
             IgnorePointer(
               child: Opacity(
                 opacity: 0.45,
-                child: DashedAddButton(label: '+ 추가', onTap: () {}),
+                child: DashedAddButton(label: tr('+ 추가'), onTap: () {}),
               ),
             )
           else
             MenuAnchor(
               menuChildren: [
                 if (rest.isEmpty)
-                  const SizedBox(
+                  SizedBox(
                     width: 200,
-                    child: MenuItemButton(child: Text('더 고를 구성원이 없습니다')),
+                    child: MenuItemButton(child: Text(tr('더 고를 구성원이 없습니다'))),
                   ),
                 for (final m in rest)
                   SizedBox(
@@ -873,7 +892,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                   ),
               ],
               builder: (context, controller, _) => DashedAddButton(
-                label: '+ 추가',
+                label: tr('+ 추가'),
                 onTap: () =>
                     controller.isOpen ? controller.close() : controller.open(),
               ),
@@ -891,7 +910,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
       return Align(
         alignment: Alignment.centerLeft,
         child: Text(
-          parentTitle ?? '없음',
+          parentTitle ?? tr('없음'),
           style: TextStyle(
             fontSize: 13,
             color: parentTitle == null ? theme.hintColor : null,
@@ -944,15 +963,15 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
       children: [
         Row(
           children: [
-            const Text(
-              '설명',
+            Text(
+              tr('설명'),
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
             ),
             const Spacer(),
             if (editing == null)
               TextButton.icon(
                 icon: const Icon(Icons.edit_outlined, size: 14),
-                label: const Text('편집'),
+                label: Text(tr('편집')),
                 style: TextButton.styleFrom(
                   visualDensity: VisualDensity.compact,
                   textStyle: const TextStyle(fontSize: 12),
@@ -971,7 +990,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
           Text(
             task.description?.isNotEmpty == true
                 ? task.description!
-                : '설명을 추가하세요...',
+                : tr('설명을 추가하세요...'),
             style: TextStyle(
               color: task.description?.isNotEmpty == true
                   ? null
@@ -995,7 +1014,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                   editing.dispose();
                   setState(() => _editingDescription = null);
                 },
-                child: const Text('취소'),
+                child: Text(tr('취소')),
               ),
               const SizedBox(width: 6),
               FilledButton(
@@ -1010,7 +1029,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                     ),
                   );
                 },
-                child: const Text('저장'),
+                child: Text(tr('저장')),
               ),
             ],
           ),
@@ -1038,7 +1057,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               Icon(Icons.checklist, size: 16, color: theme.hintColor),
               const SizedBox(width: 6),
               Text(
-                '체크리스트 ($done/$total)',
+                tr('체크리스트 ({done}/{total})', {'done': done, 'total': total}),
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(width: 8),
@@ -1062,7 +1081,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
           ),
           const SizedBox(height: 8),
           Text(
-            '체크리스트 진행률은 업무 상세에만 표시되며 전체·대시보드 진행률에는 포함되지 않습니다.',
+            tr('체크리스트 진행률은 업무 상세에만 표시되며 전체·대시보드 진행률에는 포함되지 않습니다.'),
             style: TextStyle(color: theme.hintColor, fontSize: 11),
           ),
           const SizedBox(height: 6),
@@ -1095,7 +1114,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                 if (!_readOnly)
                   IconButton(
                     icon: const Icon(Icons.close, size: 14),
-                    tooltip: '삭제',
+                    tooltip: tr('삭제'),
                     visualDensity: VisualDensity.compact,
                     onPressed: () => _apply(
                       () => widget.session.api!.deleteChecklistItem(item.id),
@@ -1110,8 +1129,8 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                 child: TextField(
                   controller: _newChecklist,
                   enabled: !_readOnly,
-                  decoration: const InputDecoration(
-                    hintText: '+ 새 체크리스트 항목 추가 (Enter)',
+                  decoration: InputDecoration(
+                    hintText: tr('+ 새 체크리스트 항목 추가 (Enter)'),
                     isDense: true,
                     border: OutlineInputBorder(),
                   ),
@@ -1121,7 +1140,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               const SizedBox(width: 6),
               FilledButton(
                 onPressed: _readOnly ? null : () => _addChecklist(task),
-                child: const Text('추가'),
+                child: Text(tr('추가')),
               ),
             ],
           ),
@@ -1153,7 +1172,9 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
             ),
             const SizedBox(width: 6),
             Text(
-              '하위 업무 (${task.subtasks.length})',
+              tr('하위 업무 ({task.subtasks.length})', {
+                'task.subtasks.length': task.subtasks.length,
+              }),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ],
@@ -1172,8 +1193,8 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                 child: TextField(
                   controller: _newSubtask,
                   enabled: !_readOnly,
-                  decoration: const InputDecoration(
-                    hintText: '+ 새 하위 업무 (Enter)',
+                  decoration: InputDecoration(
+                    hintText: tr('+ 새 하위 업무 (Enter)'),
                     isDense: true,
                     border: OutlineInputBorder(),
                   ),
@@ -1183,7 +1204,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               const SizedBox(width: 6),
               FilledButton(
                 onPressed: _readOnly ? null : () => _addSubtask(task),
-                child: const Text('추가'),
+                child: Text(tr('추가')),
               ),
             ],
           ),
@@ -1212,7 +1233,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
             children: [
               if (sub.archived) ...[
                 Tooltip(
-                  message: '보관된 업무',
+                  message: tr('보관된 업무'),
                   child: Icon(
                     Icons.inventory_2_outlined,
                     size: 14,
@@ -1231,7 +1252,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               ),
               const SizedBox(width: 8),
               Tooltip(
-                message: assignee?.name ?? '미배정',
+                message: assignee?.name ?? tr('미배정'),
                 child: assignee != null
                     ? UserAvatar(
                         user: assignee,
@@ -1344,7 +1365,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
   Widget _creator(Task task) {
     final theme = Theme.of(context);
     return Tooltip(
-      message: '생성자',
+      message: tr('생성자'),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1388,7 +1409,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               color: theme.colorScheme.surfaceContainerHigh,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text(
-                '종료된 프로젝트의 업무입니다. 읽기만 할 수 있습니다.',
+                tr('종료된 프로젝트의 업무입니다. 읽기만 할 수 있습니다.'),
                 style: TextStyle(color: theme.hintColor, fontSize: 12),
               ),
             )
@@ -1494,7 +1515,7 @@ class _ArchivedBanner extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Text(
-            '보관된 업무입니다',
+            tr('보관된 업무입니다'),
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
@@ -1602,7 +1623,7 @@ class _ParentTaskPickerState extends State<_ParentTaskPicker> {
       } catch (e) {
         if (!mounted) return;
         setState(() => _loading = false);
-        showAppToast(context, '업무를 불러오지 못했습니다: $e');
+        showAppToast(context, tr('업무를 불러오지 못했습니다: {e}', {'e': e}));
         return;
       }
     }
@@ -1664,7 +1685,7 @@ class _ParentTaskPickerState extends State<_ParentTaskPicker> {
                     )
                   : null,
               child: Text(
-                '없음',
+                tr('없음'),
                 style: TextStyle(
                   fontSize: 13,
                   color: widget.currentId == null
@@ -1716,7 +1737,7 @@ class _ParentTaskPickerState extends State<_ParentTaskPicker> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : Text(
-                    widget.title ?? '없음',
+                    widget.title ?? tr('없음'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

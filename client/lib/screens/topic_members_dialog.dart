@@ -15,6 +15,7 @@ import 'home_screen.dart' show wideBreakpoint;
 import 'invite_members_screen.dart';
 import 'member_profile_dialog.dart';
 import 'my_profile_dialog.dart';
+import '../l10n/tr.dart';
 
 /// 토픽 "참여 멤버" — 채팅 헤더의 "멤버 N" 버튼이 연다. 넓은 화면(PC)은 떠 있는 창, 좁은
 /// 화면(모바일)은 전체 화면.
@@ -90,19 +91,21 @@ List<Widget> topicMemberBadges(
   return [
     if (room.createdBy == m.id)
       RoleBadge(
-        label: '토픽 소유자',
+        label: tr('토픽 소유자'),
         bg: scheme.tertiary.withValues(alpha: 0.16),
         fg: scheme.tertiary,
       ),
     if (withTopicAdmin && room.isTopicAdmin(m.id))
       RoleBadge(
-        label: '토픽 관리자',
+        label: tr('토픽 관리자'),
         bg: scheme.primary.withValues(alpha: 0.16),
         fg: scheme.primary,
       ),
-    if (m.isOwner) RoleBadge(label: '소유자', bg: owner.bg, fg: owner.fg),
-    if (m.role == 'admin') RoleBadge(label: '관리자', bg: admin.bg, fg: admin.fg),
-    if (m.role == 'guest') RoleBadge(label: '준회원', bg: guest.bg, fg: guest.fg),
+    if (m.isOwner) RoleBadge(label: tr('소유자'), bg: owner.bg, fg: owner.fg),
+    if (m.role == 'admin')
+      RoleBadge(label: tr('관리자'), bg: admin.bg, fg: admin.fg),
+    if (m.role == 'guest')
+      RoleBadge(label: tr('준회원'), bg: guest.bg, fg: guest.fg),
   ];
 }
 
@@ -112,20 +115,24 @@ Future<bool> confirmKickTopicMembers(
   List<AppUser> members,
 ) async {
   final who = members.length == 1
-      ? "'${members.single.name}' 님을"
-      : '선택한 멤버 ${members.length}명을';
+      ? tr('\'{members.single.name}\' 님을', {
+          'members.single.name': members.single.name,
+        })
+      : tr('선택한 멤버 {members.length}명을', {'members.length': members.length});
   final ok = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('멤버 내보내기'),
+      title: Text(tr('멤버 내보내기')),
       content: SizedBox(
         width: 340,
-        child: Text('$who 이 토픽에서 내보낼까요? 공개 토픽이면 다시 찾아서 참여할 수 있습니다.'),
+        child: Text(
+          tr('{who} 이 토픽에서 내보낼까요? 공개 토픽이면 다시 찾아서 참여할 수 있습니다.', {'who': who}),
+        ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           style: FilledButton.styleFrom(
@@ -133,7 +140,7 @@ Future<bool> confirmKickTopicMembers(
             foregroundColor: Theme.of(dialogContext).colorScheme.onError,
           ),
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text('내보내기'),
+          child: Text(tr('내보내기')),
         ),
       ],
     ),
@@ -183,7 +190,7 @@ class TopicSearchField extends StatelessWidget {
           suffixIcon: controller.text.isEmpty
               ? null
               : IconButton(
-                  tooltip: '검색어 지우기',
+                  tooltip: tr('검색어 지우기'),
                   visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.close, size: 18),
                   onPressed: () {
@@ -300,9 +307,14 @@ class _TopicMembersScreenState extends State<TopicMembersScreen>
     setState(() => _kicking.add(member.id));
     try {
       await session.kickTopicMembers(room.id, [member.id]);
-      if (mounted) showAppToast(context, "'${member.name}' 님을 내보냈습니다.");
+      if (mounted) {
+        showAppToast(
+          context,
+          tr('\'{member.name}\' 님을 내보냈습니다.', {'member.name': member.name}),
+        );
+      }
     } catch (e) {
-      if (mounted) showAppToast(context, '내보내지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('내보내지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _kicking.remove(member.id));
     }
@@ -327,14 +339,14 @@ class _TopicMembersScreenState extends State<TopicMembersScreen>
     }
     if (widget.asDialog) {
       return FloatingDialog(
-        title: '참여 멤버',
+        title: tr('참여 멤버'),
         maxWidth: 480,
         maxHeight: 640,
         child: body,
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('참여 멤버')),
+      appBar: AppBar(title: Text(tr('참여 멤버'))),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -373,13 +385,15 @@ class _TopicMembersScreenState extends State<TopicMembersScreen>
               children: [
                 Expanded(
                   child: Text(
-                    '멤버 총 ${room.members.length}명',
+                    tr('멤버 총 {room.members.length}명', {
+                      'room.members.length': room.members.length,
+                    }),
                     style: theme.textTheme.titleLarge,
                   ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close),
-                  tooltip: '닫기',
+                  tooltip: tr('닫기'),
                   onPressed: widget.onClose,
                 ),
               ],
@@ -391,8 +405,8 @@ class _TopicMembersScreenState extends State<TopicMembersScreen>
             child: TextField(
               key: const ValueKey('topic-members-search'),
               controller: _search,
-              decoration: const InputDecoration(
-                hintText: '멤버 검색',
+              decoration: InputDecoration(
+                hintText: tr('멤버 검색'),
                 isDense: true,
                 prefixIcon: Icon(Icons.search, size: 18),
                 border: OutlineInputBorder(),
@@ -402,7 +416,7 @@ class _TopicMembersScreenState extends State<TopicMembersScreen>
           ),
           Expanded(
             child: all.isEmpty
-                ? const Center(child: Text('검색 결과가 없습니다.'))
+                ? Center(child: Text(tr('검색 결과가 없습니다.')))
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -464,7 +478,7 @@ class _TopicMembersScreenState extends State<TopicMembersScreen>
         TopicSearchField(
           fieldKey: const ValueKey('topic-members-search'),
           controller: _search,
-          hintText: '이름이나 직책으로 검색',
+          hintText: tr('이름이나 직책으로 검색'),
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 8),
@@ -472,7 +486,9 @@ class _TopicMembersScreenState extends State<TopicMembersScreen>
           children: [
             Expanded(
               child: Text(
-                '멤버 ${room.members.length}명',
+                tr('멤버 {room.members.length}명', {
+                  'room.members.length': room.members.length,
+                }),
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -484,7 +500,7 @@ class _TopicMembersScreenState extends State<TopicMembersScreen>
               TextButton.icon(
                 onPressed: () => showInviteMembers(context, session, room),
                 icon: const Icon(Icons.person_add_alt, size: 18),
-                label: const Text('멤버 초대하기'),
+                label: Text(tr('멤버 초대하기')),
               ),
           ],
         ),
@@ -493,7 +509,7 @@ class _TopicMembersScreenState extends State<TopicMembersScreen>
           child: members.isEmpty
               ? Center(
                   child: Text(
-                    '검색 결과가 없습니다.',
+                    tr('검색 결과가 없습니다.'),
                     style: TextStyle(fontSize: 13, color: theme.hintColor),
                   ),
                 )
@@ -587,7 +603,7 @@ class _MemberTile extends StatelessWidget {
                               TextSpan(text: member.name),
                               if (isMe)
                                 TextSpan(
-                                  text: ' (나)',
+                                  text: tr(' (나)'),
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.normal,
@@ -637,7 +653,7 @@ class _MemberTile extends StatelessWidget {
                       visualDensity: VisualDensity.compact,
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                     ),
-                    child: const Text('내보내기'),
+                    child: Text(tr('내보내기')),
                   ),
               ],
             ],

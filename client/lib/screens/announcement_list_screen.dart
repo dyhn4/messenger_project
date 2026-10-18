@@ -22,6 +22,7 @@ import 'announcement_detail_screen.dart';
 import 'announcement_editor_dialog.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import '../widgets/retrying_network_image.dart';
+import '../l10n/tr.dart';
 
 /// 공지 패널의 키(side_panels.dart의 [SidePanelSpec.key]).
 const announcementPanelKey = 'announcements';
@@ -267,7 +268,7 @@ class _AnnouncementsPanelState extends State<AnnouncementsPanel>
       final items = await _session.api!.fetchAnnouncements(_room.id);
       if (mounted) setState(() => _items = items);
     } catch (e) {
-      if (mounted) setState(() => _error = '공지를 불러오지 못했습니다: $e');
+      if (mounted) setState(() => _error = tr('공지를 불러오지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -296,7 +297,7 @@ class _AnnouncementsPanelState extends State<AnnouncementsPanel>
                 : DateTime.now().add(autoUnpinAfter),
           );
         } catch (e) {
-          throw '공지를 등록하지 못했습니다: $e';
+          throw tr('공지를 등록하지 못했습니다: {e}', {'e': e});
         }
         if (!mounted) return;
         // 소켓 echo(위 _newSub)와 중복되지 않도록 id로 한 번 더 확인한다.
@@ -498,7 +499,7 @@ class _AnnouncementsPanelState extends State<AnnouncementsPanel>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '공지',
+                  tr('공지'),
                   maxLines: 1,
                   style: theme.textTheme.titleLarge?.copyWith(height: 1.15),
                 ),
@@ -528,7 +529,7 @@ class _AnnouncementsPanelState extends State<AnnouncementsPanel>
           IconButton(
             key: const ValueKey('announcement-panel-close'),
             icon: const Icon(Icons.close),
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             onPressed: widget.onClose,
           ),
         ],
@@ -556,11 +557,7 @@ class _AnnouncementsPanelState extends State<AnnouncementsPanel>
           ),
         ),
         icon: const Icon(Icons.add, size: 20),
-        label: const Text(
-          '공지 쓰기',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        label: Text(tr('공지 쓰기'), maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
   }
@@ -618,7 +615,7 @@ class _AnnouncementsPanelState extends State<AnnouncementsPanel>
                     vertical: 6,
                   ),
                   child: Text(
-                    '내린 공지 제외',
+                    tr('내린 공지 제외'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
@@ -663,7 +660,7 @@ class _AnnouncementsPanelState extends State<AnnouncementsPanel>
         TextSpan(
           children: [
             TextSpan(text: '${_visible(items).length}', style: bold),
-            const TextSpan(text: '개의 공지'),
+            TextSpan(text: tr('개의 공지')),
           ],
         ),
         style: style,
@@ -700,7 +697,7 @@ class _AnnouncementsPanelState extends State<AnnouncementsPanel>
             Icon(Icons.campaign_outlined, size: 40, color: theme.hintColor),
             const SizedBox(height: 12),
             Text(
-              filtered ? '채팅방에 고정된 공지가 없습니다.' : '등록된 공지가 없습니다.',
+              filtered ? tr('채팅방에 고정된 공지가 없습니다.') : tr('등록된 공지가 없습니다.'),
               key: const ValueKey('announcement-empty'),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyLarge,
@@ -708,8 +705,10 @@ class _AnnouncementsPanelState extends State<AnnouncementsPanel>
             const SizedBox(height: 4),
             Text(
               filtered
-                  ? '"내린 공지 제외"를 끄면 지난 공지도 보입니다.'
-                  : (_canWrite ? '"공지 쓰기"로 첫 공지를 올려 보세요.' : '아직 올라온 공지가 없습니다.'),
+                  ? tr('"내린 공지 제외"를 끄면 지난 공지도 보입니다.')
+                  : (_canWrite
+                        ? tr('"공지 쓰기"로 첫 공지를 올려 보세요.')
+                        : tr('아직 올라온 공지가 없습니다.')),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
@@ -737,7 +736,7 @@ class _AnnouncementsPanelState extends State<AnnouncementsPanel>
               ),
             ),
             const SizedBox(height: 8),
-            OutlinedButton(onPressed: _load, child: const Text('다시 시도')),
+            OutlinedButton(onPressed: _load, child: Text(tr('다시 시도'))),
           ],
         ),
       );
@@ -805,10 +804,12 @@ class AnnouncementsPanelNoRoom extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
             child: Row(
               children: [
-                Expanded(child: Text('공지', style: theme.textTheme.titleLarge)),
+                Expanded(
+                  child: Text(tr('공지'), style: theme.textTheme.titleLarge),
+                ),
                 IconButton(
                   icon: const Icon(Icons.close),
-                  tooltip: '닫기',
+                  tooltip: tr('닫기'),
                   onPressed: onClose,
                 ),
               ],
@@ -818,7 +819,7 @@ class AnnouncementsPanelNoRoom extends StatelessWidget {
           Expanded(
             child: Center(
               child: Text(
-                '공지를 볼 토픽을 먼저 여세요.',
+                tr('공지를 볼 토픽을 먼저 여세요.'),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.hintColor,
                 ),
@@ -929,8 +930,8 @@ class _AnnouncementCard extends StatelessWidget {
                                     color: Colors.redAccent,
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: const Text(
-                                    '안 읽음',
+                                  child: Text(
+                                    tr('안 읽음'),
                                     style: TextStyle(
                                       color: Colors.white,
                                       fontSize: 11,

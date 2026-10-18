@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/team.dart' show AccountRole;
 import '../services/api_client.dart' show ApiException;
 import '../services/session.dart';
+import '../l10n/tr.dart';
 
 /// 프로필의 "생일" — 월/일만 고른다(연도는 저장하지 않는다). 서버에는 'MM-DD'로 보내고, 팀원들의 캘린더
 /// "멤버 생일"에 표시된다.
@@ -32,7 +33,9 @@ String birthdayValue(int month, int day) =>
 /// 화면 문구 "3월 1일". 없으면 null.
 String? birthdayText(String? value) {
   final b = parseBirthdayValue(value);
-  return b == null ? null : '${b.month}월 ${b.day}일';
+  return b == null
+      ? null
+      : tr('{b.month}월 {b.day}일', {'b.month': b.month, 'b.day': b.day});
 }
 
 /// 프로필 카드에서 생일 수정 창을 연다.
@@ -81,7 +84,7 @@ class _BirthdayEditDialogState extends State<BirthdayEditDialog> {
           _busy = false;
           _error = e is ApiException
               ? e.message
-              : '생일을 저장하지 못했습니다. 잠시 후 다시 시도하세요.';
+              : tr('생일을 저장하지 못했습니다. 잠시 후 다시 시도하세요.');
         });
       }
     }
@@ -93,7 +96,7 @@ class _BirthdayEditDialogState extends State<BirthdayEditDialog> {
     final hint = theme.textTheme.bodySmall?.copyWith(color: theme.hintColor);
     final maxDay = _month == null ? 31 : maxBirthdayDay(_month!);
     return AlertDialog(
-      title: const Text('생일'),
+      title: Text(tr('생일')),
       content: SizedBox(
         width: 320,
         child: Column(
@@ -107,14 +110,17 @@ class _BirthdayEditDialogState extends State<BirthdayEditDialog> {
                     key: const ValueKey('birthday-month'),
                     initialValue: _month,
                     isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: '월',
+                    decoration: InputDecoration(
+                      labelText: tr('월'),
                       isDense: true,
                       border: OutlineInputBorder(),
                     ),
                     items: [
                       for (var m = 1; m <= 12; m++)
-                        DropdownMenuItem(value: m, child: Text('$m월')),
+                        DropdownMenuItem(
+                          value: m,
+                          child: Text(tr('{m}월', {'m': m})),
+                        ),
                     ],
                     onChanged: _busy
                         ? null
@@ -136,14 +142,17 @@ class _BirthdayEditDialogState extends State<BirthdayEditDialog> {
                     key: ValueKey('birthday-day-${_month ?? 0}'),
                     initialValue: _day,
                     isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: '일',
+                    decoration: InputDecoration(
+                      labelText: tr('일'),
                       isDense: true,
                       border: OutlineInputBorder(),
                     ),
                     items: [
                       for (var d = 1; d <= maxDay; d++)
-                        DropdownMenuItem(value: d, child: Text('$d일')),
+                        DropdownMenuItem(
+                          value: d,
+                          child: Text(tr('{d}일', {'d': d})),
+                        ),
                     ],
                     onChanged: _busy ? null : (v) => setState(() => _day = v),
                   ),
@@ -151,11 +160,11 @@ class _BirthdayEditDialogState extends State<BirthdayEditDialog> {
               ],
             ),
             const SizedBox(height: 12),
-            Text('생일 캘린더에 팀원들에게 표시됩니다(연도는 저장하지 않아요)', style: hint),
+            Text(tr('생일 캘린더에 팀원들에게 표시됩니다(연도는 저장하지 않아요)'), style: hint),
             if (_isGuest) ...[
               const SizedBox(height: 6),
               Text(
-                '정회원부터 생일 캘린더에 표시돼요.',
+                tr('정회원부터 생일 캘린더에 표시돼요.'),
                 key: const ValueKey('birthday-guest-note'),
                 style: hint,
               ),
@@ -179,18 +188,18 @@ class _BirthdayEditDialogState extends State<BirthdayEditDialog> {
             style: TextButton.styleFrom(
               foregroundColor: theme.colorScheme.error,
             ),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         TextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('birthday-save'),
           onPressed: _canSave && !_busy
               ? () => _save(birthdayValue(_month!, _day!))
               : null,
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ],
     );

@@ -20,6 +20,7 @@ import 'calendar_time_grid.dart';
 import 'event_detail.dart';
 import 'event_editor.dart';
 import 'management/calendar_management.dart';
+import '../../l10n/tr.dart';
 
 /// 모바일에서 캘린더를 전체 화면으로 연다(방 목록 위쪽 캘린더 버튼).
 Future<void> openCalendarScreen(BuildContext context, Session session) {
@@ -201,7 +202,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
       await _c.moveEvent(event, move);
     } catch (e) {
       if (!mounted) return;
-      showAppToast(context, e is ApiException ? e.message : '일정을 옮기지 못했습니다.');
+      showAppToast(
+        context,
+        e is ApiException ? trServer(e.message) : tr('일정을 옮기지 못했습니다.'),
+      );
     }
   }
 
@@ -366,7 +370,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       return Material(color: theme.colorScheme.surface, child: content);
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('캘린더')),
+      appBar: AppBar(title: Text(tr('캘린더'))),
       body: content,
     );
   }
@@ -390,18 +394,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 OutlinedButton(
                   key: const ValueKey('cal-today'),
                   onPressed: _goToday,
-                  child: const Text('오늘'),
+                  child: Text(tr('오늘')),
                 ),
                 const SizedBox(width: 4),
                 IconButton(
                   key: const ValueKey('cal-prev'),
-                  tooltip: '이전',
+                  tooltip: tr('이전'),
                   icon: const Icon(Icons.chevron_left),
                   onPressed: () => _shift(-1),
                 ),
                 IconButton(
                   key: const ValueKey('cal-next'),
-                  tooltip: '다음',
+                  tooltip: tr('다음'),
                   icon: const Icon(Icons.chevron_right),
                   onPressed: () => _shift(1),
                 ),
@@ -438,13 +442,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   key: const ValueKey('cal-create'),
                   onPressed: () => _createOn(_focused),
                   icon: const Icon(Icons.add, size: 18),
-                  label: const Text('일정 만들기'),
+                  label: Text(tr('일정 만들기')),
                 ),
                 const SizedBox(width: 8),
                 OutlinedButton(
                   key: const ValueKey('cal-close'),
                   onPressed: _close,
-                  child: const Text('닫기'),
+                  child: Text(tr('닫기')),
                 ),
               ],
             ),
@@ -503,7 +507,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     style: TextStyle(color: theme.colorScheme.onErrorContainer),
                   ),
                 ),
-                TextButton(onPressed: _c.refresh, child: const Text('다시 시도')),
+                TextButton(onPressed: _c.refresh, child: Text(tr('다시 시도'))),
               ],
             ),
           ),
@@ -518,23 +522,23 @@ class _CalendarScreenState extends State<CalendarScreen> {
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
-        title: const Text('캘린더'),
+        title: Text(tr('캘린더')),
         actions: [
           IconButton(
             key: const ValueKey('cal-search-open'),
-            tooltip: '일정 검색',
+            tooltip: tr('일정 검색'),
             icon: const Icon(Icons.search),
             onPressed: _openSearchScreen,
           ),
           IconButton(
             key: const ValueKey('cal-today'),
-            tooltip: '오늘',
+            tooltip: tr('오늘'),
             icon: const Icon(Icons.today),
             onPressed: _goToday,
           ),
           IconButton(
             key: const ValueKey('cal-open-list'),
-            tooltip: '캘린더 목록',
+            tooltip: tr('캘린더 목록'),
             icon: const Icon(Icons.layers_outlined),
             onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
           ),
@@ -547,7 +551,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                child: Text('캘린더', style: theme.textTheme.titleMedium),
+                child: Text(tr('캘린더'), style: theme.textTheme.titleMedium),
               ),
               Expanded(
                 child: CalendarListPanel(controller: _c, hooks: _hooks),
@@ -558,7 +562,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         key: const ValueKey('cal-create'),
-        tooltip: '일정 만들기',
+        tooltip: tr('일정 만들기'),
         onPressed: () =>
             _createOn(_mode == CalendarViewMode.month ? _selected : _focused),
         child: const Icon(Icons.add),
@@ -569,7 +573,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             children: [
               IconButton(
                 key: const ValueKey('cal-prev'),
-                tooltip: '이전',
+                tooltip: tr('이전'),
                 icon: const Icon(Icons.chevron_left),
                 onPressed: () => _shift(-1),
               ),
@@ -597,7 +601,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
               ),
               IconButton(
                 key: const ValueKey('cal-next'),
-                tooltip: '다음',
+                tooltip: tr('다음'),
                 icon: const Icon(Icons.chevron_right),
                 onPressed: () => _shift(1),
               ),

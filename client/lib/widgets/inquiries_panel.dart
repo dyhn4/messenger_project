@@ -18,6 +18,7 @@ import 'todos_panel.dart'
         todoCardHoverBorder,
         todoCardPressColor,
         todoListBackgroundColor;
+import '../l10n/tr.dart';
 
 /// 문의함의 두 목록.
 enum InquiryBox { received, sent }
@@ -140,7 +141,9 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
         _errors[box] = null;
       });
     } catch (e) {
-      if (mounted) setState(() => _errors[box] = '문의를 불러오지 못했습니다: $e');
+      if (mounted) {
+        setState(() => _errors[box] = tr('문의를 불러오지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 
@@ -174,13 +177,13 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
         : await showDialog<AppUser>(
             context: context,
             builder: (dialogContext) => SimpleDialog(
-              title: const Text('누구에게 문의할까요?'),
+              title: Text(tr('누구에게 문의할까요?')),
               children: [
                 for (final l in leaders)
                   SimpleDialogOption(
                     key: ValueKey('inquiry-leader-${l.id}'),
                     onPressed: () => Navigator.of(dialogContext).pop(l),
-                    child: Text('${l.name} · 팀장'),
+                    child: Text(tr('{l.name} · 팀장', {'l.name': l.name})),
                   ),
               ],
             ),
@@ -200,7 +203,7 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
         _filter = null;
       });
     } catch (e) {
-      if (mounted) showAppToast(context, '대화방을 열지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('대화방을 열지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -224,7 +227,7 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
         inquiry.statusUpdatedAt = updated.statusUpdatedAt;
       });
     } catch (e) {
-      if (mounted) showAppToast(context, '상태를 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('상태를 바꾸지 못했습니다: {e}', {'e': e}));
       rethrow;
     }
   }
@@ -233,7 +236,7 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
   void _openRoom(Inquiry inquiry) {
     final room = widget.session.roomById(inquiry.roomId);
     if (room == null) {
-      showAppToast(context, '이 대화방에 더 이상 참여하고 있지 않습니다.');
+      showAppToast(context, tr('이 대화방에 더 이상 참여하고 있지 않습니다.'));
       return;
     }
     openRoomFromPanel(context, widget.session, room);
@@ -247,8 +250,12 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
         session: widget.session,
         inquiry: inquiry,
         counterpartLabel: received
-            ? '보낸 사람: ${inquiry.senderName}'
-            : '받는 사람: ${inquiry.recipientName}',
+            ? tr('보낸 사람: {inquiry.senderName}', {
+                'inquiry.senderName': inquiry.senderName,
+              })
+            : tr('받는 사람: {inquiry.recipientName}', {
+                'inquiry.recipientName': inquiry.recipientName,
+              }),
         onChangeStatus: received
             ? (status) => _changeStatus(inquiry, status)
             : null,
@@ -296,12 +303,15 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
       child: Row(
         children: [
           Expanded(
-            child: Text('문의함', style: Theme.of(context).textTheme.titleLarge),
+            child: Text(
+              tr('문의함'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
           ),
           IconButton(
             key: const ValueKey('inquiry-panel-close'),
             icon: const Icon(Icons.close),
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             onPressed: widget.onClose,
           ),
         ],
@@ -329,8 +339,8 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
           ),
         ),
         icon: const Icon(Icons.add, size: 20),
-        label: const Text(
-          '팀장에게 문의하기',
+        label: Text(
+          tr('팀장에게 문의하기'),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -349,13 +359,15 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
         children: [
           PanelTab(
             key: const ValueKey('inquiry-box-received'),
-            label: waiting > 0 ? '받은 문의 $waiting' : '받은 문의',
+            label: waiting > 0
+                ? tr('받은 문의 {waiting}', {'waiting': waiting})
+                : tr('받은 문의'),
             selected: _box == InquiryBox.received,
             onTap: () => _selectBox(InquiryBox.received),
           ),
           PanelTab(
             key: const ValueKey('inquiry-box-sent'),
-            label: '보낸 문의',
+            label: tr('보낸 문의'),
             selected: _box == InquiryBox.sent,
             onTap: () => _selectBox(InquiryBox.sent),
           ),
@@ -376,7 +388,9 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
           ChoiceChip(
             key: const ValueKey('inquiry-filter-all'),
             visualDensity: VisualDensity.compact,
-            label: Text('전체 ${items.length}'),
+            label: Text(
+              tr('전체 {items.length}', {'items.length': items.length}),
+            ),
             selected: _filter == null,
             onSelected: (_) => setState(() => _filter = null),
           ),
@@ -415,7 +429,7 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
               ? const [TextSpan(text: ' ', style: bold)]
               : [
                   TextSpan(text: '${shown.length}', style: bold),
-                  const TextSpan(text: '개의 문의'),
+                  TextSpan(text: tr('개의 문의')),
                 ],
         ),
         style: theme.textTheme.bodyMedium?.copyWith(
@@ -441,7 +455,7 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
               const SizedBox(height: 8),
               OutlinedButton(
                 onPressed: () => _load(_box),
-                child: const Text('다시 시도'),
+                child: Text(tr('다시 시도')),
               ),
             ],
           ),
@@ -463,8 +477,12 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
           session: widget.session,
           inquiry: inquiry,
           counterpart: received
-              ? '보낸 사람 ${inquiry.senderName}'
-              : '받는 사람 ${inquiry.recipientName}',
+              ? tr('보낸 사람 {inquiry.senderName}', {
+                  'inquiry.senderName': inquiry.senderName,
+                })
+              : tr('받는 사람 {inquiry.recipientName}', {
+                  'inquiry.recipientName': inquiry.recipientName,
+                }),
           onTap: () => _openDetail(inquiry),
         );
       },
@@ -476,15 +494,15 @@ class _InquiriesPanelState extends State<InquiriesPanel> {
     final received = _box == InquiryBox.received;
     final filtered = _filter != null;
     final text = filtered
-        ? '${inquiryStatusLabel(_filter!)} 상태인 문의가 없어요.'
+        ? tr('{p0} 상태인 문의가 없어요.', {'p0': inquiryStatusLabel(_filter!)})
         : received
-        ? '받은 문의가 없어요.'
-        : '보낸 문의가 없어요.';
+        ? tr('받은 문의가 없어요.')
+        : tr('보낸 문의가 없어요.');
     final hint = received
-        ? '직책이 팀장이면 팀원이 보낸 문의가 여기에 모여요.'
+        ? tr('직책이 팀장이면 팀원이 보낸 문의가 여기에 모여요.')
         : (_leaders?.isNotEmpty ?? false)
-        ? '"팀장에게 문의하기"로 업무·근태 등을 문의해 보세요.'
-        : '팀장과의 1:1 대화방에서 문의할 수 있어요.';
+        ? tr('"팀장에게 문의하기"로 업무·근태 등을 문의해 보세요.')
+        : tr('팀장과의 1:1 대화방에서 문의할 수 있어요.');
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -768,20 +786,20 @@ class _InquiryDetailDialogState extends State<InquiryDetailDialog> {
                   DownloadableImage(
                     session: widget.session,
                     url: inquiry.fileUrl!,
-                    fileName: inquiry.fileName ?? '첨부 이미지',
+                    fileName: inquiry.fileName ?? tr('첨부 이미지'),
                     thumbnailUrl: inquiry.thumbnailUrl,
                   )
                 else
                   DownloadableFile(
                     session: widget.session,
                     url: inquiry.fileUrl!,
-                    fileName: inquiry.fileName ?? '첨부 파일',
+                    fileName: inquiry.fileName ?? tr('첨부 파일'),
                     // 다운로드 단추는 카드와 겹치지 않게 카드 바깥 오른쪽에(할 일 상세와 같다).
                     actionsBeside: true,
                   ),
               ],
               const SizedBox(height: 20),
-              Text('처리 상태', style: theme.textTheme.labelLarge),
+              Text(tr('처리 상태'), style: theme.textTheme.labelLarge),
               const SizedBox(height: 8),
               if (widget.onChangeStatus != null)
                 Wrap(
@@ -811,11 +829,11 @@ class _InquiryDetailDialogState extends State<InquiryDetailDialog> {
           key: const ValueKey('inquiry-open-room'),
           onPressed: () => Navigator.of(context).pop(true),
           icon: const Icon(Icons.chat_bubble_outline, size: 18),
-          label: const Text('대화로 이동'),
+          label: Text(tr('대화로 이동')),
         ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );

@@ -4,6 +4,7 @@ import '../models/room.dart';
 import '../services/session.dart';
 import 'floating_dialog.dart';
 import 'room_avatar.dart';
+import '../l10n/tr.dart';
 
 /// "초대 완료" 창을 연다 — 멤버 초대하기(토픽·그룹채팅 한 곳)와 여러 토픽/그룹채팅에 초대가 같이 쓴다.
 /// 어느 대화방에 누가 초대됐는지, 이미 참여 중이던 사람, 초대하지 못한 사람(사유)을 방별로 보여 준다.
@@ -26,7 +27,9 @@ const inviteResultNamesMax = 3;
 String inviteNamesText(List<InvitePerson> people) {
   final shown = people.take(inviteResultNamesMax).map((p) => p.name).join(', ');
   final rest = people.length - inviteResultNamesMax;
-  return rest > 0 ? '$shown 외 $rest명' : shown;
+  return rest > 0
+      ? tr('{shown} 외 {rest}명', {'shown': shown, 'rest': rest})
+      : shown;
 }
 
 /// "N개 대화방에 M명을 초대했습니다" 요약 — 새로 초대된 사람이 없으면 그렇게 알린다.
@@ -37,8 +40,11 @@ String inviteResultSummary(List<RoomInviteResult> results) {
       if (r.error == null)
         for (final p in r.invited) p.userId,
   }.length;
-  if (invitedRooms == 0) return '새로 초대된 멤버가 없습니다';
-  return '$invitedRooms개 대화방에 $invitedPeople명을 초대했습니다';
+  if (invitedRooms == 0) return tr('새로 초대된 멤버가 없습니다');
+  return tr('{invitedRooms}개 대화방에 {invitedPeople}명을 초대했습니다', {
+    'invitedRooms': invitedRooms,
+    'invitedPeople': invitedPeople,
+  });
 }
 
 class InviteResultDialog extends StatelessWidget {
@@ -55,7 +61,7 @@ class InviteResultDialog extends StatelessWidget {
     final theme = Theme.of(context);
     final skipped = results.where((r) => r.error != null).length;
     return FloatingDialog(
-      title: '초대 완료',
+      title: tr('초대 완료'),
       maxWidth: 560,
       maxHeight: 680,
       child: Column(
@@ -85,7 +91,7 @@ class InviteResultDialog extends StatelessWidget {
           if (skipped > 0) ...[
             const SizedBox(height: 6),
             Text(
-              '$skipped개 대화방은 초대하지 못했습니다.',
+              tr('{skipped}개 대화방은 초대하지 못했습니다.', {'skipped': skipped}),
               key: const ValueKey('invite-result-skipped'),
               style: TextStyle(fontSize: 13, color: theme.colorScheme.error),
             ),
@@ -114,7 +120,7 @@ class InviteResultDialog extends StatelessWidget {
               key: const ValueKey('invite-result-confirm'),
               autofocus: true,
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('확인'),
+              child: Text(tr('확인')),
             ),
           ),
         ],
@@ -135,7 +141,7 @@ class _ResultTile extends StatelessWidget {
     final type = result.roomType ?? room?.type;
     final name = (result.roomName ?? '').isNotEmpty
         ? result.roomName!
-        : (room?.displayName(session.userId ?? '') ?? '(알 수 없음)');
+        : (room?.displayName(session.userId ?? '') ?? tr('(알 수 없음)'));
     final error = result.errorText;
     return Padding(
       key: ValueKey('invite-result-room-${result.roomId}'),
@@ -182,21 +188,21 @@ class _ResultTile extends StatelessWidget {
                   if (result.invited.isNotEmpty)
                     _line(
                       context,
-                      label: '초대됨',
+                      label: tr('초대됨'),
                       text: inviteNamesText(result.invited),
                     ),
                   if (result.alreadyMembers.isNotEmpty)
                     _line(
                       context,
-                      label: '이미 참여중',
+                      label: tr('이미 참여중'),
                       text: inviteNamesText(result.alreadyMembers),
                       muted: true,
                     ),
                   for (final p in result.failed)
                     _line(
                       context,
-                      label: '실패',
-                      text: '${p.name} — ${p.reason ?? '초대하지 못했습니다.'}',
+                      label: tr('실패'),
+                      text: '${p.name} — ${p.reason ?? tr('초대하지 못했습니다.')}',
                       error: true,
                     ),
                 ],
@@ -294,7 +300,7 @@ class InviteRoomTypeChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
       ),
       child: Text(
-        type == RoomType.topic ? '토픽' : '그룹채팅',
+        type == RoomType.topic ? tr('토픽') : tr('그룹채팅'),
         style: TextStyle(
           fontSize: 11,
           color: theme.colorScheme.onSecondaryContainer,

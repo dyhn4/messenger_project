@@ -5,6 +5,7 @@ import '../models/integration.dart';
 import '../services/time_format.dart';
 import 'app_toast.dart';
 import 'avatar_utils.dart';
+import '../l10n/tr.dart';
 
 /// 외부 연동 화면(웹훅·슬래시 명령·개인 API 토큰)이 함께 쓰는 조각 — 한 번만 보이는 비밀값 창, 복사 칸, 이름·아이콘 입력.
 
@@ -39,11 +40,11 @@ class CopyableSecretField extends StatelessWidget {
             ),
           ),
           IconButton(
-            tooltip: '복사',
+            tooltip: tr('복사'),
             icon: const Icon(Icons.copy, size: 18),
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: value));
-              if (context.mounted) showAppToast(context, copiedText);
+              if (context.mounted) showAppToast(context, tr(copiedText));
             },
           ),
         ],
@@ -90,7 +91,9 @@ Future<void> showSecretRevealDialog(
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '이 창을 닫으면 다시 볼 수 없습니다. 지금 복사해 두세요. 새어 나갔다면 "새로 만들기"로 바꾸세요.',
+                      tr(
+                        '이 창을 닫으면 다시 볼 수 없습니다. 지금 복사해 두세요. 새어 나갔다면 "새로 만들기"로 바꾸세요.',
+                      ),
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.orange.shade800,
@@ -108,7 +111,7 @@ Future<void> showSecretRevealDialog(
         FilledButton(
           key: const ValueKey('integration-secret-done'),
           onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const Text('복사했습니다'),
+          child: Text(tr('복사했습니다')),
         ),
       ],
     ),
@@ -189,17 +192,17 @@ class _BotNameDialogState extends State<_BotNameDialog> {
               autofocus: true,
               maxLength: 40,
               decoration: InputDecoration(
-                labelText: '봇 이름',
-                hintText: widget.nameHint,
+                labelText: tr('봇 이름'),
+                hintText: tr(widget.nameHint),
               ),
               onSubmitted: (_) => _submit(),
             ),
             TextField(
               key: const ValueKey('bot-emoji-field'),
               controller: _emoji,
-              decoration: const InputDecoration(
-                labelText: '아이콘(이모지 하나)',
-                hintText: '비우면 🤖',
+              decoration: InputDecoration(
+                labelText: tr('아이콘(이모지 하나)'),
+                hintText: tr('비우면 🤖'),
               ),
               onSubmitted: (_) => _submit(),
             ),
@@ -209,12 +212,12 @@ class _BotNameDialogState extends State<_BotNameDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('bot-name-confirm'),
           onPressed: _submit,
-          child: Text(widget.confirmLabel),
+          child: Text(tr(widget.confirmLabel)),
         ),
       ],
     );
@@ -250,7 +253,7 @@ Future<void> showSlashReplyDialog(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '/$command · 나에게만 보이는 답',
+                tr('/{command} · 나에게만 보이는 답', {'command': command}),
                 style: TextStyle(
                   fontSize: 12,
                   color: Theme.of(dialogContext).hintColor,
@@ -265,7 +268,7 @@ Future<void> showSlashReplyDialog(
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     ),
@@ -337,8 +340,11 @@ class SlashCommandSuggestions extends StatelessWidget {
 /// "마지막 사용 …" / "아직 안 씀" 한 줄.
 String integrationUsageText(DateTime? lastUsedAt, int useCount) =>
     lastUsedAt == null
-    ? '아직 쓰지 않음'
-    : '마지막 사용 ${formatPostDateTime(lastUsedAt)} · $useCount번';
+    ? tr('아직 쓰지 않음')
+    : tr('마지막 사용 {p0} · {useCount}번', {
+        'p0': formatPostDateTime(lastUsedAt),
+        'useCount': useCount,
+      });
 
 /// 지우기 확인 창 — 확인하면 true.
 Future<bool> confirmIntegrationDelete(
@@ -354,13 +360,13 @@ Future<bool> confirmIntegrationDelete(
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('integration-delete-confirm'),
           style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text('지우기'),
+          child: Text(tr('지우기')),
         ),
       ],
     ),

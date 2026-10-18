@@ -13,6 +13,7 @@ import '../services/api_client.dart'
 import '../services/image_thumbnail.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
+import '../l10n/tr.dart';
 
 /// "팀장에게 문의하기" — 팀장과의 1:1 대화방([room])에서 분류/제목/내용(+선택 첨부)을 받아 서버에 문의(티켓)를 만들고,
 /// 팀장이 대화 목록에서도 바로 볼 수 있도록 같은 내용을 일반 메시지로도 그 방에 보낸다. 티켓 생성이 실패하면 메시지도 안
@@ -30,7 +31,11 @@ Future<Inquiry?> sendInquiryTo(
       );
   if (result == null || !context.mounted) return null;
   final (category, title, content, attachment) = result;
-  final text = '📩 문의 [$category] $title\n\n$content';
+  final text = tr('📩 문의 [{category}] {title}\n\n{content}', {
+    'category': category,
+    'title': title,
+    'content': content,
+  });
   try {
     final inquiry = await session.api!.createInquiry(
       room.id,
@@ -56,10 +61,12 @@ Future<Inquiry?> sendInquiryTo(
       thumbnailUrl: attachment?.thumbnailUrl,
       inquiryId: inquiry.id,
     );
-    if (context.mounted) showAppToast(context, '문의를 보냈습니다.');
+    if (context.mounted) showAppToast(context, tr('문의를 보냈습니다.'));
     return inquiry;
   } catch (e) {
-    if (context.mounted) showAppToast(context, '문의를 보내지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('문의를 보내지 못했습니다: {e}', {'e': e}));
+    }
     return null;
   }
 }
@@ -154,7 +161,7 @@ class _InquiryComposeDialogState extends State<InquiryComposeDialog> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _attachment = null);
-      showAppToast(context, '첨부 업로드 실패: $e');
+      showAppToast(context, tr('첨부 업로드 실패: {e}', {'e': e}));
     }
   }
 
@@ -173,7 +180,7 @@ class _InquiryComposeDialogState extends State<InquiryComposeDialog> {
     // 자식(특히 첨부 미리보기 줄)이 밀려나거나 겹쳐 보일 수 있어 화면 폭에 맞춰 줄인다.
     final dialogWidth = math.min(420.0, MediaQuery.sizeOf(context).width - 64);
     return AlertDialog(
-      title: const Text('팀장에게 문의하기'),
+      title: Text(tr('팀장에게 문의하기')),
       content: SizedBox(
         width: dialogWidth,
         child: SingleChildScrollView(
@@ -183,8 +190,8 @@ class _InquiryComposeDialogState extends State<InquiryComposeDialog> {
             children: [
               DropdownButtonFormField<String>(
                 initialValue: _category,
-                decoration: const InputDecoration(
-                  labelText: '분류',
+                decoration: InputDecoration(
+                  labelText: tr('분류'),
                   border: OutlineInputBorder(),
                 ),
                 items: [
@@ -201,8 +208,8 @@ class _InquiryComposeDialogState extends State<InquiryComposeDialog> {
                 controller: _titleController,
                 autofocus: true,
                 maxLength: 100,
-                decoration: const InputDecoration(
-                  labelText: '제목',
+                decoration: InputDecoration(
+                  labelText: tr('제목'),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -212,9 +219,9 @@ class _InquiryComposeDialogState extends State<InquiryComposeDialog> {
                 maxLines: 6,
                 minLines: 3,
                 maxLength: 2000,
-                decoration: const InputDecoration(
-                  labelText: '내용',
-                  hintText: '문의 내용을 입력하세요',
+                decoration: InputDecoration(
+                  labelText: tr('내용'),
+                  hintText: tr('문의 내용을 입력하세요'),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -227,13 +234,13 @@ class _InquiryComposeDialogState extends State<InquiryComposeDialog> {
                   OutlinedButton.icon(
                     onPressed: attachment == null ? _pickImage : null,
                     icon: const Icon(Icons.image_outlined, size: 18),
-                    label: const Text('이미지'),
+                    label: Text(tr('이미지')),
                   ),
                   const SizedBox(width: 8),
                   OutlinedButton.icon(
                     onPressed: attachment == null ? _pickFile : null,
                     icon: const Icon(Icons.attach_file, size: 18),
-                    label: const Text('파일'),
+                    label: Text(tr('파일')),
                   ),
                 ],
               ),
@@ -291,7 +298,7 @@ class _InquiryComposeDialogState extends State<InquiryComposeDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('inquiry-compose-send'),
@@ -305,7 +312,7 @@ class _InquiryComposeDialogState extends State<InquiryComposeDialog> {
                     context,
                   ).pop((_category, title, content, attachment?.result));
                 },
-          child: const Text('보내기'),
+          child: Text(tr('보내기')),
         ),
       ],
     );

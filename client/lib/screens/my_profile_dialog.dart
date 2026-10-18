@@ -31,6 +31,7 @@ import 'api_tokens_dialog.dart';
 import 'my_devices_dialog.dart';
 import 'linked_accounts_dialog.dart';
 import '../widgets/otp_dialogs.dart' show showOtpManageDialog;
+import '../l10n/tr.dart';
 
 /// 삼선(햄버거) 메뉴의 프로필 행을 누르면 뜨는 플로팅 카드: 아바타 + 이름 + 등급 + 팀/직책
 /// (member_profile_dialog.dart의 다른 사람 프로필 카드와 같은 모양) + 나와의 대화 + 개인정보 설정 +
@@ -50,7 +51,7 @@ class MyProfileDialog extends StatelessWidget {
   Future<void> _editName(BuildContext context) async {
     final value = await _promptEdit(
       context,
-      title: '이름 변경',
+      title: tr('이름 변경'),
       initialValue: session.name ?? '',
       maxLength: kProfileNameMaxLength,
     );
@@ -61,7 +62,7 @@ class MyProfileDialog extends StatelessWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('실패: {e}', {'e': e}))));
       }
     }
   }
@@ -101,12 +102,12 @@ class MyProfileDialog extends StatelessWidget {
         await showDialog<void>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: const Text('회원 탈퇴'),
-            content: const Text('회원탈퇴가 완료되었습니다.'),
+            title: Text(tr('회원 탈퇴')),
+            content: Text(tr('회원탈퇴가 완료되었습니다.')),
             actions: [
               FilledButton(
                 onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('확인'),
+                child: Text(tr('확인')),
               ),
             ],
           ),
@@ -135,7 +136,7 @@ class MyProfileDialog extends StatelessWidget {
           : Icon(Icons.emoji_emotions_outlined, size: 18, color: hint),
       label: Text(
         status == null
-            ? '상태 설정'
+            ? tr('상태 설정')
             : status.emoji != null && status.text != null
             ? status.text!
             : status.label,
@@ -191,7 +192,7 @@ class MyProfileDialog extends StatelessWidget {
             final hint = Theme.of(context).hintColor;
             final role = session.accountRole;
             final roleText = session.currentTeam?.isOwner == true
-                ? '${role.label} · 이 팀의 소유자'
+                ? tr('{role.label} · 이 팀의 소유자', {'role.label': role.label})
                 : role.label;
             return Column(
               mainAxisSize: MainAxisSize.min,
@@ -312,7 +313,7 @@ class MyProfileDialog extends StatelessWidget {
                     size: 18,
                     color: hint,
                   ),
-                  label: const Text('개인정보 설정'),
+                  label: Text(tr('개인정보 설정')),
                   onTap: () => _openPersonalInfo(context),
                 ),
                 // 나와의 대화는 팀마다 하나라, 팀을 고르기 전(팀 목록 화면)에는 뺀다.
@@ -340,8 +341,8 @@ class MyProfileDialog extends StatelessWidget {
                         ),
                       ),
                       icon: const Icon(Icons.logout, color: Colors.redAccent),
-                      label: const Text(
-                        '로그아웃',
+                      label: Text(
+                        tr('로그아웃'),
                         style: TextStyle(
                           color: Colors.redAccent,
                           fontWeight: FontWeight.w600,
@@ -430,7 +431,7 @@ class _SelfChatButtonState extends State<_SelfChatButton> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _opening = false);
-      showAppToast(context, '나와의 대화를 열지 못했습니다: $e');
+      showAppToast(context, tr('나와의 대화를 열지 못했습니다: {e}', {'e': e}));
       return;
     }
     if (!mounted) return;
@@ -460,7 +461,7 @@ class _SelfChatButtonState extends State<_SelfChatButton> {
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           : const Icon(Icons.chat_bubble_outline),
-      label: const Text(selfRoomName),
+      label: Text(selfRoomName),
     );
   }
 }
@@ -506,22 +507,22 @@ class _VerifyPasswordDialogState extends State<_VerifyPasswordDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('비밀번호 확인'),
+      title: Text(tr('비밀번호 확인')),
       content: SizedBox(
         width: 360,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('개인정보 설정을 열려면 비밀번호를 다시 확인해야 합니다.'),
+            Text(tr('개인정보 설정을 열려면 비밀번호를 다시 확인해야 합니다.')),
             const SizedBox(height: 12),
             TextField(
               controller: _password,
               autofocus: true,
               obscureText: true,
               onSubmitted: (_) => _submit(),
-              decoration: const InputDecoration(
-                labelText: '비밀번호',
+              decoration: InputDecoration(
+                labelText: tr('비밀번호'),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -535,7 +536,7 @@ class _VerifyPasswordDialogState extends State<_VerifyPasswordDialog> {
       actions: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: _submitting ? null : _submit,
@@ -545,7 +546,7 @@ class _VerifyPasswordDialogState extends State<_VerifyPasswordDialog> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('확인'),
+              : Text(tr('확인')),
         ),
       ],
     );
@@ -597,7 +598,7 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                   children: [
                     Expanded(
                       child: Text(
-                        '개인정보',
+                        tr('개인정보'),
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -618,16 +619,16 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                     children: [
                       _StaticInfoRow(
                         icon: Icons.badge_outlined,
-                        label: '아이디',
+                        label: tr('아이디'),
                         value: widget.session.username ?? '',
                       ),
                       const Divider(height: 1),
                       _ExpandableEntry(
                         icon: Icons.mail_outline,
-                        label: '이메일 관리',
+                        label: tr('이메일 관리'),
                         collapsedValue: widget.session.email?.isNotEmpty == true
                             ? widget.session.email!
-                            : '등록된 이메일이 없습니다',
+                            : tr('등록된 이메일이 없습니다'),
                         expanded: _expanded == _InfoSection.email,
                         onToggle: () => _toggle(_InfoSection.email),
                         child: _EmailEditPanel(
@@ -655,14 +656,14 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                                 color: Theme.of(context).hintColor,
                               ),
                               const SizedBox(width: 10),
-                              const SizedBox(
+                              SizedBox(
                                 width: _infoLabelWidth,
-                                child: Text('생일'),
+                                child: Text(tr('생일')),
                               ),
                               Expanded(
                                 child: Text(
                                   birthdayText(widget.session.birthday) ??
-                                      '설정 안 함',
+                                      tr('설정 안 함'),
                                   style: TextStyle(
                                     color: Theme.of(context).hintColor,
                                   ),
@@ -681,7 +682,7 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                       if (widget.session.authSource == 'local') ...[
                         _ExpandableEntry(
                           icon: Icons.lock_outline,
-                          label: '비밀번호 변경',
+                          label: tr('비밀번호 변경'),
                           collapsedValue: null,
                           expanded: _expanded == _InfoSection.password,
                           onToggle: () => _toggle(_InfoSection.password),
@@ -697,8 +698,10 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                         _ProfileLinkRow(
                           rowKey: const ValueKey('profile-otp'),
                           icon: Icons.phonelink_lock_outlined,
-                          label: '2단계 인증',
-                          value: widget.session.otpEnabled ? '켜짐' : '꺼짐',
+                          label: tr('2단계 인증'),
+                          value: widget.session.otpEnabled
+                              ? tr('켜짐')
+                              : tr('꺼짐'),
                           onTap: () async {
                             await showOtpManageDialog(context, widget.session);
                             if (mounted) setState(() {});
@@ -710,7 +713,7 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                       _ProfileLinkRow(
                         rowKey: const ValueKey('profile-linked-accounts'),
                         icon: Icons.business_center_outlined,
-                        label: '연결된 회사 계정',
+                        label: tr('연결된 회사 계정'),
                         onTap: () =>
                             showLinkedAccountsDialog(context, widget.session),
                       ),
@@ -733,7 +736,7 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                                 color: Theme.of(context).hintColor,
                               ),
                               const SizedBox(width: 10),
-                              const Expanded(child: Text('로그인한 기기')),
+                              Expanded(child: Text(tr('로그인한 기기'))),
                               Icon(
                                 Icons.chevron_right,
                                 color: Theme.of(context).hintColor,
@@ -748,7 +751,7 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                         _ProfileLinkRow(
                           rowKey: const ValueKey('profile-api-tokens'),
                           icon: Icons.key_outlined,
-                          label: 'API 토큰',
+                          label: tr('API 토큰'),
                           onTap: () =>
                               showApiTokensDialog(context, widget.session),
                         ),
@@ -757,7 +760,7 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                       _ExpandableEntry(
                         icon: Icons.person_remove_outlined,
                         iconColor: Colors.redAccent,
-                        label: '회원 탈퇴',
+                        label: tr('회원 탈퇴'),
                         labelColor: Colors.redAccent,
                         collapsedValue: null,
                         expanded: _expanded == _InfoSection.withdraw,
@@ -973,11 +976,11 @@ class _EmailEditPanelState extends State<_EmailEditPanel> {
     final byMail = widget.session.mailEnabled;
     if (byMail) {
       final codeError = _codeSentFor == null
-          ? '새 이메일로 인증 코드를 받아 넣어 주세요.'
+          ? tr('새 이메일로 인증 코드를 받아 넣어 주세요.')
           : _codeSentFor != email
-          ? '이메일을 바꿨다면 인증 코드를 다시 받으세요.'
+          ? tr('이메일을 바꿨다면 인증 코드를 다시 받으세요.')
           : !isEmailCodeShape(_code.text)
-          ? '메일로 받은 6자리 인증 코드를 넣어 주세요.'
+          ? tr('메일로 받은 6자리 인증 코드를 넣어 주세요.')
           : null;
       if (codeError != null) {
         setState(() => _error = codeError);
@@ -1009,7 +1012,7 @@ class _EmailEditPanelState extends State<_EmailEditPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '현재 이메일',
+          tr('현재 이메일'),
           style: Theme.of(context).textTheme.labelSmall?.copyWith(color: hint),
         ),
         const SizedBox(height: 4),
@@ -1026,7 +1029,7 @@ class _EmailEditPanelState extends State<_EmailEditPanel> {
                 child: Text(
                   widget.session.email?.isNotEmpty == true
                       ? widget.session.email!
-                      : '등록된 이메일이 없습니다',
+                      : tr('등록된 이메일이 없습니다'),
                 ),
               ),
               // 메일이 켜진 서버에서만 확인 여부를 보인다 — 확인된 이메일이 있어야 비밀번호·아이디를 메일로 찾는다.
@@ -1034,7 +1037,7 @@ class _EmailEditPanelState extends State<_EmailEditPanel> {
                   widget.session.email?.isNotEmpty == true)
                 widget.session.emailVerified
                     ? Text(
-                        '확인됨',
+                        tr('확인됨'),
                         style: TextStyle(
                           color: Colors.green.shade700,
                           fontWeight: FontWeight.w600,
@@ -1046,14 +1049,14 @@ class _EmailEditPanelState extends State<_EmailEditPanel> {
                           await showEmailVerifyDialog(context, widget.session);
                           if (mounted) setState(() {});
                         },
-                        child: const Text('확인하기'),
+                        child: Text(tr('확인하기')),
                       ),
             ],
           ),
         ),
         const SizedBox(height: 12),
         Text(
-          '새 이메일',
+          tr('새 이메일'),
           style: Theme.of(context).textTheme.labelSmall?.copyWith(color: hint),
         ),
         const SizedBox(height: 4),
@@ -1084,7 +1087,7 @@ class _EmailEditPanelState extends State<_EmailEditPanel> {
             Expanded(
               child: OutlinedButton(
                 onPressed: _submitting ? null : widget.onDone,
-                child: const Text('취소'),
+                child: Text(tr('취소')),
               ),
             ),
             const SizedBox(width: 12),
@@ -1097,7 +1100,7 @@ class _EmailEditPanelState extends State<_EmailEditPanel> {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('확인'),
+                    : Text(tr('확인')),
               ),
             ),
           ],
@@ -1137,11 +1140,14 @@ class _PasswordChangePanelState extends State<_PasswordChangePanel> {
     if (_current.text.isEmpty || _newPassword.text.isEmpty) return;
     final passwordError = passwordPolicyError(_newPassword.text);
     if (passwordError != null) {
-      setState(() => _error = '새 $passwordError');
+      setState(
+        () =>
+            _error = tr('새 {passwordError}', {'passwordError': passwordError}),
+      );
       return;
     }
     if (_newPassword.text != _confirm.text) {
-      setState(() => _error = '새 비밀번호가 서로 다릅니다.');
+      setState(() => _error = tr('새 비밀번호가 서로 다릅니다.'));
       return;
     }
     setState(() {
@@ -1170,8 +1176,8 @@ class _PasswordChangePanelState extends State<_PasswordChangePanel> {
           controller: _current,
           autofocus: true,
           obscureText: true,
-          decoration: const InputDecoration(
-            labelText: '현재 비밀번호',
+          decoration: InputDecoration(
+            labelText: tr('현재 비밀번호'),
             border: OutlineInputBorder(),
           ),
         ),
@@ -1179,8 +1185,8 @@ class _PasswordChangePanelState extends State<_PasswordChangePanel> {
         TextField(
           controller: _newPassword,
           obscureText: true,
-          decoration: const InputDecoration(
-            labelText: '새 비밀번호',
+          decoration: InputDecoration(
+            labelText: tr('새 비밀번호'),
             hintText: kPasswordHint,
             border: OutlineInputBorder(),
           ),
@@ -1189,8 +1195,8 @@ class _PasswordChangePanelState extends State<_PasswordChangePanel> {
         TextField(
           controller: _confirm,
           obscureText: true,
-          decoration: const InputDecoration(
-            labelText: '새 비밀번호 확인',
+          decoration: InputDecoration(
+            labelText: tr('새 비밀번호 확인'),
             border: OutlineInputBorder(),
           ),
           onSubmitted: (_) => _submit(),
@@ -1205,7 +1211,7 @@ class _PasswordChangePanelState extends State<_PasswordChangePanel> {
             Expanded(
               child: OutlinedButton(
                 onPressed: _submitting ? null : widget.onDone,
-                child: const Text('취소'),
+                child: Text(tr('취소')),
               ),
             ),
             const SizedBox(width: 12),
@@ -1218,7 +1224,7 @@ class _PasswordChangePanelState extends State<_PasswordChangePanel> {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('변경하기'),
+                    : Text(tr('변경하기')),
               ),
             ),
           ],
@@ -1286,8 +1292,8 @@ class _WithdrawPanelState extends State<_WithdrawPanel> {
           autofocus: true,
           obscureText: true,
           onChanged: (_) => setState(() {}),
-          decoration: const InputDecoration(
-            labelText: '비밀번호',
+          decoration: InputDecoration(
+            labelText: tr('비밀번호'),
             border: OutlineInputBorder(),
           ),
         ),
@@ -1303,16 +1309,16 @@ class _WithdrawPanelState extends State<_WithdrawPanel> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '탈퇴 시 유의사항',
+                tr('탈퇴 시 유의사항'),
                 style: Theme.of(
                   context,
                 ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
               Text(
-                '· 탈퇴 후에는 이 아이디로 다시 로그인할 수 없습니다.\n'
-                '· 보낸 메시지·첨부파일 등 활동 기록은 삭제되지 않고, 작성자만 익명 처리됩니다.\n'
-                '· 속한 팀·대화방에서 자동으로 나가며, 이 작업은 되돌릴 수 없습니다.',
+                tr(
+                  '· 탈퇴 후에는 이 아이디로 다시 로그인할 수 없습니다.\n· 보낸 메시지·첨부파일 등 활동 기록은 삭제되지 않고, 작성자만 익명 처리됩니다.\n· 속한 팀·대화방에서 자동으로 나가며, 이 작업은 되돌릴 수 없습니다.',
+                ),
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: hint),
@@ -1329,7 +1335,7 @@ class _WithdrawPanelState extends State<_WithdrawPanel> {
                 value: _agreed,
                 onChanged: (v) => setState(() => _agreed = v ?? false),
               ),
-              const Expanded(child: Text('위 유의사항을 모두 확인하였으며 회원 탈퇴에 동의합니다.')),
+              Expanded(child: Text(tr('위 유의사항을 모두 확인하였으며 회원 탈퇴에 동의합니다.'))),
             ],
           ),
         ),
@@ -1343,7 +1349,7 @@ class _WithdrawPanelState extends State<_WithdrawPanel> {
             Expanded(
               child: OutlinedButton(
                 onPressed: _submitting ? null : widget.onCancel,
-                child: const Text('취소'),
+                child: Text(tr('취소')),
               ),
             ),
             const SizedBox(width: 12),
@@ -1362,7 +1368,7 @@ class _WithdrawPanelState extends State<_WithdrawPanel> {
                           color: Colors.white,
                         ),
                       )
-                    : const Text('회원 탈퇴'),
+                    : Text(tr('회원 탈퇴')),
               ),
             ),
           ],
@@ -1396,11 +1402,11 @@ Future<String?> _promptEdit(
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-          child: const Text('확인'),
+          child: Text(tr('확인')),
         ),
       ],
     ),
@@ -1491,7 +1497,7 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('저장 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('저장 실패: {e}', {'e': e}))));
         setState(() => _busy = false);
       }
     }
@@ -1535,9 +1541,9 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('사진을 읽지 못했습니다: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(tr('사진을 읽지 못했습니다: {e}', {'e': e}))),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -1558,7 +1564,7 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  '프로필 사진 편집',
+                  tr('프로필 사진 편집'),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -1578,7 +1584,7 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '프로필 사진은 640x640px 해상도를 권장합니다.',
+                  tr('프로필 사진은 640x640px 해상도를 권장합니다.'),
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).hintColor,
@@ -1592,15 +1598,15 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
                   children: [
                     TextButton(
                       onPressed: _busy ? null : _reset,
-                      child: const Text('초기화'),
+                      child: Text(tr('초기화')),
                     ),
                     TextButton(
                       onPressed: _busy ? null : _pickCharacter,
-                      child: const Text('캐릭터 선택하기'),
+                      child: Text(tr('캐릭터 선택하기')),
                     ),
                     TextButton(
                       onPressed: _busy ? null : _uploadPhoto,
-                      child: const Text('사진 올리기'),
+                      child: Text(tr('사진 올리기')),
                     ),
                   ],
                 ),
@@ -1613,7 +1619,7 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
                         onPressed: _busy
                             ? null
                             : () => Navigator.of(context).pop(),
-                        child: const Text('닫기'),
+                        child: Text(tr('닫기')),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1628,7 +1634,7 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Text('저장'),
+                            : Text(tr('저장')),
                       ),
                     ),
                   ],
@@ -1683,7 +1689,7 @@ class _CharSetTab {
   bool get isBuiltin => pack == null;
 }
 
-const _builtinCharSetName = '기본 캐릭터';
+final _builtinCharSetName = tr('기본 캐릭터');
 
 class CharacterPickerDialog extends StatefulWidget {
   final Session session;
@@ -1793,7 +1799,7 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('실패: {e}', {'e': e}))));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -1810,7 +1816,7 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
   @override
   Widget build(BuildContext context) {
     final tabs = [
-      const _CharSetTab(_builtinCharSetName, null),
+      _CharSetTab(_builtinCharSetName, null),
       for (final p in _characterPacks ?? const <ServerStickerPack>[])
         _CharSetTab(p.name, p),
     ];
@@ -1844,13 +1850,13 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          '프로필 사진 편집',
+                          tr('프로필 사진 편집'),
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '캐릭터 선택하기',
+                          tr('캐릭터 선택하기'),
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(color: Theme.of(context).hintColor),
                         ),
@@ -1918,7 +1924,7 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
                         onPressed: _saving
                             ? null
                             : () => Navigator.of(context).pop(),
-                        child: const Text('닫기'),
+                        child: Text(tr('닫기')),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1933,7 +1939,7 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Text('확인'),
+                            : Text(tr('확인')),
                       ),
                     ),
                   ],
@@ -1950,7 +1956,7 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
   List<Widget> _builtinContent() => [
     Align(
       alignment: Alignment.centerLeft,
-      child: Text('캐릭터', style: Theme.of(context).textTheme.labelMedium),
+      child: Text(tr('캐릭터'), style: Theme.of(context).textTheme.labelMedium),
     ),
     const SizedBox(height: 8),
     Wrap(
@@ -1975,7 +1981,7 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
     const SizedBox(height: 16),
     Align(
       alignment: Alignment.centerLeft,
-      child: Text('색상', style: Theme.of(context).textTheme.labelMedium),
+      child: Text(tr('색상'), style: Theme.of(context).textTheme.labelMedium),
     ),
     const SizedBox(height: 8),
     Wrap(

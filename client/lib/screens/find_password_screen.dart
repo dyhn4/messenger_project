@@ -5,6 +5,7 @@ import '../services/password_policy.dart';
 import '../services/session.dart';
 import '../widgets/email_address_field.dart';
 import '../widgets/email_code_input.dart';
+import '../l10n/tr.dart';
 
 enum _Step { credentials, question, emailCode, newPassword }
 
@@ -106,7 +107,7 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
     );
     final sent = start.emailCode;
     if (sent == null) {
-      throw const ApiException('이 계정은 이메일 코드로 재설정하지 않습니다. 처음부터 다시 하세요.');
+      throw ApiException(tr('이 계정은 이메일 코드로 재설정하지 않습니다. 처음부터 다시 하세요.'));
     }
     _emailCode.clear();
     return sent;
@@ -135,7 +136,7 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
 
   Future<void> _verifyCode() async {
     if (!isEmailCodeShape(_emailCode.text)) {
-      setState(() => _error = '메일로 받은 6자리 인증 코드를 넣으세요.');
+      setState(() => _error = tr('메일로 받은 6자리 인증 코드를 넣으세요.'));
       return;
     }
     setState(() {
@@ -165,7 +166,7 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
       return;
     }
     if (_newPassword.text != _confirmPassword.text) {
-      setState(() => _error = '새 비밀번호가 서로 다릅니다.');
+      setState(() => _error = tr('새 비밀번호가 서로 다릅니다.'));
       return;
     }
     setState(() {
@@ -184,7 +185,7 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('비밀번호가 재설정되었습니다. 새 비밀번호로 로그인하세요.')),
+        SnackBar(content: Text(tr('비밀번호가 재설정되었습니다. 새 비밀번호로 로그인하세요.'))),
       );
       Navigator.of(context).pop();
     } catch (e) {
@@ -208,12 +209,12 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('비밀번호 찾기'),
+      title: Text(tr('비밀번호 찾기')),
       content: SizedBox(width: 360, child: _buildStep()),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
         FilledButton(
           onPressed: _loading ? null : _primaryAction,
@@ -237,9 +238,9 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
   };
 
   String get _primaryLabel => switch (_step) {
-    _Step.credentials => '다음',
-    _Step.question || _Step.emailCode => '확인',
-    _Step.newPassword => '비밀번호 재설정',
+    _Step.credentials => tr('다음'),
+    _Step.question || _Step.emailCode => tr('확인'),
+    _Step.newPassword => tr('비밀번호 재설정'),
   };
 
   Widget _buildStep() {
@@ -273,12 +274,12 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
           ];
         }
         return [
-          const Text('아이디와 가입할 때 등록한 이메일이 모두 일치해야 재설정할 수 있습니다.'),
+          Text(tr('아이디와 가입할 때 등록한 이메일이 모두 일치해야 재설정할 수 있습니다.')),
           const SizedBox(height: 16),
           TextField(
             controller: _username,
-            decoration: const InputDecoration(
-              labelText: '아이디',
+            decoration: InputDecoration(
+              labelText: tr('아이디'),
               border: OutlineInputBorder(),
             ),
           ),
@@ -287,7 +288,7 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
         ];
       case _Step.question:
         return [
-          const Text('회원정보에 등록한 질문과 답변을 입력해 주세요.'),
+          Text(tr('회원정보에 등록한 질문과 답변을 입력해 주세요.')),
           const SizedBox(height: 16),
           TextField(
             controller: _securityAnswer,
@@ -300,7 +301,7 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
         ];
       case _Step.emailCode:
         return [
-          const Text('가입한 이메일로 비밀번호 재설정 코드를 보냈습니다. 받은 코드를 넣어 주세요.'),
+          Text(tr('가입한 이메일로 비밀번호 재설정 코드를 보냈습니다. 받은 코드를 넣어 주세요.')),
           const SizedBox(height: 16),
           EmailCodeInput(
             key: const ValueKey('find-password-email-code'),
@@ -313,12 +314,12 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
         ];
       case _Step.newPassword:
         return [
-          const Text('새 비밀번호를 입력하세요.'),
+          Text(tr('새 비밀번호를 입력하세요.')),
           const SizedBox(height: 16),
           TextField(
             controller: _newPassword,
-            decoration: const InputDecoration(
-              labelText: '새 비밀번호',
+            decoration: InputDecoration(
+              labelText: tr('새 비밀번호'),
               hintText: kPasswordHint,
               border: OutlineInputBorder(),
             ),
@@ -327,8 +328,8 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _confirmPassword,
-            decoration: const InputDecoration(
-              labelText: '새 비밀번호 확인',
+            decoration: InputDecoration(
+              labelText: tr('새 비밀번호 확인'),
               border: OutlineInputBorder(),
             ),
             obscureText: true,

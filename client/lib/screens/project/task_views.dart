@@ -10,8 +10,17 @@ import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/date_drop_calendar.dart';
 import '../../widgets/user_avatar.dart';
 import 'task_detail_panel.dart' show TaskPanelInset, TaskPanelScope;
+import '../../l10n/tr.dart';
 
-const kWeekdayLabels = ['일', '월', '화', '수', '목', '금', '토'];
+final kWeekdayLabels = [
+  tr('일'),
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+];
 
 DateTime dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
@@ -194,7 +203,7 @@ class _TaskListTableState extends State<TaskListTable> {
       widget.onChanged?.call();
       if (mounted) TaskPanelScope.notifyChanged(context);
     } catch (e) {
-      if (mounted) showAppToast(context, '바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('바꾸지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -203,7 +212,7 @@ class _TaskListTableState extends State<TaskListTable> {
     if (widget.tasks.isEmpty) {
       return Center(
         child: Text(
-          widget.emptyText,
+          tr(widget.emptyText),
           style: TextStyle(color: Theme.of(context).hintColor),
         ),
       );
@@ -384,8 +393,15 @@ class _TaskCalendarViewState extends State<TaskCalendarView> {
         if (taskRange(t) != null) t,
     ];
     final title = _monthMode
-        ? '${_focused.year}년 ${_focused.month}월'
-        : '${_weekStart.year}년 ${_weekStart.month}월 ${_weekStart.day}일 주';
+        ? tr('{_focused.year}년 {_focused.month}월', {
+            '_focused.year': _focused.year,
+            '_focused.month': _focused.month,
+          })
+        : tr('{_weekStart.year}년 {_weekStart.month}월 {_weekStart.day}일 주', {
+            '_weekStart.year': _weekStart.year,
+            '_weekStart.month': _weekStart.month,
+            '_weekStart.day': _weekStart.day,
+          });
 
     // 그 달의 주(행)별 날짜들.
     final weeks = <List<DateTime>>[];
@@ -444,7 +460,7 @@ class _TaskCalendarViewState extends State<TaskCalendarView> {
                   style: OutlinedButton.styleFrom(
                     visualDensity: VisualDensity.compact,
                   ),
-                  child: const Text('오늘'),
+                  child: Text(tr('오늘')),
                 ),
                 const Spacer(),
                 SegmentedButton<bool>(
@@ -452,9 +468,9 @@ class _TaskCalendarViewState extends State<TaskCalendarView> {
                   style: SegmentedButton.styleFrom(
                     visualDensity: VisualDensity.compact,
                   ),
-                  segments: const [
-                    ButtonSegment(value: true, label: Text('월')),
-                    ButtonSegment(value: false, label: Text('주')),
+                  segments: [
+                    ButtonSegment(value: true, label: Text(tr('월'))),
+                    ButtonSegment(value: false, label: Text(tr('주'))),
                   ],
                   selected: {_monthMode},
                   onSelectionChanged: (s) =>
@@ -652,24 +668,24 @@ class _TaskTable extends StatelessWidget {
                 color: Theme.of(context).colorScheme.surfaceContainerLow,
                 child: Row(
                   children: [
-                    head('업무'),
+                    head(tr('업무')),
                     Expanded(
                       child: _HScrollWindow(
                         controller: horizontalController,
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            head('유형', width: otherW),
-                            head('우선순위', width: otherW),
-                            head('상태', width: otherW),
-                            head('시작일', width: otherW),
-                            head('마감일', width: otherW),
+                            head(tr('유형'), width: otherW),
+                            head(tr('우선순위'), width: otherW),
+                            head(tr('상태'), width: otherW),
+                            head(tr('시작일'), width: otherW),
+                            head(tr('마감일'), width: otherW),
                             if (members != null) ...[
-                              head('담당자', width: otherW),
-                              head('생성자', width: otherW),
-                              head('생성일', width: otherW),
+                              head(tr('담당자'), width: otherW),
+                              head(tr('생성자'), width: otherW),
+                              head(tr('생성일'), width: otherW),
                             ] else
-                              head('생성자', width: otherW),
+                              head(tr('생성자'), width: otherW),
                             for (final f in fields) head(f.name, width: otherW),
                           ],
                         ),
@@ -840,7 +856,7 @@ class _EditablePillState extends State<_EditablePill> {
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);
-        showAppToast(context, '목록을 불러오지 못했습니다: $e');
+        showAppToast(context, tr('목록을 불러오지 못했습니다: {e}', {'e': e}));
       }
       return;
     }
@@ -1141,7 +1157,7 @@ class _TaskTableRowState extends State<_TaskTableRow> {
                               // 보관한 업무 표시(보관함 아이콘).
                               if (task.archived) ...[
                                 Tooltip(
-                                  message: '보관된 업무',
+                                  message: tr('보관된 업무'),
                                   child: Icon(
                                     Icons.inventory_2_outlined,
                                     size: 14,
@@ -1161,7 +1177,7 @@ class _TaskTableRowState extends State<_TaskTableRow> {
                                 ),
                               if (task.myRole == 'reference') ...[
                                 const SizedBox(width: 6),
-                                TaskPill('참조', const Color(0xFF8E6BD9)),
+                                TaskPill(tr('참조'), const Color(0xFF8E6BD9)),
                               ],
                               const SizedBox(width: 8),
                               if (_editing != null)
@@ -1208,7 +1224,7 @@ class _TaskTableRowState extends State<_TaskTableRow> {
                                       Icons.edit_outlined,
                                       size: 16,
                                     ),
-                                    tooltip: '제목 수정',
+                                    tooltip: tr('제목 수정'),
                                     visualDensity: VisualDensity.compact,
                                     padding: EdgeInsets.zero,
                                     constraints: const BoxConstraints.tightFor(
@@ -1258,11 +1274,7 @@ class _TaskTableRowState extends State<_TaskTableRow> {
                                   menuWidth: otherW,
                                   loadOptions: () async => (
                                     options: [
-                                      const _PillOption(
-                                        null,
-                                        '없음',
-                                        Colors.grey,
-                                      ),
+                                      _PillOption(null, tr('없음'), Colors.grey),
                                       for (final t in (await optionsFor(
                                         task.projectId,
                                       )).types)
@@ -1838,7 +1850,10 @@ class _DayPanel extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     if (t.assigneeName == null)
-                      Text('미배정', style: TextStyle(fontSize: 12, color: hint))
+                      Text(
+                        tr('미배정'),
+                        style: TextStyle(fontSize: 12, color: hint),
+                      )
                     else
                       Row(
                         children: [
@@ -1895,14 +1910,14 @@ class _DayPanel extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '해당 일의 업무 ${tasks.length}건',
+            tr('해당 일의 업무 {tasks.length}건', {'tasks.length': tasks.length}),
             style: TextStyle(color: hint, fontSize: 12),
           ),
           const SizedBox(height: 6),
           Expanded(
             child: tasks.isEmpty
                 ? Center(
-                    child: Text('업무가 없습니다.', style: TextStyle(color: hint)),
+                    child: Text(tr('업무가 없습니다.'), style: TextStyle(color: hint)),
                   )
                 : MutedScrollbar(
                     controller: scroll,

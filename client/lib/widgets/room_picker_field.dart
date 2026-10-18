@@ -5,6 +5,7 @@ import '../models/room.dart';
 import '../services/app_platform.dart';
 import '../services/session.dart';
 import 'room_avatar.dart';
+import '../l10n/tr.dart';
 
 /// "메시지 공유"/"메시지 전달" 화면의 "대화방" 필드 — 누르면 바로 아래에 검색창 +
 /// 토픽/그룹채팅/채팅 탭 + 목록이 든 드롭다운이 뜬다(전체화면 이동 없이). 방을 고르면
@@ -127,7 +128,7 @@ class _RoomPickerFieldState extends State<RoomPickerField> {
             children: [
               Expanded(
                 child: Text(
-                  label ?? '대화방 선택',
+                  label ?? tr('대화방 선택'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: label == null
@@ -245,9 +246,9 @@ class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
                 controller: _searchController,
                 focusNode: _searchFocus,
                 autofocus: true,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   isDense: true,
-                  hintText: '검색어를 입력하세요.',
+                  hintText: tr('검색어를 입력하세요.'),
                   prefixIcon: Icon(Icons.search, size: 18),
                   border: OutlineInputBorder(),
                 ),
@@ -274,9 +275,9 @@ class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
                         ),
                         child: Text(
                           switch (t) {
-                            RoomType.topic => '토픽',
-                            RoomType.group => '그룹채팅',
-                            RoomType.dm => '채팅',
+                            RoomType.topic => tr('토픽'),
+                            RoomType.group => tr('그룹채팅'),
+                            RoomType.dm => tr('채팅'),
                           },
                           textAlign: TextAlign.center,
                           style: TextStyle(
@@ -299,7 +300,7 @@ class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
               child: rooms.isEmpty
                   ? Center(
                       child: Text(
-                        '대화방이 없습니다.',
+                        tr('대화방이 없습니다.'),
                         style: TextStyle(color: Theme.of(context).hintColor),
                       ),
                     )

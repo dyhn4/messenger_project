@@ -17,6 +17,7 @@ import '../widgets/panel_create_button.dart';
 import '../widgets/poll_card.dart';
 import '../widgets/side_panel_header.dart';
 import 'poll_create_dialog.dart';
+import '../l10n/tr.dart';
 
 /// "투표" 패널 — 이 팀에서 내가 멤버인 방(비밀 대화 제외)의 투표를 한곳에 모아 보고, 그 자리에서 바로 투표한다.
 /// 할 일 패널(todos_panel.dart)과 같은 틀이다 — 위에서부터 헤더(`투표` + 닫기), 가로 전체 옅은 회색 `+ 투표 만들기`,
@@ -220,14 +221,14 @@ class _PollsScreenState extends State<PollsScreen> {
   Future<void> _create() async {
     final created = await showPollCreator(context, session: _session);
     if (!mounted || !created) return;
-    showAppToast(context, '투표를 만들었습니다.');
+    showAppToast(context, tr('투표를 만들었습니다.'));
     _reload();
   }
 
   void _openRoom(PollListItem item) {
     final room = _session.roomById(item.roomId);
     if (room == null) {
-      showAppToast(context, '대화방을 찾을 수 없습니다.');
+      showAppToast(context, tr('대화방을 찾을 수 없습니다.'));
       return;
     }
     final open = widget.onOpenRoom;
@@ -296,18 +297,18 @@ class _PollsScreenState extends State<PollsScreen> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: PanelCreateButton(
         key: const ValueKey('polls-create'),
-        label: '투표 만들기',
+        label: tr('투표 만들기'),
         onPressed: _create,
       ),
     );
   }
 
   /// 대화방 필터에서 방을 고르지 않았을 때의 글자(할 일 패널과 같다).
-  static const _allRoomsLabel = '참여한 대화방';
+  static final _allRoomsLabel = tr('참여한 대화방');
 
   /// 참여 여부 단추 글자 — 펼침 목록은 `전체 / 참여함 / 참여 안 함`이고, 전체일 때 단추만 무엇의 전체인지 보인다.
   String get _participationLabel => _participated == PollParticipationFilter.all
-      ? '참여 여부'
+      ? tr('참여 여부')
       : _participated.label;
 
   /// 필터 줄 — 참여한 대화방, 그 오른쪽 참여 여부. 할 일 패널의 `참여한 대화방` · `나의 할 일`처럼 두 단추를 같은 폭으로
@@ -438,7 +439,7 @@ class _PollsScreenState extends State<PollsScreen> {
                             vertical: 6,
                           ),
                           child: Text(
-                            '마감된 투표 제외',
+                            tr('마감된 투표 제외'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodyMedium?.copyWith(
@@ -479,7 +480,7 @@ class _PollsScreenState extends State<PollsScreen> {
       builder: (context, controller, _) => Semantics(
         expanded: controller.isOpen,
         child: Tooltip(
-          message: '정렬',
+          message: tr('정렬'),
           child: InkWell(
             key: const ValueKey('polls-sort'),
             onTap: () =>
@@ -519,7 +520,7 @@ class _PollsScreenState extends State<PollsScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '새 투표가 있습니다 · 새로고침',
+                  tr('새 투표가 있습니다 · 새로고침'),
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -550,7 +551,7 @@ class _PollsScreenState extends State<PollsScreen> {
         TextSpan(
           children: [
             TextSpan(text: '$_total', style: bold),
-            const TextSpan(text: '개의 투표'),
+            TextSpan(text: tr('개의 투표')),
           ],
         ),
         style: style,
@@ -616,7 +617,7 @@ class _PollsScreenState extends State<PollsScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     textStyle: theme.textTheme.labelMedium,
                   ),
-                  child: const Text('방으로 이동'),
+                  child: Text(tr('방으로 이동')),
                 ),
               ],
             ),
@@ -656,14 +657,16 @@ class _PollsScreenState extends State<PollsScreen> {
             Icon(Icons.how_to_vote_outlined, size: 40, color: theme.hintColor),
             const SizedBox(height: 12),
             Text(
-              _filtered ? '조건에 맞는 투표가 없습니다.' : '등록된 투표가 없습니다.',
+              _filtered ? tr('조건에 맞는 투표가 없습니다.') : tr('등록된 투표가 없습니다.'),
               key: const ValueKey('polls-empty'),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyLarge,
             ),
             const SizedBox(height: 4),
             Text(
-              _filtered ? '필터를 바꿔 보세요.' : '"투표 만들기"로 대화방에 첫 투표를 만들어 보세요.',
+              _filtered
+                  ? tr('필터를 바꿔 보세요.')
+                  : tr('"투표 만들기"로 대화방에 첫 투표를 만들어 보세요.'),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
@@ -690,7 +693,7 @@ class _PollsScreenState extends State<PollsScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            OutlinedButton(onPressed: _reload, child: const Text('다시 시도')),
+            OutlinedButton(onPressed: _reload, child: Text(tr('다시 시도'))),
           ],
         ),
       );
@@ -726,7 +729,7 @@ class _PollsScreenState extends State<PollsScreen> {
                       : TextButton(
                           key: const ValueKey('polls-more'),
                           onPressed: _loadMore,
-                          child: const Text('더 보기'),
+                          child: Text(tr('더 보기')),
                         ),
                 ),
               );
@@ -745,7 +748,7 @@ class _PollsScreenState extends State<PollsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SidePanelHeader(title: '투표', onClose: widget.onClose),
+          SidePanelHeader(title: tr('투표'), onClose: widget.onClose),
           const Divider(height: 1),
           _createButton(context),
           _filterBar(),

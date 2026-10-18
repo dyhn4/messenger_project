@@ -6,6 +6,7 @@ import '../services/api_client.dart' show ApiException;
 import '../services/session.dart';
 import '../widgets/room_avatar.dart' show SelfRoomAvatar;
 import 'invite_members_screen.dart';
+import '../l10n/tr.dart';
 
 /// "채팅 시작하기" — 멤버 초대하기와 같은 모양(멤버 검색·직책·검색 조건 초기화, 왼쪽 팀 멤버, 오른쪽
 /// 선택된 멤버)에서 대화할 사람을 고른다. 1명이면 1:1 채팅, 2명 이상이면 그룹채팅(이름·아이콘은
@@ -55,7 +56,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
       if (!mounted) return;
       setState(() {
         _busy = null;
-        _error = e is ApiException ? e.message : failure;
+        _error = e is ApiException ? trServer(e.message) : failure;
       });
     }
   }
@@ -63,7 +64,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
   void _openSelf() => _run(
     _Busy.self,
     () => _session.openSelfChat(),
-    '나와의 대화를 열지 못했습니다. 잠시 후 다시 시도하세요.',
+    tr('나와의 대화를 열지 못했습니다. 잠시 후 다시 시도하세요.'),
   );
 
   /// 1명이면 1:1 채팅(이미 있으면 그 방), 2명 이상이면 이름 없는 그룹채팅 — 이름은 멤버 이름으로
@@ -73,14 +74,14 @@ class _NewChatScreenState extends State<NewChatScreen> {
     () => selected.length == 1
         ? _session.startDm(selected.single.id)
         : _session.createGroup(memberIds: [for (final u in selected) u.id]),
-    '채팅을 시작하지 못했습니다. 잠시 후 다시 시도하세요.',
+    tr('채팅을 시작하지 못했습니다. 잠시 후 다시 시도하세요.'),
   );
 
   /// 비밀 대화는 1:1 전용 — member_profile_dialog.dart처럼 별도 방을 새로 만들거나 진행 중인 방을 연다.
   void _startSecret(List<AppUser> selected) => _run(
     _Busy.secret,
     () => _session.startSecretChat(selected.single.id),
-    '비밀 대화를 시작하지 못했습니다. 잠시 후 다시 시도하세요.',
+    tr('비밀 대화를 시작하지 못했습니다. 잠시 후 다시 시도하세요.'),
   );
 
   @override
@@ -91,7 +92,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
     return PopScope(
       canPop: _busy == null,
       child: MemberPickerFrame(
-        title: '채팅 시작하기',
+        title: tr('채팅 시작하기'),
         asDialog: widget.asDialog,
         child: MemberPicker(
           session: _session,
@@ -103,8 +104,8 @@ class _NewChatScreenState extends State<NewChatScreen> {
             busy: _busy == _Busy.self,
             onTap: _busy == null ? _openSelf : null,
           ),
-          emptySelectedText: '대화할 멤버를 선택하세요.',
-          noMembersText: '대화할 수 있는 멤버가 없습니다.',
+          emptySelectedText: tr('대화할 멤버를 선택하세요.'),
+          noMembersText: tr('대화할 수 있는 멤버가 없습니다.'),
           footer: _buildFooter(context, canStart),
           actionsBuilder: (context, selected, wide) =>
               _buildActions(selected, wide: wide, canStart: canStart),
@@ -123,13 +124,13 @@ class _NewChatScreenState extends State<NewChatScreen> {
         : !canStart
         ? (
             Icons.lock_outline,
-            '준회원은 대화를 시작할 수 없어요. 나와의 대화만 열 수 있어요.',
+            tr('준회원은 대화를 시작할 수 없어요. 나와의 대화만 열 수 있어요.'),
             theme.colorScheme.error,
           )
         : (
             Icons.info_outline,
             // 휴대폰 폭(360)에서도 한 줄에 들게 짧게 — 길면 끝의 '요.'만 다음 줄로 넘어갔다.
-            '1명은 1:1 채팅, 2명 이상은 그룹채팅으로 만들어요.',
+            tr('1명은 1:1 채팅, 2명 이상은 그룹채팅으로 만들어요.'),
             theme.hintColor,
           );
     return Row(
@@ -179,7 +180,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           : const Icon(Icons.lock_outline, size: 18),
-      label: const _OneLine('비밀 대화 시작'),
+      label: _OneLine(tr('비밀 대화 시작')),
     );
     final startButton = FilledButton(
       key: const ValueKey('start-chat-submit'),
@@ -197,11 +198,11 @@ class _NewChatScreenState extends State<NewChatScreen> {
               height: 20,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : const _OneLine('채팅 시작'),
+          : _OneLine(tr('채팅 시작')),
     );
     final cancel = TextButton(
       onPressed: idle ? () => Navigator.of(context).pop() : null,
-      child: const Text('취소'),
+      child: Text(tr('취소')),
     );
     if (wide) {
       return Row(
@@ -278,7 +279,7 @@ class _SelfChatRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text(
+                    Text(
                       selfRoomName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -288,7 +289,7 @@ class _SelfChatRow extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '나만 보는 메모 공간 · 바로 열기',
+                      tr('나만 보는 메모 공간 · 바로 열기'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 12, color: theme.hintColor),

@@ -5,6 +5,7 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/muted_scrollbar.dart';
 import 'filter_controls.dart';
+import '../../l10n/tr.dart';
 
 /// 템플릿 편집기에서 고를 수 있는 색.
 const templateColorChoices = <String>[
@@ -103,7 +104,7 @@ class _ProjectTemplatesViewState extends State<ProjectTemplatesView> {
         await api.updateProjectTemplate(id, t);
       }
       if (!mounted) return;
-      showAppToast(context, '템플릿을 저장했습니다.');
+      showAppToast(context, tr('템플릿을 저장했습니다.'));
       setState(() => _editing = null);
       _load();
     } catch (e) {
@@ -115,19 +116,21 @@ class _ProjectTemplatesViewState extends State<ProjectTemplatesView> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('템플릿 삭제'),
+        title: Text(tr('템플릿 삭제')),
         content: Text(
-          '"${t.name}" 템플릿을 삭제할까요?\n이 템플릿으로 이미 만든 프로젝트에는 영향이 없습니다.',
+          tr('"{t.name}" 템플릿을 삭제할까요?\n이 템플릿으로 이미 만든 프로젝트에는 영향이 없습니다.', {
+            't.name': t.name,
+          }),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       ),
@@ -135,10 +138,10 @@ class _ProjectTemplatesViewState extends State<ProjectTemplatesView> {
     if (ok != true || !mounted) return;
     try {
       await widget.session.api!.deleteProjectTemplate(t.id!);
-      if (mounted) showAppToast(context, '템플릿을 삭제했습니다.');
+      if (mounted) showAppToast(context, tr('템플릿을 삭제했습니다.'));
       _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '템플릿을 삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('템플릿을 삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -147,7 +150,7 @@ class _ProjectTemplatesViewState extends State<ProjectTemplatesView> {
   Widget _newButton() => FilledButton.icon(
     onPressed: _newTemplate,
     icon: const Icon(Icons.add, size: 18),
-    label: const Text('새 템플릿 만들기'),
+    label: Text(tr('새 템플릿 만들기')),
   );
 
   @override
@@ -175,8 +178,8 @@ class _ProjectTemplatesViewState extends State<ProjectTemplatesView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      '프로젝트 템플릿',
+                    Text(
+                      tr('프로젝트 템플릿'),
                       style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
@@ -184,7 +187,7 @@ class _ProjectTemplatesViewState extends State<ProjectTemplatesView> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '팀에서 공유하는 프로젝트 설정 템플릿을 관리합니다',
+                      tr('팀에서 공유하는 프로젝트 설정 템플릿을 관리합니다'),
                       style: TextStyle(fontSize: 13, color: hint),
                     ),
                   ],
@@ -248,13 +251,13 @@ class _ProjectTemplatesViewState extends State<ProjectTemplatesView> {
             child: const Icon(Icons.grid_view_outlined, size: 30),
           ),
           const SizedBox(height: 16),
-          const Text(
-            '템플릿이 없습니다',
+          Text(
+            tr('템플릿이 없습니다'),
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 6),
           Text(
-            '자주 쓰는 프로젝트 설정을 템플릿으로 저장해 보세요',
+            tr('자주 쓰는 프로젝트 설정을 템플릿으로 저장해 보세요'),
             style: TextStyle(fontSize: 13, color: theme.hintColor),
           ),
           const SizedBox(height: 16),
@@ -330,7 +333,7 @@ Future<ProjectTemplate?> showProjectTemplateEditorDialog(
                   t,
                 );
                 if (!dialogContext.mounted) return;
-                showAppToast(dialogContext, '템플릿을 저장했습니다.');
+                showAppToast(dialogContext, tr('템플릿을 저장했습니다.'));
                 Navigator.of(dialogContext).pop(saved);
               } catch (e) {
                 if (dialogContext.mounted) showAppToast(dialogContext, '$e');
@@ -436,8 +439,15 @@ class ProjectTemplateSummaryCard extends StatelessWidget {
                   const SizedBox(height: 6),
                 ],
                 Text(
-                  '상태 ${t.statuses.length} · 유형 ${t.types.length} · '
-                  '우선순위 ${t.priorities.length} · 필드 ${t.fields.length}',
+                  tr(
+                    '상태 {t.statuses.length} · 유형 {t.types.length} · 우선순위 {t.priorities.length} · 필드 {t.fields.length}',
+                    {
+                      't.statuses.length': t.statuses.length,
+                      't.types.length': t.types.length,
+                      't.priorities.length': t.priorities.length,
+                      't.fields.length': t.fields.length,
+                    },
+                  ),
                   style: TextStyle(fontSize: 12, color: hint),
                 ),
                 if (detailed && t.statuses.isNotEmpty) ...[
@@ -524,9 +534,9 @@ class _TemplateCard extends StatelessWidget {
                 MenuItemButton(
                   leadingIcon: const Icon(Icons.edit_outlined, size: 16),
                   onPressed: onEdit,
-                  child: const Padding(
+                  child: Padding(
                     padding: EdgeInsets.only(right: 20),
-                    child: Text('수정'),
+                    child: Text(tr('수정')),
                   ),
                 ),
                 MenuItemButton(
@@ -536,17 +546,17 @@ class _TemplateCard extends StatelessWidget {
                     color: Colors.redAccent,
                   ),
                   onPressed: onDelete,
-                  child: const Padding(
+                  child: Padding(
                     padding: EdgeInsets.only(right: 20),
                     child: Text(
-                      '삭제',
+                      tr('삭제'),
                       style: TextStyle(color: Colors.redAccent),
                     ),
                   ),
                 ),
               ],
               builder: (context, controller, _) => IconButton(
-                tooltip: '템플릿 메뉴',
+                tooltip: tr('템플릿 메뉴'),
                 icon: const Icon(Icons.more_horiz, size: 20),
                 visualDensity: VisualDensity.compact,
                 onPressed: () =>
@@ -565,7 +575,7 @@ class _TemplateCard extends StatelessWidget {
           ),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-        child: const Text('이 템플릿으로 만들기'),
+        child: Text(tr('이 템플릿으로 만들기')),
       ),
     );
   }
@@ -691,10 +701,10 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
         _FieldDraft(
           _uniqueName([
             for (final f in _fields) f.name.text.trim(),
-          ], fieldKindLabels[kind] ?? '새 필드'),
+          ], fieldKindLabels[kind] ?? tr('새 필드')),
           kind,
           kind == 'select' || kind == 'multiSelect'
-              ? [_Draft('옵션 1', templateColorChoices.first)]
+              ? [_Draft(tr('옵션 1'), templateColorChoices.first)]
               : [],
         ),
       );
@@ -796,7 +806,7 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
           child: Row(
             children: [
               IconButton(
-                tooltip: '뒤로',
+                tooltip: tr('뒤로'),
                 onPressed: widget.onCancel,
                 icon: const Icon(Icons.chevron_left),
               ),
@@ -806,7 +816,7 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      isNew ? '새 템플릿 만들기' : '템플릿 수정',
+                      isNew ? tr('새 템플릿 만들기') : tr('템플릿 수정'),
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w700,
@@ -814,17 +824,17 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '프로젝트의 상태·유형·우선순위·커스텀 필드 구성을 저장해 재사용합니다',
+                      tr('프로젝트의 상태·유형·우선순위·커스텀 필드 구성을 저장해 재사용합니다'),
                       style: TextStyle(fontSize: 12, color: hint),
                     ),
                   ],
                 ),
               ),
-              TextButton(onPressed: widget.onCancel, child: const Text('취소')),
+              TextButton(onPressed: widget.onCancel, child: Text(tr('취소'))),
               const SizedBox(width: 8),
               FilledButton(
                 onPressed: _saving || _name.text.trim().isEmpty ? null : _save,
-                child: const Text('템플릿 저장'),
+                child: Text(tr('템플릿 저장')),
               ),
             ],
           ),
@@ -839,43 +849,45 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _label('템플릿 이름'),
+                  _label(tr('템플릿 이름')),
                   TextField(
                     controller: _name,
                     maxLength: 40,
                     decoration: _inputDeco(
-                      '예: 소프트웨어 개발',
+                      tr('예: 소프트웨어 개발'),
                     ).copyWith(counterText: ''),
                   ),
                   const SizedBox(height: 14),
-                  _label('설명'),
+                  _label(tr('설명')),
                   TextField(
                     controller: _description,
                     minLines: 2,
                     maxLines: 3,
-                    decoration: _inputDeco('템플릿에 대한 설명을 추가하세요...'),
+                    decoration: _inputDeco(tr('템플릿에 대한 설명을 추가하세요...')),
                   ),
                   const SizedBox(height: 16),
                   LayoutBuilder(
                     builder: (context, constraints) {
                       final sections = [
                         _section(
-                          title: '상태',
+                          title: tr('상태'),
                           list: _statuses,
-                          onAdd: () => _add(_statuses, '새 상태'),
+                          onAdd: () => _add(_statuses, tr('새 상태')),
                           withDone: true,
-                          footnote: "'완료'로 표시한 상태의 업무는 진행률·통계에서 완료로 집계됩니다.",
+                          footnote: tr(
+                            '\'완료\'로 표시한 상태의 업무는 진행률·통계에서 완료로 집계됩니다.',
+                          ),
                         ),
                         _section(
-                          title: '작업 유형',
+                          title: tr('작업 유형'),
                           list: _types,
-                          onAdd: () => _add(_types, '새 유형'),
-                          footnote: '유형 색상은 캘린더·간트 차트에서 업무 색상으로 사용됩니다.',
+                          onAdd: () => _add(_types, tr('새 유형')),
+                          footnote: tr('유형 색상은 캘린더·간트 차트에서 업무 색상으로 사용됩니다.'),
                         ),
                         _section(
-                          title: '우선순위',
+                          title: tr('우선순위'),
                           list: _priorities,
-                          onAdd: () => _add(_priorities, '새 우선순위'),
+                          onAdd: () => _add(_priorities, tr('새 우선순위')),
                         ),
                       ];
                       if (constraints.maxWidth < 760) {
@@ -955,7 +967,7 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
-          _addButton('추가', onAdd),
+          _addButton(tr('추가'), onAdd),
           _reorderable(list, withDone: withDone),
           if (footnote != null) ...[
             const SizedBox(height: 6),
@@ -1055,7 +1067,7 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
                     ),
                     const SizedBox(width: 3),
                     Text(
-                      '완료',
+                      tr('완료'),
                       style: TextStyle(
                         fontSize: 11,
                         color: done ? filterAccent : hint,
@@ -1066,7 +1078,7 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
               ),
             ),
           IconButton(
-            tooltip: '삭제',
+            tooltip: tr('삭제'),
             onPressed: () => setState(() {
               list.removeAt(i).name.dispose();
             }),
@@ -1087,13 +1099,13 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            '커스텀 필드',
+          Text(
+            tr('커스텀 필드'),
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
           Text(
-            '각 필드는 하나의 타입을 가집니다. 단일/다중 선택 타입은 순서가 있는 옵션을 가질 수 있습니다.',
+            tr('각 필드는 하나의 타입을 가집니다. 단일/다중 선택 타입은 순서가 있는 옵션을 가질 수 있습니다.'),
             style: TextStyle(fontSize: 11, color: hint),
           ),
           const SizedBox(height: 8),
@@ -1102,7 +1114,7 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Center(
                 child: Text(
-                  '사용자 정의 필드가 없습니다.',
+                  tr('사용자 정의 필드가 없습니다.'),
                   style: TextStyle(fontSize: 12, color: hint),
                 ),
               ),
@@ -1110,7 +1122,7 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
           for (final f in _fields) _fieldBox(f),
           FilterPopup(
             anchorBuilder: (context, open, toggle) =>
-                _addButton('필드 추가', toggle),
+                _addButton(tr('필드 추가'), toggle),
             popupBuilder: (context, close) => FilterPopupCard(
               width: 180,
               child: Column(
@@ -1202,7 +1214,7 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
                 const Spacer(),
                 if (f.hasOptions)
                   IconButton(
-                    tooltip: f.expanded ? '접기' : '펼치기',
+                    tooltip: f.expanded ? tr('접기') : tr('펼치기'),
                     onPressed: () => setState(() => f.expanded = !f.expanded),
                     icon: Icon(
                       f.expanded
@@ -1214,7 +1226,7 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
                     visualDensity: VisualDensity.compact,
                   ),
                 IconButton(
-                  tooltip: '필드 삭제',
+                  tooltip: tr('필드 삭제'),
                   onPressed: () => setState(() {
                     _fields.remove(f);
                     f.name.dispose();
@@ -1232,7 +1244,7 @@ class _ProjectTemplateEditorState extends State<ProjectTemplateEditor> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _addButton('추가', () => _add(f.options, '옵션')),
+                  _addButton(tr('추가'), () => _add(f.options, tr('옵션'))),
                   _reorderable(f.options, withColor: false),
                 ],
               ),

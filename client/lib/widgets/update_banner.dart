@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/session.dart';
 import 'update_dialog.dart';
+import '../l10n/tr.dart';
 
 /// 앱을 쓰는 동안 화면 위쪽 가운데에 계속 떠 있는 업데이트 알림 알약 — 로그인 화면/홈 화면이
 /// 앱을 막 열었을 때 한 번 띄우는 모달(UpdateDialog)과 달리, 그걸 "나중에"로 닫고 계속
@@ -73,7 +74,7 @@ class _UpdateBannerState extends State<UpdateBanner> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          'v$version 업데이트가 있습니다.',
+                          tr('v{version} 업데이트가 있습니다.', {'version': version}),
                           style: TextStyle(
                             color: colors.onPrimaryContainer,
                             fontWeight: FontWeight.w600,

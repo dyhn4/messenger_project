@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/api_client.dart' show ApiException;
 import '../services/app_lock.dart';
 import '../services/session.dart';
+import '../l10n/tr.dart';
 
 /// 앱 전체(모든 화면·다이얼로그)를 감싸서, 잠겨 있으면(AppSettings.appLocked — 자동 잠금) 그
 /// 위를 잠금 화면으로 덮는다. 잠긴 동안은 아래 화면으로 키보드 포커스가 가지 않고, 마우스도
@@ -75,7 +76,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
       if (mounted) {
-        setState(() => _error = '서버에 연결하지 못했습니다. 연결 상태를 확인해 주세요.');
+        setState(() => _error = tr('서버에 연결하지 못했습니다. 연결 상태를 확인해 주세요.'));
       }
     } finally {
       if (mounted) {
@@ -112,8 +113,8 @@ class _AppLockScreenState extends State<AppLockScreen> {
                 children: [
                   const Icon(Icons.lock, size: 110, color: Colors.white),
                   const SizedBox(height: 20),
-                  const Text(
-                    '현재 화면 잠금모드입니다.\n잠금 해제를 하려면 비밀번호를 입력해주세요.',
+                  Text(
+                    tr('현재 화면 잠금모드입니다.\n잠금 해제를 하려면 비밀번호를 입력해주세요.'),
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white,
@@ -133,7 +134,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
                       onSubmitted: (_) => _unlock(),
                       style: const TextStyle(color: Colors.black87),
                       decoration: InputDecoration(
-                        hintText: '비밀번호 입력',
+                        hintText: tr('비밀번호 입력'),
                         hintStyle: const TextStyle(color: Colors.black38),
                         filled: true,
                         fillColor: Colors.white.withValues(alpha: 0.92),
@@ -162,7 +163,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
                                   Icons.arrow_forward,
                                   color: Colors.black54,
                                 ),
-                                tooltip: '잠금 해제',
+                                tooltip: tr('잠금 해제'),
                                 onPressed: _unlock,
                               ),
                       ),
@@ -182,7 +183,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.white70,
                     ),
-                    child: const Text('로그아웃'),
+                    child: Text(tr('로그아웃')),
                   ),
                 ],
               ),

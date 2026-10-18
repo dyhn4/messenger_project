@@ -6,6 +6,7 @@ import 'package:livekit_client/livekit_client.dart' as lk;
 import '../../widgets/avatar_utils.dart';
 import 'call_logic.dart';
 import 'call_snapshot.dart';
+import '../../l10n/tr.dart';
 
 /// 말하는 중 표시(테두리)와 줌 느낌의 어두운 타일 배경.
 const callSpeakingColor = Color(0xFF2ECC71);
@@ -247,17 +248,17 @@ class CallVideoTile extends StatelessWidget {
     final isShare = tile.isScreenShare;
     final speaking = person.speaking && person.micOn && !isShare;
     final label = isShare
-        ? '${person.name}의 화면 공유'
+        ? tr('{person.name}의 화면 공유', {'person.name': person.name})
         : person.isMe
-        ? '${person.name} (나)'
+        ? tr('{person.name} (나)', {'person.name': person.name})
         : person.name;
 
     Widget content;
     if (isShare && person.isMe) {
       // 내 화면을 내 화면에 비추면 거울 속 거울이 된다 — 안내만 띄운다.
-      content = const Center(
+      content = Center(
         child: Text(
-          '내 화면을 공유하고 있습니다',
+          tr('내 화면을 공유하고 있습니다'),
           style: TextStyle(color: Colors.white70, fontSize: 14),
         ),
       );
@@ -446,14 +447,14 @@ class CallMicRequestBanner extends StatelessWidget {
           spacing: 8,
           runSpacing: 6,
           children: [
-            const Row(
+            Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.mic, size: 18, color: callSpeakingColor),
                 SizedBox(width: 8),
                 Flexible(
                   child: Text(
-                    '진행자가 마이크를 켜 달라고 요청했습니다',
+                    tr('진행자가 마이크를 켜 달라고 요청했습니다'),
                     style: TextStyle(color: Colors.white, fontSize: 13),
                   ),
                 ),
@@ -466,7 +467,7 @@ class CallMicRequestBanner extends StatelessWidget {
                   key: const ValueKey('call-mic-request-decline'),
                   onPressed: onDecline,
                   style: TextButton.styleFrom(foregroundColor: Colors.white70),
-                  child: const Text('그대로 두기'),
+                  child: Text(tr('그대로 두기')),
                 ),
                 const SizedBox(width: 4),
                 FilledButton.icon(
@@ -477,7 +478,7 @@ class CallMicRequestBanner extends StatelessWidget {
                     foregroundColor: Colors.black87,
                   ),
                   icon: const Icon(Icons.mic, size: 16),
-                  label: const Text('마이크 켜기'),
+                  label: Text(tr('마이크 켜기')),
                 ),
               ],
             ),
@@ -509,11 +510,7 @@ class CallToast extends StatelessWidget {
         children: [
           hand
               ? const Icon(Icons.front_hand, size: 16, color: callHandColor)
-              : const Icon(
-                  Icons.info_outline,
-                  size: 16,
-                  color: Colors.white70,
-                ),
+              : const Icon(Icons.info_outline, size: 16, color: Colors.white70),
           const SizedBox(width: 8),
           Flexible(
             child: Text(

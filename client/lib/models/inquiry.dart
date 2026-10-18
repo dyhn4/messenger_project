@@ -1,6 +1,8 @@
+import '../l10n/tr.dart';
+
 /// 문의 작성 폼(chat_input_bar.dart)의 분류 선택지 — 관리자가 설정하는 값이 아니라 고정
 /// 목록이다(직책 목록처럼 팀마다 다를 이유가 없는 값이라 굳이 DB 테이블로 안 뺐다).
-const inquiryCategories = ['업무', '근태/휴가', '불편사항', '기타'];
+final inquiryCategories = [tr('업무'), tr('근태/휴가'), tr('불편사항'), tr('기타')];
 
 /// "팀장에게 문의하기"의 처리 상태 — server/src/inquiries.js와 1:1 대응.
 enum InquiryStatus { open, inProgress, resolved }
@@ -18,9 +20,9 @@ String inquiryStatusToWire(InquiryStatus s) => switch (s) {
 };
 
 String inquiryStatusLabel(InquiryStatus s) => switch (s) {
-  InquiryStatus.open => '대기',
-  InquiryStatus.inProgress => '처리중',
-  InquiryStatus.resolved => '완료',
+  InquiryStatus.open => tr('대기'),
+  InquiryStatus.inProgress => tr('처리중'),
+  InquiryStatus.resolved => tr('완료'),
 };
 
 /// 팀원이 자기 팀의 "팀장"에게 보낸 문의(미니 티켓) — server/src/inquiries.js 응답과 1:1

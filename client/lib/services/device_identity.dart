@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 
 import 'api_client.dart';
 import 'app_platform.dart';
+import '../l10n/tr.dart';
 
 const _kDeviceId = 'secret_device_id';
 const _kIdentitySeed = 'secret_identity_seed'; // X25519 개인키(32바이트 시드).
@@ -26,7 +27,7 @@ class DeviceIdentity {
   String get deviceId {
     final id = _deviceId;
     if (id == null) {
-      throw StateError('DeviceIdentity.ensureLoaded()를 먼저 호출해야 합니다.');
+      throw StateError(tr('DeviceIdentity.ensureLoaded()를 먼저 호출해야 합니다.'));
     }
     return id;
   }

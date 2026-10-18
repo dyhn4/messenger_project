@@ -6,6 +6,7 @@ import '../services/app_platform.dart';
 import '../services/session.dart';
 import '../services/web_notifications.dart';
 import 'app_toast.dart';
+import '../l10n/tr.dart';
 
 /// 웹 앱에서 알림을 켜자고 권하는 알약(화면 위 가운데) — 앱 화면이 아니면(로그인 전 등) 안 보인다.
 /// - 아이폰 Safari 탭: 웹 푸시는 홈 화면에 추가한 앱에서만 되니 그 방법을 안내한다.
@@ -96,8 +97,8 @@ class _WebPushPromptState extends State<WebPushPrompt> {
                       Flexible(
                         child: Text(
                           needsHomeScreen
-                              ? '홈 화면에 추가하면 알림을 받을 수 있습니다.'
-                              : '알림을 켜면 새 메시지를 놓치지 않습니다.',
+                              ? tr('홈 화면에 추가하면 알림을 받을 수 있습니다.')
+                              : tr('알림을 켜면 새 메시지를 놓치지 않습니다.'),
                           style: TextStyle(
                             color: colors.onPrimaryContainer,
                             fontWeight: FontWeight.w600,
@@ -113,7 +114,9 @@ class _WebPushPromptState extends State<WebPushPrompt> {
                                 widget.navigatorKey.currentContext ?? context,
                               )
                             : _enable,
-                        child: Text(needsHomeScreen ? '방법 보기' : '알림 켜기'),
+                        child: Text(
+                          needsHomeScreen ? tr('방법 보기') : tr('알림 켜기'),
+                        ),
                       ),
                       IconButton(
                         icon: Icon(
@@ -145,17 +148,16 @@ Future<void> showAddToHomeScreenGuide(BuildContext context) {
   return showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('홈 화면에 추가하기'),
-      content: const Text(
-        '아이폰은 홈 화면에 추가한 앱에서만 알림을 받을 수 있습니다(iOS 16.4 이상).\n\n'
-        '1. Safari 아래쪽의 공유 단추(네모에서 화살표가 나온 모양)를 누릅니다.\n'
-        '2. "홈 화면에 추가"를 누릅니다.\n'
-        '3. 홈 화면에 생긴 TangoTalk 아이콘으로 열고, 로그인한 뒤 "알림 켜기"를 누릅니다.',
+      title: Text(tr('홈 화면에 추가하기')),
+      content: Text(
+        tr(
+          '아이폰은 홈 화면에 추가한 앱에서만 알림을 받을 수 있습니다(iOS 16.4 이상).\n\n1. Safari 아래쪽의 공유 단추(네모에서 화살표가 나온 모양)를 누릅니다.\n2. "홈 화면에 추가"를 누릅니다.\n3. 홈 화면에 생긴 TangoTalk 아이콘으로 열고, 로그인한 뒤 "알림 켜기"를 누릅니다.',
+        ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('확인'),
+          child: Text(tr('확인')),
         ),
       ],
     ),
@@ -182,18 +184,18 @@ class _WebNotificationSettingState extends State<WebNotificationSetting> {
     final String status;
     Widget? action;
     if (needsHomeScreen) {
-      status = '아이폰은 홈 화면에 추가한 앱에서만 알림을 받을 수 있습니다.';
+      status = tr('아이폰은 홈 화면에 추가한 앱에서만 알림을 받을 수 있습니다.');
       action = OutlinedButton(
         onPressed: () => showAddToHomeScreenGuide(context),
-        child: const Text('방법 보기'),
+        child: Text(tr('방법 보기')),
       );
     } else if (!webNotificationsSupported) {
-      status = '이 브라우저는 알림을 지원하지 않습니다.';
+      status = tr('이 브라우저는 알림을 지원하지 않습니다.');
     } else if (permission == 'granted') {
       final push = webPushSupported && widget.session.webPushEnabled;
       status = push
-          ? '켜져 있습니다. 앱을 닫아도 새 메시지 알림이 옵니다.'
-          : '켜져 있습니다. 앱이 열려 있는 동안 새 메시지 알림이 옵니다.';
+          ? tr('켜져 있습니다. 앱을 닫아도 새 메시지 알림이 옵니다.')
+          : tr('켜져 있습니다. 앱이 열려 있는 동안 새 메시지 알림이 옵니다.');
       // 앱을 닫아도 오는 알림(이 브라우저의 웹 푸시) 켜고 끄기 — 같은 기기에서 PC 앱·휴대폰 앱으로도 알림을 받으면 두 번 뜨니
       // 끌 수 있게 한다(그 앱이 켜져 있는 동안은 서버가 알아서 막지만, 앱을 껐을 때나 다른 기기 브라우저는 여기서 고른다).
       if (webPushSupported) {
@@ -201,9 +203,11 @@ class _WebNotificationSettingState extends State<WebNotificationSetting> {
           key: const ValueKey('web-push-switch'),
           contentPadding: EdgeInsets.zero,
           dense: true,
-          title: const Text('앱을 닫아도 알림 받기(푸시)'),
-          subtitle: const Text(
-            '끄면 이 브라우저는 웹 앱이 열려 있는 동안에만 알림을 받습니다. 같은 기기에서 앱으로 알림을 받고 있다면 꺼 두세요.',
+          title: Text(tr('앱을 닫아도 알림 받기(푸시)')),
+          subtitle: Text(
+            tr(
+              '끄면 이 브라우저는 웹 앱이 열려 있는 동안에만 알림을 받습니다. 같은 기기에서 앱으로 알림을 받고 있다면 꺼 두세요.',
+            ),
           ),
           value: widget.session.webPushEnabled,
           onChanged: _busy
@@ -214,7 +218,10 @@ class _WebNotificationSettingState extends State<WebNotificationSetting> {
                     await widget.session.setWebPushEnabled(on);
                   } catch (e) {
                     if (context.mounted) {
-                      showAppToast(context, '알림 설정을 바꾸지 못했습니다: $e');
+                      showAppToast(
+                        context,
+                        tr('알림 설정을 바꾸지 못했습니다: {e}', {'e': e}),
+                      );
                     }
                   } finally {
                     if (mounted) setState(() => _busy = false);
@@ -223,9 +230,9 @@ class _WebNotificationSettingState extends State<WebNotificationSetting> {
         );
       }
     } else if (permission == 'denied') {
-      status = '브라우저에서 알림이 차단되어 있습니다. 주소창의 사이트 설정에서 알림을 허용하세요.';
+      status = tr('브라우저에서 알림이 차단되어 있습니다. 주소창의 사이트 설정에서 알림을 허용하세요.');
     } else {
-      status = '꺼져 있습니다.';
+      status = tr('꺼져 있습니다.');
       action = FilledButton.tonal(
         onPressed: _busy
             ? null
@@ -234,7 +241,7 @@ class _WebNotificationSettingState extends State<WebNotificationSetting> {
                 await widget.session.enableWebNotifications();
                 if (mounted) setState(() => _busy = false);
               },
-        child: const Text('알림 켜기'),
+        child: Text(tr('알림 켜기')),
       );
     }
     return Column(

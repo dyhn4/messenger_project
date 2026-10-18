@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/calendar.dart';
+import '../../l10n/tr.dart';
 
 /// 반복 일정을 고치거나 지울 때 "이 일정만 / 이 일정 및 이후 일정 / 모든 일정" 중 범위를 고르는 대화상자.
 /// 고른 범위를 돌려주고, 취소하면 null. 돌려받은 값을 PATCH/DELETE 의 scope 로 그대로 넘긴다.
@@ -32,10 +33,10 @@ class _RecurrenceScopeDialogState extends State<_RecurrenceScopeDialog> {
   // 가장 좁은 범위(이 일정만)가 기본 — 실수로 반복 전체를 건드리지 않게.
   RecurrenceScope _scope = RecurrenceScope.thisOnly;
 
-  static const _options = [
-    (RecurrenceScope.thisOnly, '이 일정만', 'scope-this'),
-    (RecurrenceScope.following, '이 일정 및 이후 일정', 'scope-following'),
-    (RecurrenceScope.all, '모든 일정', 'scope-all'),
+  static final _options = [
+    (RecurrenceScope.thisOnly, tr('이 일정만'), 'scope-this'),
+    (RecurrenceScope.following, tr('이 일정 및 이후 일정'), 'scope-following'),
+    (RecurrenceScope.all, tr('모든 일정'), 'scope-all'),
   ];
 
   @override
@@ -64,7 +65,7 @@ class _RecurrenceScopeDialogState extends State<_RecurrenceScopeDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('scope-confirm'),

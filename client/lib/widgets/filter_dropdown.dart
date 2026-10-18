@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/room.dart';
 import '../services/session.dart';
+import '../l10n/tr.dart';
 
 /// 검색/파일 패널 등에서 쓰는 필터 드롭다운 버튼 — 버튼을 누르면 앵커 방식으로 오버레이
 /// 패널이 뜬다. Material `DropdownMenu`는 방 필터의 토픽/채팅 탭 같은 커스텀 내용을 못 넣어서
@@ -157,8 +158,8 @@ Widget filterSearchBox(ValueChanged<String> onChanged) {
   return Padding(
     padding: const EdgeInsets.all(8),
     child: TextField(
-      decoration: const InputDecoration(
-        hintText: '검색어를 입력하세요.',
+      decoration: InputDecoration(
+        hintText: tr('검색어를 입력하세요.'),
         isDense: true,
         prefixIcon: Icon(Icons.search, size: 18),
         border: OutlineInputBorder(),
@@ -211,11 +212,11 @@ class RoomFilterButton extends StatelessWidget {
 
   String get _label {
     final id = selectedRoomId;
-    if (id == null) return allLabel;
+    if (id == null) return tr(allLabel);
     for (final r in session.rooms) {
       if (r.id == id) return r.displayName(session.userId ?? '');
     }
-    return allLabel;
+    return tr(allLabel);
   }
 
   @override
@@ -230,7 +231,7 @@ class RoomFilterButton extends StatelessWidget {
         child: _RoomFilterPanel(
           session: session,
           selectedRoomId: selectedRoomId,
-          allLabel: allOptionLabel ?? '전체',
+          allLabel: allOptionLabel ?? tr('전체'),
           teamId: teamId,
           onSelected: (id) {
             onSelected(id);
@@ -296,10 +297,10 @@ class _RoomFilterPanelState extends State<_RoomFilterPanel> {
       children: [
         Row(
           children: [
-            for (final (type, label) in const [
-              (RoomType.topic, '토픽'),
-              (RoomType.group, '그룹채팅'),
-              (RoomType.dm, '채팅'),
+            for (final (type, label) in [
+              (RoomType.topic, tr('토픽')),
+              (RoomType.group, tr('그룹채팅')),
+              (RoomType.dm, tr('채팅')),
             ])
               _tabButton(
                 context,

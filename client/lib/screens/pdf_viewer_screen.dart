@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:pdfx/pdfx.dart';
+import '../l10n/tr.dart';
 
 /// PDF 첨부 인앱 뷰어. 채팅 버블에서 .pdf 파일명을 탭하면 엽니다(그 외 확장자는 여전히
 /// DownloadableFile이 외부 앱으로 연다 — attachment_widgets.dart의 _isInAppViewable 참고).
@@ -47,7 +48,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           errorBuilder: (_, error) => Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Text('PDF를 열 수 없습니다: $error', textAlign: TextAlign.center),
+              child: Text(
+                tr('PDF를 열 수 없습니다: {error}', {'error': error}),
+                textAlign: TextAlign.center,
+              ),
             ),
           ),
         ),

@@ -24,6 +24,7 @@ import '../widgets/sticker_picker.dart';
 import '../widgets/sticker_preview_card.dart';
 import 'announcement_detail_screen.dart' show showAnnouncementReadersDialog;
 import 'post_editor_dialog.dart' show postEditorsOpen;
+import '../l10n/tr.dart';
 
 /// 메시지 하나의 댓글 스레드. 데스크톱은 우측 패널(asPanel: true), 모바일은 전체화면으로 쓴다
 /// (SearchScreen과 동일한 이중 모드 패턴). [message]는 RoomChatController.messages 안에 있는
@@ -296,7 +297,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
     }
   }
 
-  String get _title => widget.message.isPost ? '게시글' : '댓글';
+  String get _title => widget.message.isPost ? tr('게시글') : tr('댓글');
 
   AppUser? _memberOf(String? userId) {
     for (final m in widget.room.members) {
@@ -365,7 +366,13 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                               Expanded(
                                 child: Text(
                                   // 게시글은 보드 카드의 "댓글 N"과 같게 지운 댓글은 세지 않는다.
-                                  '댓글 ${widget.message.isPost ? comments.where((c) => !c.deleted).length : comments.length}',
+                                  tr('댓글 {p0}', {
+                                    'p0': widget.message.isPost
+                                        ? comments
+                                              .where((c) => !c.deleted)
+                                              .length
+                                        : comments.length,
+                                  }),
                                   style: Theme.of(context).textTheme.labelLarge,
                                 ),
                               ),
@@ -379,14 +386,22 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                                   ),
                                   icon: const Icon(Icons.done_all, size: 16),
                                   label: Text(
-                                    '읽음 ${readers.read.length} · 안 읽음 ${readers.unread.length}',
+                                    tr(
+                                      '읽음 {readers.read.length} · 안 읽음 {readers.unread.length}',
+                                      {
+                                        'readers.read.length':
+                                            readers.read.length,
+                                        'readers.unread.length':
+                                            readers.unread.length,
+                                      },
+                                    ),
                                   ),
                                   onPressed: () {
                                     unawaited(_loadReaders());
                                     showAnnouncementReadersDialog(
                                       context,
                                       readers,
-                                      title: '게시글 읽음 확인',
+                                      title: tr('게시글 읽음 확인'),
                                     );
                                   },
                                 ),

@@ -9,6 +9,7 @@ import '../home_screen.dart' show wideBreakpoint;
 import 'calendar_common.dart';
 import 'event_editor.dart';
 import 'recurrence_scope_dialog.dart';
+import '../../l10n/tr.dart';
 
 /// 일정을 눌렀을 때의 상세 보기 — 넓은 창(PC)은 대화상자, 좁은 창(모바일)은 아래에서 올라오는 시트.
 /// 수정·삭제는 여기서 이어진다(반복 일정이면 적용 범위를 먼저 묻는다).
@@ -77,8 +78,8 @@ class EventDetailBody extends StatelessWidget {
     if (event.recurring) {
       scope = await showRecurrenceScopeDialog(
         hostContext,
-        title: '반복 일정 수정',
-        confirmLabel: '수정',
+        title: tr('반복 일정 수정'),
+        confirmLabel: tr('수정'),
       );
       if (scope == null) return;
     }
@@ -98,8 +99,8 @@ class EventDetailBody extends StatelessWidget {
     if (event.recurring) {
       scope = await showRecurrenceScopeDialog(
         context,
-        title: '반복 일정 삭제',
-        confirmLabel: '삭제',
+        title: tr('반복 일정 삭제'),
+        confirmLabel: tr('삭제'),
       );
       if (scope == null) return;
     } else {
@@ -107,17 +108,19 @@ class EventDetailBody extends StatelessWidget {
       final ok = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('일정을 삭제할까요?'),
-          content: Text('\'${eventDisplayTitle(event)}\' 일정이 삭제됩니다.'),
+          title: Text(tr('일정을 삭제할까요?')),
+          content: Text(
+            tr('\'{p0}\' 일정이 삭제됩니다.', {'p0': eventDisplayTitle(event)}),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('취소'),
+              child: Text(tr('취소')),
             ),
             FilledButton(
               key: const ValueKey('event-delete-confirm'),
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('삭제'),
+              child: Text(tr('삭제')),
             ),
           ],
         ),
@@ -131,10 +134,13 @@ class EventDetailBody extends StatelessWidget {
         occurrenceStart: event.recurring ? event.start : null,
       );
       onClose();
-      if (hostContext.mounted) showAppToast(hostContext, '일정을 삭제했습니다.');
+      if (hostContext.mounted) showAppToast(hostContext, tr('일정을 삭제했습니다.'));
     } catch (e) {
       if (!context.mounted) return;
-      showAppToast(context, e is ApiException ? e.message : '일정을 삭제하지 못했습니다.');
+      showAppToast(
+        context,
+        e is ApiException ? trServer(e.message) : tr('일정을 삭제하지 못했습니다.'),
+      );
     }
   }
 
@@ -145,12 +151,12 @@ class EventDetailBody extends StatelessWidget {
     final calendarName =
         _calendar?.name ??
         (event.isHoliday
-            ? '국가 공휴일'
+            ? tr('국가 공휴일')
             : event.isBirthday
-            ? '멤버 생일'
+            ? tr('멤버 생일')
             : event.isExternal
-            ? '외부 캘린더'
-            : '캘린더');
+            ? tr('외부 캘린더')
+            : tr('캘린더'));
     final recurrence = event.recurrence;
     final canEdit = event.isUserEvent && event.canEdit && !event.restricted;
     final canDelete = event.isUserEvent && event.canDelete;
@@ -179,19 +185,19 @@ class EventDetailBody extends StatelessWidget {
               if (canEdit)
                 IconButton(
                   key: const ValueKey('event-edit'),
-                  tooltip: '수정하기',
+                  tooltip: tr('수정하기'),
                   icon: const Icon(Icons.edit_outlined),
                   onPressed: _edit,
                 ),
               if (canDelete)
                 IconButton(
                   key: const ValueKey('event-delete'),
-                  tooltip: '삭제하기',
+                  tooltip: tr('삭제하기'),
                   icon: const Icon(Icons.delete_outline),
                   onPressed: () => _delete(context),
                 ),
               IconButton(
-                tooltip: '닫기',
+                tooltip: tr('닫기'),
                 icon: const Icon(Icons.close),
                 onPressed: onClose,
               ),
@@ -252,7 +258,7 @@ class EventDetailBody extends StatelessWidget {
                   row(
                     Icons.lock_outline,
                     Text(
-                      '비공개 일정입니다. 초대된 사람만 자세한 내용을 볼 수 있습니다.',
+                      tr('비공개 일정입니다. 초대된 사람만 자세한 내용을 볼 수 있습니다.'),
                       style: TextStyle(color: theme.hintColor),
                     ),
                   ),
@@ -273,7 +279,7 @@ class EventDetailBody extends StatelessWidget {
                     row(
                       Icons.info_outline,
                       Text(
-                        '그룹웨어 → 예약에서 잡은 예약입니다. 바꾸거나 취소하려면 그곳에서 하세요.',
+                        tr('그룹웨어 → 예약에서 잡은 예약입니다. 바꾸거나 취소하려면 그곳에서 하세요.'),
                         key: const ValueKey('event-detail-booking'),
                         style: TextStyle(color: theme.hintColor),
                       ),
@@ -299,7 +305,9 @@ class EventDetailBody extends StatelessWidget {
                     row(
                       event.isPrivate ? Icons.lock_outline : Icons.public,
                       Text(
-                        event.isPrivate ? '비공개 (초대된 사람만 자세히 볼 수 있음)' : '공개',
+                        event.isPrivate
+                            ? tr('비공개 (초대된 사람만 자세히 볼 수 있음)')
+                            : tr('공개'),
                         key: const ValueKey('event-detail-visibility'),
                       ),
                     ),
@@ -308,7 +316,9 @@ class EventDetailBody extends StatelessWidget {
                     row(
                       Icons.cloud_download_outlined,
                       Text(
-                        '외부 캘린더에서 가져온 일정입니다. 고치려면 원래 캘린더(Google·Outlook 등)에서 고치세요.',
+                        tr(
+                          '외부 캘린더에서 가져온 일정입니다. 고치려면 원래 캘린더(Google·Outlook 등)에서 고치세요.',
+                        ),
                         key: const ValueKey('event-detail-external'),
                         style: TextStyle(color: theme.hintColor),
                       ),
@@ -317,7 +327,9 @@ class EventDetailBody extends StatelessWidget {
                     row(
                       Icons.person_outline,
                       Text(
-                        '만든 사람: ${event.creatorName}',
+                        tr('만든 사람: {event.creatorName}', {
+                          'event.creatorName': event.creatorName,
+                        }),
                         key: const ValueKey('event-detail-creator'),
                       ),
                     ),

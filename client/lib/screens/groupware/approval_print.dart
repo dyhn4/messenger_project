@@ -12,6 +12,7 @@ import '../../services/time_format.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/attachment_widgets.dart' show fetchAttachmentBytes;
 import '../../widgets/retrying_network_image.dart';
+import '../../l10n/tr.dart';
 
 /// 결재 문서의 결재란(칸마다 역할·서명/도장·이름·날짜)과 인쇄·PDF.
 
@@ -21,10 +22,10 @@ import '../../widgets/retrying_network_image.dart';
 String? stampTextOf(ApprovalStep s) => switch (s.status) {
   ApprovalStepStatus.approved =>
     s.role == LineRole.finalApprove
-        ? '전결'
-        : (s.role == LineRole.agree ? '합의' : '승인'),
-  ApprovalStepStatus.rejected => '반려',
-  ApprovalStepStatus.skipped => '생략',
+        ? tr('전결')
+        : (s.role == LineRole.agree ? tr('합의') : tr('승인')),
+  ApprovalStepStatus.rejected => tr('반려'),
+  ApprovalStepStatus.skipped => tr('생략'),
   _ => null,
 };
 
@@ -86,7 +87,7 @@ class ApprovalStampBox extends StatelessWidget {
                         : stampTextOf(s) == null
                         ? Text(
                             s.status == ApprovalStepStatus.pending
-                                ? '결재 차례'
+                                ? tr('결재 차례')
                                 : '',
                             style: TextStyle(fontSize: 11, color: hint),
                           )
@@ -108,7 +109,9 @@ class ApprovalStampBox extends StatelessWidget {
                       ),
                       if (s.actedByName != null)
                         Text(
-                          '대결 ${s.actedByName}',
+                          tr('대결 {s.actedByName}', {
+                            's.actedByName': s.actedByName,
+                          }),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -179,26 +182,29 @@ approvalContentOf(ApprovalDocument doc, GroupwareContext ctx) {
   switch (doc.kind) {
     case ApprovalKind.leave:
       rows.add((
-        '종류',
+        tr('종류'),
         p['leaveLabel'] as String? ??
             ctx.leaveType(p['leaveType'] as String?)?.label ??
-            '휴가',
+            tr('휴가'),
       ));
       rows.add((
-        '기간',
+        tr('기간'),
         p['startDate'] == p['endDate']
             ? '${p['startDate']}'
             : '${p['startDate']} ~ ${p['endDate']}',
       ));
-      rows.add(('일수', halfDaysText((p['halfDays'] as num?)?.toInt() ?? 0)));
+      rows.add((tr('일수'), halfDaysText((p['halfDays'] as num?)?.toInt() ?? 0)));
     case ApprovalKind.expense:
-      rows.add(('금액', wonText((p['amount'] as num?)?.toInt() ?? 0)));
-      rows.add(('분류', '${p['category'] ?? ''}'));
-      rows.add(('쓴 날', '${p['spentOn'] ?? ''}'));
+      rows.add((tr('금액'), wonText((p['amount'] as num?)?.toInt() ?? 0)));
+      rows.add((tr('분류'), '${p['category'] ?? ''}'));
+      rows.add((tr('쓴 날'), '${p['spentOn'] ?? ''}'));
     case ApprovalKind.attendance:
-      rows.add(('날짜', '${p['workDate'] ?? ''}'));
-      rows.add(('출근', '${p['clockIn'] ?? ''}'));
-      rows.add(('퇴근', p['clockOut'] == null ? '(그대로)' : '${p['clockOut']}'));
+      rows.add((tr('날짜'), '${p['workDate'] ?? ''}'));
+      rows.add((tr('출근'), '${p['clockIn'] ?? ''}'));
+      rows.add((
+        tr('퇴근'),
+        p['clockOut'] == null ? tr('(그대로)') : '${p['clockOut']}',
+      ));
     default:
       final values = doc.formValues;
       for (final f in doc.formFields) {
@@ -216,7 +222,7 @@ approvalContentOf(ApprovalDocument doc, GroupwareContext ctx) {
         }
       }
   }
-  if (doc.body != null) longTexts.add(('내용', doc.body!));
+  if (doc.body != null) longTexts.add((tr('내용'), doc.body!));
   return (
     rows: rows,
     longTexts: longTexts,
@@ -297,10 +303,17 @@ Future<Uint8List> buildApprovalPdf(
                   pw.SizedBox(height: 6),
                   pw.Text(
                     [
-                      if (doc.docNumber != null) '문서 번호 ${doc.docNumber}',
-                      '기안 ${doc.authorName}',
+                      if (doc.docNumber != null)
+                        tr('문서 번호 {doc.docNumber}', {
+                          'doc.docNumber': doc.docNumber,
+                        }),
+                      tr('기안 {doc.authorName}', {
+                        'doc.authorName': doc.authorName,
+                      }),
                       if (doc.createdAt != null) formatDateTime(doc.createdAt!),
-                      '상태 ${doc.status.label}',
+                      tr('상태 {doc.status.label}', {
+                        'doc.status.label': doc.status.label,
+                      }),
                     ].join('   '),
                     style: pw.TextStyle(fontSize: 9, color: grey),
                   ),
@@ -338,7 +351,9 @@ Future<Uint8List> buildApprovalPdf(
                     ),
                     if (s.actedByName != null)
                       pw.Text(
-                        '대결 ${s.actedByName}',
+                        tr('대결 {s.actedByName}', {
+                          's.actedByName': s.actedByName,
+                        }),
                         style: pw.TextStyle(fontSize: 7, color: red),
                       ),
                     pw.Text(
@@ -356,7 +371,7 @@ Future<Uint8List> buildApprovalPdf(
         if (doc.cc.isNotEmpty) ...[
           pw.SizedBox(height: 6),
           pw.Text(
-            '참조  ${doc.cc.map((c) => c.name).join(', ')}',
+            tr('참조  {p0}', {'p0': doc.cc.map((c) => c.name).join(', ')}),
             style: pw.TextStyle(fontSize: 9, color: grey),
           ),
         ],
@@ -376,7 +391,7 @@ Future<Uint8List> buildApprovalPdf(
         if (content.items.isNotEmpty) ...[
           pw.SizedBox(height: 10),
           pw.TableHelper.fromTextArray(
-            headers: ['품명', '수량', '단가', '금액'],
+            headers: [tr('품명'), tr('수량'), tr('단가'), tr('금액')],
             data: [
               for (final r in content.items)
                 [
@@ -400,7 +415,7 @@ Future<Uint8List> buildApprovalPdf(
             child: pw.Padding(
               padding: const pw.EdgeInsets.only(top: 4),
               child: pw.Text(
-                '합계 ${wonText(content.itemsTotal ?? 0)}',
+                tr('합계 {p0}', {'p0': wonText(content.itemsTotal ?? 0)}),
                 style: const pw.TextStyle(fontSize: 10),
               ),
             ),
@@ -422,12 +437,16 @@ Future<Uint8List> buildApprovalPdf(
         if (doc.attachments.isNotEmpty) ...[
           pw.SizedBox(height: 10),
           pw.Text(
-            '첨부  ${doc.attachments.map((a) => a.fileName ?? '첨부').join(', ')}',
+            tr('첨부  {p0}', {
+              'p0': doc.attachments
+                  .map((a) => a.fileName ?? tr('첨부'))
+                  .join(', '),
+            }),
             style: pw.TextStyle(fontSize: 9, color: grey),
           ),
         ],
         pw.SizedBox(height: 14),
-        pw.Text('결재 이력', style: pw.TextStyle(fontSize: 9, color: grey)),
+        pw.Text(tr('결재 이력'), style: pw.TextStyle(fontSize: 9, color: grey)),
         pw.SizedBox(height: 3),
         for (final s in doc.steps)
           if (s.decidedAt != null || s.status == ApprovalStepStatus.skipped)
@@ -435,7 +454,8 @@ Future<Uint8List> buildApprovalPdf(
               [
                 '${s.approverName}(${s.role.label})',
                 s.status.label,
-                if (s.actedByName != null) '대결 ${s.actedByName}',
+                if (s.actedByName != null)
+                  tr('대결 {s.actedByName}', {'s.actedByName': s.actedByName}),
                 if (s.decidedAt != null) formatDateTime(s.decidedAt!),
                 if (s.comment != null) '"${s.comment}"',
               ].join(' · '),
@@ -445,7 +465,10 @@ Future<Uint8List> buildApprovalPdf(
           pw.Padding(
             padding: const pw.EdgeInsets.only(top: 6),
             child: pw.Text(
-              '${doc.canceledByName ?? '관리자'}님이 취소: ${doc.cancelReason ?? ''}',
+              tr('{p0}님이 취소: {p1}', {
+                'p0': doc.canceledByName ?? tr('관리자'),
+                'p1': doc.cancelReason ?? '',
+              }),
               style: pw.TextStyle(fontSize: 9, color: red),
             ),
           ),
@@ -484,7 +507,7 @@ Future<Map<String, Uint8List>> _signatureBytes(
 }
 
 String _pdfFileName(ApprovalDocument doc) =>
-    '${doc.docNumber ?? '결재'}_${doc.title}'.replaceAll(
+    '${doc.docNumber ?? tr('결재')}_${doc.title}'.replaceAll(
       RegExp(r'[\\/:*?"<>|\n\r]'),
       '_',
     );
@@ -504,7 +527,7 @@ Future<void> printApproval(
           buildApprovalPdf(doc, ctx, signatures: signatures, format: format),
     );
   } catch (e) {
-    if (context.mounted) showAppToast(context, '인쇄하지 못했습니다: $e');
+    if (context.mounted) showAppToast(context, tr('인쇄하지 못했습니다: {e}', {'e': e}));
   }
 }
 
@@ -526,8 +549,12 @@ Future<void> saveApprovalPdf(
       fileName: '${_pdfFileName(doc)}.pdf',
       bytes: bytes,
     );
-    if (context.mounted) showAppToast(context, 'PDF를 저장했습니다: $path');
+    if (context.mounted) {
+      showAppToast(context, tr('PDF를 저장했습니다: {path}', {'path': path}));
+    }
   } catch (e) {
-    if (context.mounted) showAppToast(context, 'PDF를 저장하지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('PDF를 저장하지 못했습니다: {e}', {'e': e}));
+    }
   }
 }

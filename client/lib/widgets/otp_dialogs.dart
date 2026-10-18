@@ -9,6 +9,7 @@ import '../services/api_client.dart';
 import '../services/app_platform.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
+import '../l10n/tr.dart';
 
 /// 2단계 인증(OTP) 화면들 — 로그인 둘째 단계(코드 넣기), 켜기(QR·비밀 키 → 코드 확인 → 복구 코드), 내 프로필의 관리(복구 코드
 /// 새로 받기·끄기). 서버는 server/src/loginSecurity.js.
@@ -68,7 +69,9 @@ class RecoveryCodesView extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          '휴대폰을 잃어버리면 아래 복구 코드로 로그인할 수 있습니다(코드마다 한 번). 지금만 보이니 안전한 곳에 적어 두세요.',
+          tr(
+            '휴대폰을 잃어버리면 아래 복구 코드로 로그인할 수 있습니다(코드마다 한 번). 지금만 보이니 안전한 곳에 적어 두세요.',
+          ),
           style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 12),
@@ -103,10 +106,10 @@ class RecoveryCodesView extends StatelessWidget {
           child: TextButton.icon(
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: codes.join('\n')));
-              if (context.mounted) showAppToast(context, '복구 코드를 복사했습니다.');
+              if (context.mounted) showAppToast(context, tr('복구 코드를 복사했습니다.'));
             },
             icon: const Icon(Icons.copy, size: 18),
-            label: const Text('전부 복사'),
+            label: Text(tr('전부 복사')),
           ),
         ),
       ],
@@ -153,7 +156,9 @@ class _OtpLoginDialogState extends State<_OtpLoginDialog> {
     final code = _code.text.trim();
     final recovery = _recovery.text.trim();
     if (_useRecovery ? recovery.isEmpty : code.length != 6) {
-      setState(() => _error = _useRecovery ? '복구 코드를 넣으세요.' : '6자리 코드를 넣으세요.');
+      setState(
+        () => _error = _useRecovery ? tr('복구 코드를 넣으세요.') : tr('6자리 코드를 넣으세요.'),
+      );
       return;
     }
     setState(() {
@@ -181,7 +186,7 @@ class _OtpLoginDialogState extends State<_OtpLoginDialog> {
   Widget build(BuildContext context) {
     final hint = Theme.of(context).colorScheme.onSurfaceVariant;
     return AlertDialog(
-      title: const Text('2단계 인증'),
+      title: Text(tr('2단계 인증')),
       content: SizedBox(
         width: _dialogWidth,
         child: Column(
@@ -190,8 +195,8 @@ class _OtpLoginDialogState extends State<_OtpLoginDialog> {
           children: [
             Text(
               _useRecovery
-                  ? '적어 둔 복구 코드 하나를 넣으세요(한 번 쓰면 다시 못 씁니다).'
-                  : '인증 앱(Google Authenticator 등)에 보이는 6자리 코드를 넣으세요.',
+                  ? tr('적어 둔 복구 코드 하나를 넣으세요(한 번 쓰면 다시 못 씁니다).')
+                  : tr('인증 앱(Google Authenticator 등)에 보이는 6자리 코드를 넣으세요.'),
               style: TextStyle(color: hint),
             ),
             const SizedBox(height: 16),
@@ -224,7 +229,9 @@ class _OtpLoginDialogState extends State<_OtpLoginDialog> {
                         _useRecovery = !_useRecovery;
                         _error = null;
                       }),
-                child: Text(_useRecovery ? '인증 앱 코드 넣기' : '휴대폰이 없나요? 복구 코드 사용'),
+                child: Text(
+                  _useRecovery ? tr('인증 앱 코드 넣기') : tr('휴대폰이 없나요? 복구 코드 사용'),
+                ),
               ),
             ),
           ],
@@ -233,7 +240,7 @@ class _OtpLoginDialogState extends State<_OtpLoginDialog> {
       actions: [
         TextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('otp-submit'),
@@ -244,7 +251,7 @@ class _OtpLoginDialogState extends State<_OtpLoginDialog> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('확인'),
+              : Text(tr('확인')),
         ),
       ],
     );
@@ -304,7 +311,7 @@ class _OtpSetupDialogState extends State<_OtpSetupDialog> {
   Future<void> _enable() async {
     if (_busy) return;
     if (_code.text.trim().length != 6) {
-      setState(() => _error = '6자리 코드를 넣으세요.');
+      setState(() => _error = tr('6자리 코드를 넣으세요.'));
       return;
     }
     setState(() {
@@ -343,12 +350,14 @@ class _OtpSetupDialogState extends State<_OtpSetupDialog> {
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Text(
-              '관리자가 2단계 인증을 꼭 쓰게 정했습니다. 지금 켜야 로그인됩니다.',
+              tr('관리자가 2단계 인증을 꼭 쓰게 정했습니다. 지금 켜야 로그인됩니다.'),
               style: TextStyle(color: scheme.primary),
             ),
           ),
         Text(
-          '① 휴대폰의 인증 앱(Google Authenticator·Microsoft Authenticator 등)에서 아래 QR 코드를 찍으세요.',
+          tr(
+            '① 휴대폰의 인증 앱(Google Authenticator·Microsoft Authenticator 등)에서 아래 QR 코드를 찍으세요.',
+          ),
           style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 12),
@@ -362,7 +371,7 @@ class _OtpSetupDialogState extends State<_OtpSetupDialog> {
         ),
         const SizedBox(height: 8),
         Text(
-          'QR을 찍을 수 없으면 이 키를 직접 넣으세요:',
+          tr('QR을 찍을 수 없으면 이 키를 직접 넣으세요:'),
           style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
         ),
         Row(
@@ -378,11 +387,11 @@ class _OtpSetupDialogState extends State<_OtpSetupDialog> {
               ),
             ),
             IconButton(
-              tooltip: '키 복사',
+              tooltip: tr('키 복사'),
               icon: const Icon(Icons.copy, size: 18),
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: setup.secret));
-                if (mounted) showAppToast(context, '키를 복사했습니다.');
+                if (mounted) showAppToast(context, tr('키를 복사했습니다.'));
               },
             ),
           ],
@@ -393,12 +402,12 @@ class _OtpSetupDialogState extends State<_OtpSetupDialog> {
             child: TextButton.icon(
               onPressed: () => launchUrl(Uri.parse(setup.uri)),
               icon: const Icon(Icons.open_in_new, size: 18),
-              label: const Text('이 휴대폰의 인증 앱으로 열기'),
+              label: Text(tr('이 휴대폰의 인증 앱으로 열기')),
             ),
           ),
         const SizedBox(height: 12),
         Text(
-          '② 인증 앱에 보이는 6자리 코드를 넣으세요.',
+          tr('② 인증 앱에 보이는 6자리 코드를 넣으세요.'),
           style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 8),
@@ -417,7 +426,7 @@ class _OtpSetupDialogState extends State<_OtpSetupDialog> {
     final setup = _setup;
     final done = _done;
     return AlertDialog(
-      title: Text(done == null ? '2단계 인증 켜기' : '복구 코드'),
+      title: Text(done == null ? tr('2단계 인증 켜기') : tr('복구 코드')),
       content: SizedBox(
         width: _dialogWidth,
         child: SingleChildScrollView(
@@ -439,19 +448,19 @@ class _OtpSetupDialogState extends State<_OtpSetupDialog> {
                 key: const ValueKey('otp-setup-finish'),
                 onPressed: () => Navigator.of(context).pop(done),
                 child: Text(
-                  widget.ticket != null ? '적어 두었습니다 — 로그인' : '적어 두었습니다',
+                  widget.ticket != null ? tr('적어 두었습니다 — 로그인') : tr('적어 두었습니다'),
                 ),
               ),
             ]
           : [
               TextButton(
                 onPressed: _busy ? null : () => Navigator.of(context).pop(),
-                child: const Text('취소'),
+                child: Text(tr('취소')),
               ),
               FilledButton(
                 key: const ValueKey('otp-enable'),
                 onPressed: _busy || setup == null ? null : _enable,
-                child: const Text('켜기'),
+                child: Text(tr('켜기')),
               ),
             ],
     );
@@ -499,7 +508,7 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
   Future<void> _enable() async {
     final done = await showOtpSetupDialog(context, api: _api);
     if (done == null || !mounted) return;
-    showAppToast(context, '2단계 인증을 켰습니다.');
+    showAppToast(context, tr('2단계 인증을 켰습니다.'));
     await _load();
   }
 
@@ -516,9 +525,9 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
 
   Future<void> _regenerate() async {
     final proof = await _askProof(
-      title: '복구 코드 새로 받기',
+      title: tr('복구 코드 새로 받기'),
       withPassword: false,
-      action: '새로 받기',
+      action: tr('새로 받기'),
     );
     if (proof == null || !mounted) return;
     try {
@@ -527,7 +536,7 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('새 복구 코드'),
+          title: Text(tr('새 복구 코드')),
           content: SizedBox(
             width: _dialogWidth,
             child: RecoveryCodesView(codes: codes),
@@ -535,7 +544,7 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
           actions: [
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('적어 두었습니다'),
+              child: Text(tr('적어 두었습니다')),
             ),
           ],
         ),
@@ -548,9 +557,9 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
 
   Future<void> _disable() async {
     final proof = await _askProof(
-      title: '2단계 인증 끄기',
+      title: tr('2단계 인증 끄기'),
       withPassword: widget.session.authSource == 'local',
-      action: '끄기',
+      action: tr('끄기'),
     );
     if (proof == null || !mounted) return;
     try {
@@ -560,7 +569,7 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
         recoveryCode: proof.recovery,
       );
       if (!mounted) return;
-      showAppToast(context, '2단계 인증을 껐습니다.');
+      showAppToast(context, tr('2단계 인증을 껐습니다.'));
       await _load();
     } catch (e) {
       if (mounted) showAppToast(context, e.toString());
@@ -572,7 +581,7 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
     final status = _status;
     final hint = Theme.of(context).colorScheme.onSurfaceVariant;
     return AlertDialog(
-      title: const Text('2단계 인증'),
+      title: Text(tr('2단계 인증')),
       content: SizedBox(
         width: _dialogWidth,
         child: _error != null
@@ -596,7 +605,7 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        status.enabled ? '켜져 있습니다' : '꺼져 있습니다',
+                        status.enabled ? tr('켜져 있습니다') : tr('꺼져 있습니다'),
                         key: const ValueKey('otp-status-text'),
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
@@ -605,15 +614,23 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
                   const SizedBox(height: 8),
                   Text(
                     status.enabled
-                        ? '로그인할 때 비밀번호와 함께 인증 앱의 6자리 코드를 넣습니다. 남은 복구 코드: ${status.recoveryCodesLeft}개'
-                        : '켜면 로그인할 때 비밀번호와 함께 휴대폰 인증 앱의 6자리 코드를 넣어, 비밀번호가 새도 다른 사람이 들어오지 못합니다.',
+                        ? tr(
+                            '로그인할 때 비밀번호와 함께 인증 앱의 6자리 코드를 넣습니다. 남은 복구 코드: {status.recoveryCodesLeft}개',
+                            {
+                              'status.recoveryCodesLeft':
+                                  status.recoveryCodesLeft,
+                            },
+                          )
+                        : tr(
+                            '켜면 로그인할 때 비밀번호와 함께 휴대폰 인증 앱의 6자리 코드를 넣어, 비밀번호가 새도 다른 사람이 들어오지 못합니다.',
+                          ),
                     style: TextStyle(fontSize: 13, color: hint),
                   ),
                   if (status.required)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
-                        '관리자가 꼭 쓰게 정해서 끌 수 없습니다.',
+                        tr('관리자가 꼭 쓰게 정해서 끌 수 없습니다.'),
                         style: TextStyle(fontSize: 12, color: hint),
                       ),
                     ),
@@ -625,25 +642,25 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
           TextButton(
             key: const ValueKey('otp-regenerate'),
             onPressed: _regenerate,
-            child: const Text('복구 코드 새로 받기'),
+            child: Text(tr('복구 코드 새로 받기')),
           ),
           if (!status.required)
             TextButton(
               key: const ValueKey('otp-disable'),
               onPressed: _disable,
               style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-              child: const Text('끄기'),
+              child: Text(tr('끄기')),
             ),
         ],
         if (status != null && !status.enabled)
           FilledButton(
             key: const ValueKey('otp-start-enable'),
             onPressed: _enable,
-            child: const Text('켜기'),
+            child: Text(tr('켜기')),
           ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );
@@ -702,8 +719,8 @@ class _ProofDialogState extends State<_ProofDialog> {
                 key: const ValueKey('otp-proof-password'),
                 controller: _password,
                 obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: '비밀번호',
+                decoration: InputDecoration(
+                  labelText: tr('비밀번호'),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -713,8 +730,8 @@ class _ProofDialogState extends State<_ProofDialog> {
               TextField(
                 key: const ValueKey('otp-proof-recovery'),
                 controller: _code,
-                decoration: const InputDecoration(
-                  labelText: '복구 코드',
+                decoration: InputDecoration(
+                  labelText: tr('복구 코드'),
                   border: OutlineInputBorder(),
                 ),
                 onSubmitted: (_) => _submit(),
@@ -728,7 +745,7 @@ class _ProofDialogState extends State<_ProofDialog> {
                   _useRecovery = !_useRecovery;
                   _code.clear();
                 }),
-                child: Text(_useRecovery ? '인증 앱 코드 넣기' : '복구 코드 사용'),
+                child: Text(_useRecovery ? tr('인증 앱 코드 넣기') : tr('복구 코드 사용')),
               ),
             ),
           ],
@@ -737,7 +754,7 @@ class _ProofDialogState extends State<_ProofDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('otp-proof-submit'),

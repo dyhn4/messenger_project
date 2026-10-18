@@ -7,6 +7,7 @@ import '../models/groupware.dart' show ApprovalNotification;
 import '../models/project.dart' show ProjectNotification;
 import 'notification_api.dart';
 import 'notification_view_prefs.dart';
+import '../l10n/tr.dart';
 
 /// 알림 센터의 탭 — `전체 | 멘션 | 메시지 | 보드·공지 | 프로젝트 | 결재`. 메시지 탭이 예전의 "안 읽은 대화"(안 읽은 메시지가 있는 방 목록)다.
 /// 결재 탭은 전자결재의 결재 요청(내 차례)·승인·반려·회수·취소 알림이다(그룹웨어 결재 알림함).
@@ -14,12 +15,12 @@ enum NotificationTab { all, mention, unreadChats, board, project, approval }
 
 extension NotificationTabLabel on NotificationTab {
   String get label => switch (this) {
-    NotificationTab.all => '전체',
-    NotificationTab.mention => '멘션',
-    NotificationTab.unreadChats => '메시지',
-    NotificationTab.board => '보드·공지',
-    NotificationTab.project => '프로젝트',
-    NotificationTab.approval => '결재',
+    NotificationTab.all => tr('전체'),
+    NotificationTab.mention => tr('멘션'),
+    NotificationTab.unreadChats => tr('메시지'),
+    NotificationTab.board => tr('보드·공지'),
+    NotificationTab.project => tr('프로젝트'),
+    NotificationTab.approval => tr('결재'),
   };
 }
 
@@ -37,15 +38,15 @@ extension MentionFilterInfo on MentionFilter {
 
   /// 드롭다운 메뉴 항목 글자.
   String get menuLabel => switch (this) {
-    MentionFilter.all => '전체 멘션',
-    MentionFilter.personal => '@나를 멘션',
-    MentionFilter.everyone => '@all 멘션',
+    MentionFilter.all => tr('전체 멘션'),
+    MentionFilter.personal => tr('@나를 멘션'),
+    MentionFilter.everyone => tr('@all 멘션'),
   };
 
   /// 탭 줄에 보이는 짧은 이름 — 고르지 않았으면(전체) 그냥 `멘션`.
   String get tabLabel => switch (this) {
-    MentionFilter.all => '멘션',
-    MentionFilter.personal => '@나',
+    MentionFilter.all => tr('멘션'),
+    MentionFilter.personal => tr('@나'),
     MentionFilter.everyone => '@all',
   };
 

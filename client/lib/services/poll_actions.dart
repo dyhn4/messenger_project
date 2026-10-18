@@ -4,13 +4,14 @@ import '../models/room.dart';
 import '../models/uploaded_attachment.dart';
 import 'api_client.dart';
 import 'session.dart';
+import '../l10n/tr.dart';
 
 /// 투표 만들기·투표·마감·즐겨찾기와 소켓 이벤트 반영. Session 본체가 이미 커서 새 코드는 확장으로
 /// 따로 두고(session.dart가 같이 내보낸다), 목록 갱신은 방 컨트롤러(applyPoll*)에 맡긴다.
 extension SessionPolls on Session {
   ApiClient get _pollApi {
     final client = api;
-    if (client == null) throw const ApiException('연결되어 있지 않습니다.');
+    if (client == null) throw ApiException(tr('연결되어 있지 않습니다.'));
     return client;
   }
 

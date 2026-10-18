@@ -5,6 +5,7 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/floating_dialog.dart';
 import '../../widgets/muted_scrollbar.dart';
+import '../../l10n/tr.dart';
 
 /// 공개 프로젝트 둘러보기 — 아직 참여하지 않은 이 팀의 공개 프로젝트를 보고 초대 없이 "참여"한다
 /// (정회원 이상만 목록이 보인다). 참여하면 그 프로젝트를 돌려준다.
@@ -58,7 +59,7 @@ class _BrowseProjectsDialogState extends State<_BrowseProjectsDialog> {
     } catch (e) {
       if (mounted) {
         setState(() => _joiningId = null);
-        showAppToast(context, '참여하지 못했습니다: $e');
+        showAppToast(context, tr('참여하지 못했습니다: {e}', {'e': e}));
       }
     }
   }
@@ -68,7 +69,7 @@ class _BrowseProjectsDialogState extends State<_BrowseProjectsDialog> {
     final hint = Theme.of(context).hintColor;
     final projects = _projects;
     return FloatingDialog(
-      title: '공개 프로젝트 둘러보기',
+      title: tr('공개 프로젝트 둘러보기'),
       maxWidth: 480,
       maxHeight: 560,
       child: _error != null
@@ -78,7 +79,7 @@ class _BrowseProjectsDialogState extends State<_BrowseProjectsDialog> {
           : projects.isEmpty
           ? Center(
               child: Text(
-                '참여할 수 있는 공개 프로젝트가 없습니다.',
+                tr('참여할 수 있는 공개 프로젝트가 없습니다.'),
                 style: TextStyle(color: hint),
               ),
             )
@@ -107,7 +108,10 @@ class _BrowseProjectsDialogState extends State<_BrowseProjectsDialog> {
                     subtitle: Text(
                       [
                         p.identifier,
-                        if (p.memberCount != null) '구성원 ${p.memberCount}명',
+                        if (p.memberCount != null)
+                          tr('구성원 {p.memberCount}명', {
+                            'p.memberCount': p.memberCount,
+                          }),
                         if (p.description != null) p.description!,
                       ].join(' · '),
                       maxLines: 2,
@@ -121,7 +125,7 @@ class _BrowseProjectsDialogState extends State<_BrowseProjectsDialog> {
                               height: 16,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text('참여'),
+                          : Text(tr('참여')),
                     ),
                   );
                 },

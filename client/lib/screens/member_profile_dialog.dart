@@ -7,6 +7,7 @@ import '../widgets/favorite_actions.dart';
 import '../widgets/org_section.dart';
 import '../widgets/user_avatar.dart';
 import '../widgets/user_status_dialogs.dart';
+import '../l10n/tr.dart';
 
 /// 다른 사용자의 프로필 플로팅 카드: 프로필 사진 + 이름 + 1:1 메시지 시작.
 /// 아이디/이메일은 아이디·비밀번호 찾기에 쓰이는 개인정보라 다른 사람에게는 보여주지 않는다.
@@ -125,7 +126,7 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
       return showDialog<String>(
         context: context,
         builder: (dialogContext) => SimpleDialog(
-          title: const Text('어느 팀으로 1:1 메시지를 시작할까요?'),
+          title: Text(tr('어느 팀으로 1:1 메시지를 시작할까요?')),
           children: [
             for (final team in candidates)
               SimpleDialogOption(
@@ -148,7 +149,7 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('팀원 추가 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('팀원 추가 실패: {e}', {'e': e}))));
       }
       return null;
     }
@@ -172,7 +173,7 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('대화 시작 실패: $e')));
+      ).showSnackBar(SnackBar(content: Text(tr('대화 시작 실패: {e}', {'e': e}))));
       setState(() => _starting = false);
     }
   }
@@ -182,7 +183,7 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
   Future<void> _startSecretChat() async {
     final teamId = await _resolveTeamId(
       widget.orgChartSecretTeamCandidates,
-      title: '어느 팀으로 비밀 대화를 시작할까요?',
+      title: tr('어느 팀으로 비밀 대화를 시작할까요?'),
     );
     if (widget.orgChartSecretTeamCandidates.length > 1 && teamId == null) {
       return;
@@ -199,7 +200,7 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('비밀 대화 시작 실패: $e')));
+      ).showSnackBar(SnackBar(content: Text(tr('비밀 대화 시작 실패: {e}', {'e': e}))));
       setState(() => _startingSecret = false);
     }
   }
@@ -300,7 +301,9 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
             if (role != null) ...[
               const SizedBox(height: 4),
               Text(
-                user.isOwner ? '${role.label} · 이 팀의 소유자' : role.label,
+                user.isOwner
+                    ? tr('{role.label} · 이 팀의 소유자', {'role.label': role.label})
+                    : role.label,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).hintColor,
@@ -330,7 +333,7 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.chat_bubble_outline),
-                    label: const Text('1:1 메시지'),
+                    label: Text(tr('1:1 메시지')),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -341,7 +344,7 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
                     vertical: 4,
                   ),
                   child: Text(
-                    '함께 속한 팀이 없어 1:1 메시지는 보낼 수 없습니다.',
+                    tr('함께 속한 팀이 없어 1:1 메시지는 보낼 수 없습니다.'),
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).hintColor,
@@ -361,8 +364,8 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.lock_outline, color: Colors.green),
-                    label: const Text(
-                      '비밀 대화 시작',
+                    label: Text(
+                      tr('비밀 대화 시작'),
                       style: TextStyle(color: Colors.green),
                     ),
                   ),
@@ -371,7 +374,7 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
-                  '준회원은 초대받은 방에서만 대화할 수 있습니다.',
+                  tr('준회원은 초대받은 방에서만 대화할 수 있습니다.'),
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).hintColor,
@@ -405,7 +408,7 @@ class _AddThenDmDialogState extends State<_AddThenDmDialog> {
   Widget build(BuildContext context) {
     if (_pickingTeam) {
       return SimpleDialog(
-        title: const Text('어느 팀에 추가할까요?'),
+        title: Text(tr('어느 팀에 추가할까요?')),
         children: [
           for (final team in widget.manageableTeams)
             SimpleDialogOption(
@@ -416,23 +419,23 @@ class _AddThenDmDialogState extends State<_AddThenDmDialog> {
       );
     }
     return SimpleDialog(
-      title: const Text('어느 팀으로 1:1 메시지를 시작할까요?'),
+      title: Text(tr('어느 팀으로 1:1 메시지를 시작할까요?')),
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: Text(
-            '함께 속한 팀이 없습니다.',
+            tr('함께 속한 팀이 없습니다.'),
             style: TextStyle(color: Theme.of(context).hintColor),
           ),
         ),
         const Divider(height: 16),
         SimpleDialogOption(
           onPressed: () => setState(() => _pickingTeam = true),
-          child: const Row(
+          child: Row(
             children: [
               Icon(Icons.person_add_alt_1, size: 18),
               SizedBox(width: 8),
-              Text('팀원 추가'),
+              Text(tr('팀원 추가')),
             ],
           ),
         ),

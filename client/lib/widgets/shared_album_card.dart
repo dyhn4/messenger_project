@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/album.dart';
 import '../services/session.dart';
 import 'albums_panel.dart' show openSharedAlbum;
+import '../l10n/tr.dart';
 
 /// 앨범 카드의 강조색(왼쪽 막대·아이콘) — 잔디 앨범 카드의 분홍.
 const albumAccentColor = Color(0xFFEC5A8C);
@@ -169,7 +170,9 @@ class SharedAlbumSection extends StatelessWidget {
         const Divider(height: 1),
         const SizedBox(height: 8),
         Text(
-          team == null ? '공유된 앨범입니다.' : '$team에서 공유된 앨범입니다.',
+          team == null
+              ? tr('공유된 앨범입니다.')
+              : tr('{team}에서 공유된 앨범입니다.', {'team': team}),
           style: TextStyle(fontSize: 12, color: theme.hintColor),
         ),
         if (open != null) ...[
@@ -177,10 +180,10 @@ class SharedAlbumSection extends StatelessWidget {
           InkWell(
             key: const ValueKey('shared-album-open'),
             onTap: open,
-            child: const Padding(
+            child: Padding(
               padding: EdgeInsets.symmetric(vertical: 2),
               child: Text(
-                '앨범 보기',
+                tr('앨범 보기'),
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -194,7 +197,7 @@ class SharedAlbumSection extends StatelessWidget {
         AlbumShareCard(
           key: const ValueKey('shared-album-card'),
           title: album.title,
-          subtitle: id == null ? '삭제된 앨범입니다.' : null,
+          subtitle: id == null ? tr('삭제된 앨범입니다.') : null,
           dimmed: id == null,
           onTap: open,
         ),

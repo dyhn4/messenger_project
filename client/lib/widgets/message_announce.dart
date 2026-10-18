@@ -5,6 +5,7 @@ import '../models/room.dart';
 import '../services/api_client.dart' show ApiException;
 import '../services/session.dart';
 import 'app_toast.dart';
+import '../l10n/tr.dart';
 
 /// 메시지 더보기(PC ⋯ 메뉴)·길게 누르기 시트(모바일)의 "공지 등록" — 잔디처럼 **일반 텍스트 메시지와 이미지
 /// 메시지만** 공지로 올릴 수 있다(파일·이모티콘·시스템·보드 게시글·투표·댓글·삭제된 메시지는 안 된다).
@@ -49,16 +50,16 @@ Future<void> announceMessage(
     final replace = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('공지 등록'),
-        content: const Text('기존 공지를 이 메시지로 바꿀까요?\n기존 공지는 공지 목록에 기록으로 남습니다.'),
+        title: Text(tr('공지 등록')),
+        content: Text(tr('기존 공지를 이 메시지로 바꿀까요?\n기존 공지는 공지 목록에 기록으로 남습니다.')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('바꾸기'),
+            child: Text(tr('바꾸기')),
           ),
         ],
       ),
@@ -69,13 +70,18 @@ Future<void> announceMessage(
   final overlay = Overlay.maybeOf(context, rootOverlay: true);
   try {
     await session.api!.createAnnouncementFromMessage(room.id, message.id);
-    if (overlay != null) showAppToastOnOverlay(overlay, '공지로 등록했습니다.');
+    if (overlay != null) showAppToastOnOverlay(overlay, tr('공지로 등록했습니다.'));
   } on ApiException catch (e) {
     if (overlay != null) {
-      showAppToastOnOverlay(overlay, '공지 등록 실패: ${e.message}');
+      showAppToastOnOverlay(
+        overlay,
+        tr('공지 등록 실패: {e.message}', {'e.message': e.message}),
+      );
     }
   } catch (e) {
-    if (overlay != null) showAppToastOnOverlay(overlay, '공지 등록 실패: $e');
+    if (overlay != null) {
+      showAppToastOnOverlay(overlay, tr('공지 등록 실패: {e}', {'e': e}));
+    }
   }
 }
 

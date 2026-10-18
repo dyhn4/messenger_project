@@ -2,6 +2,8 @@
 //
 // 휴가 양은 서버처럼 반일 단위 정수(halfDays — 하루 = 2, 반차 = 1)로 다루고, 날짜는 'YYYY-MM-DD' 글자, 시각은 epoch ms다.
 
+import '../l10n/tr.dart';
+
 /// 결재 종류 — 서버 approvalRules.js APPROVAL_KINDS. 휴가·지출·근태 수정은 전용 화면이 있고, 그 밖은 양식으로 올린다(서버
 /// approvalForms.js — 기본 양식 넷과 관리자가 만든 양식 'form').
 enum ApprovalKind {
@@ -15,8 +17,11 @@ enum ApprovalKind {
   form('form', '양식');
 
   final String wire;
-  final String label;
-  const ApprovalKind(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const ApprovalKind(this.wire, this._labelKo);
 
   /// 양식으로 올리는 종류인지(문서의 칸 정의·값을 payload의 fields·values로 그린다).
   bool get isForm => index >= ApprovalKind.draft.index;
@@ -38,8 +43,11 @@ enum FormFieldType {
   items('items', '품목 표');
 
   final String wire;
-  final String label;
-  const FormFieldType(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const FormFieldType(this.wire, this._labelKo);
 
   static FormFieldType fromWire(String? value) =>
       values.firstWhere((t) => t.wire == value, orElse: () => text);
@@ -134,11 +142,18 @@ String? formValueText(FormFieldDef field, Object? value) {
       final minutes = (m['minutes'] as num?)?.toInt() ?? 0;
       final h = minutes ~/ 60;
       final mm = minutes % 60;
-      final length = mm == 0 ? '$h시간' : (h == 0 ? '$mm분' : '$h시간 $mm분');
-      return '${m['start']} ~ ${m['end']}${m['overnight'] == true ? '(다음 날)' : ''} ($length)';
+      final length = mm == 0
+          ? tr('{h}시간', {'h': h})
+          : (h == 0
+                ? tr('{mm}분', {'mm': mm})
+                : tr('{h}시간 {mm}분', {'h': h, 'mm': mm}));
+      return '${m['start']} ~ ${m['end']}${m['overnight'] == true ? tr('(다음 날)') : ''} ($length)';
     case FormFieldType.items:
       final m = (value as Map).cast<String, dynamic>();
-      return '${(m['rows'] as List? ?? const []).length}건 · 합계 ${wonText((m['total'] as num?)?.toInt() ?? 0)}';
+      return tr('{p0}건 · 합계 {p1}', {
+        'p0': (m['rows'] as List? ?? const []).length,
+        'p1': wonText((m['total'] as num?)?.toInt() ?? 0),
+      });
     default:
       return value.toString();
   }
@@ -153,8 +168,11 @@ enum ApprovalStatus {
   canceled('canceled', '취소');
 
   final String wire;
-  final String label;
-  const ApprovalStatus(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const ApprovalStatus(this.wire, this._labelKo);
 
   static ApprovalStatus fromWire(String? value) =>
       values.firstWhere((s) => s.wire == value, orElse: () => pending);
@@ -171,8 +189,11 @@ enum ApprovalStepStatus {
   skipped('skipped', '생략');
 
   final String wire;
-  final String label;
-  const ApprovalStepStatus(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const ApprovalStepStatus(this.wire, this._labelKo);
 
   static ApprovalStepStatus fromWire(String? value) =>
       values.firstWhere((s) => s.wire == value, orElse: () => waiting);
@@ -185,8 +206,11 @@ enum LineRole {
   finalApprove('final', '전결');
 
   final String wire;
-  final String label;
-  const LineRole(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const LineRole(this.wire, this._labelKo);
 
   static LineRole fromWire(String? value) =>
       values.firstWhere((r) => r.wire == value, orElse: () => approve);
@@ -352,11 +376,17 @@ class ApprovalStats {
 String hoursText(double? hours) {
   if (hours == null) return '—';
   if (hours < 24) {
-    return '${hours == hours.roundToDouble() ? hours.toInt() : hours.toStringAsFixed(1)}시간';
+    return tr('{p0}시간', {
+      'p0': hours == hours.roundToDouble()
+          ? hours.toInt()
+          : hours.toStringAsFixed(1),
+    });
   }
   final days = hours ~/ 24;
   final rest = (hours - days * 24).round();
-  return rest == 0 ? '$days일' : '$days일 $rest시간';
+  return rest == 0
+      ? tr('{days}일', {'days': days})
+      : tr('{days}일 {rest}시간', {'days': days, 'rest': rest});
 }
 
 /// 결재함 — 서버 GET /groupware/documents?box=.
@@ -368,8 +398,11 @@ enum ApprovalBox {
   all('all', '전체 문서');
 
   final String wire;
-  final String label;
-  const ApprovalBox(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const ApprovalBox(this.wire, this._labelKo);
 }
 
 DateTime? _time(Object? v) =>
@@ -380,7 +413,7 @@ String halfDaysText(int halfDays) {
   final text = halfDays % 2 == 0
       ? '${halfDays ~/ 2}'
       : (halfDays / 2).toStringAsFixed(1);
-  return '$text일';
+  return tr('{text}일', {'text': text});
 }
 
 /// 하루 중 분 → 'HH:MM'.
@@ -408,7 +441,7 @@ String wonText(int amount) {
     if (i > 0 && (digits.length - i) % 3 == 0) buffer.write(',');
     buffer.write(digits[i]);
   }
-  return '$buffer원';
+  return tr('{buffer}원', {'buffer': buffer});
 }
 
 /// 휴가 종류 — 서버 annualLeave.js LEAVE_TYPES.
@@ -483,8 +516,11 @@ class WorkSchedule {
   /// "시차출퇴근 07:00~16:00" / "선택근무(핵심 10:00~15:00)" / "자율 출퇴근".
   String get description => switch (mode) {
     'staggered' => '$label ${minutesText(start ?? 0)}~${minutesText(end ?? 0)}',
-    'core' =>
-      '$label(핵심 ${minutesText(coreStart ?? 0)}~${minutesText(coreEnd ?? 0)})',
+    'core' => tr('{label}(핵심 {p0}~{p1})', {
+      'label': label,
+      'p0': minutesText(coreStart ?? 0),
+      'p1': minutesText(coreEnd ?? 0),
+    }),
     _ => label,
   };
 }
@@ -558,14 +594,18 @@ class WeeklyHours {
 String durationText(int minutes) {
   final h = minutes ~/ 60;
   final m = minutes % 60;
-  if (h == 0 && m == 0) return '0시간';
-  if (m == 0) return '$h시간';
-  if (h == 0) return '$m분';
-  return '$h시간 $m분';
+  if (h == 0 && m == 0) return tr('0시간');
+  if (m == 0) return tr('{h}시간', {'h': h});
+  if (h == 0) return tr('{m}분', {'m': m});
+  return tr('{h}시간 {m}분', {'h': h, 'm': m});
 }
 
 /// 출근 형태 — 서버 workRules.js CLOCK_IN_MODES.
-const clockInModeLabels = {'office': '사무실', 'field': '외근', 'remote': '재택'};
+final clockInModeLabels = {
+  'office': tr('사무실'),
+  'field': tr('외근'),
+  'remote': tr('재택'),
+};
 
 /// 그룹웨어 화면을 열 때 받는 값 — 범위, 관리자인지, 근무 시간, 고를 것들(휴가 종류·지출 분류), 내가 결재할 문서 수.
 class GroupwareContext {
@@ -676,7 +716,8 @@ class GroupwareContext {
     return null;
   }
 
-  String get scopeLabel => scope == 'server' ? '회사 전체' : (teamName ?? '팀');
+  String get scopeLabel =>
+      scope == 'server' ? tr('회사 전체') : (teamName ?? tr('팀'));
 }
 
 /// 결재자·참조자 후보.
@@ -797,7 +838,7 @@ class ApprovalStep {
     stage: (json['stage'] as num?)?.toInt(),
     role: LineRole.fromWire(json['role'] as String?),
     approverId: json['approverId'] as String?,
-    approverName: json['approverName'] as String? ?? '(알 수 없음)',
+    approverName: json['approverName'] as String? ?? tr('(알 수 없음)'),
     status: ApprovalStepStatus.fromWire(json['status'] as String?),
     comment: json['comment'] as String?,
     decidedAt: _time(json['decidedAt']),
@@ -902,7 +943,7 @@ class ApprovalDocument {
         ],
         status: ApprovalStatus.fromWire(json['status'] as String?),
         authorId: json['authorId'] as String?,
-        authorName: json['authorName'] as String? ?? '(알 수 없음)',
+        authorName: json['authorName'] as String? ?? tr('(알 수 없음)'),
         createdAt: _time(json['createdAt']),
         decidedAt: _time(json['decidedAt']),
         cancelReason: json['cancelReason'] as String?,
@@ -941,7 +982,7 @@ class ApprovalDocument {
 
   /// 문서의 종류 이름 — 관리자가 만든 양식이면 그 양식 이름.
   String get kindLabel => kind == ApprovalKind.form
-      ? (payload['templateName'] as String? ?? '결재')
+      ? (payload['templateName'] as String? ?? tr('결재'))
       : kind.label;
 
   /// 목록 한 줄의 요약 — 휴가 기간·양, 지출 금액, 근태 수정 날짜·시각, 양식은 종류별 요점.
@@ -950,28 +991,40 @@ class ApprovalDocument {
       case ApprovalKind.draft:
         final budget = (payload['values'] as Map?)?['budget'] as num?;
         return budget == null
-            ? '일반 기안서'
-            : '일반 기안서 · 예산 ${wonText(budget.toInt())}';
+            ? tr('일반 기안서')
+            : tr('일반 기안서 · 예산 {p0}', {'p0': wonText(budget.toInt())});
       case ApprovalKind.trip:
         final start = payload['startDate'] as String? ?? '';
         final end = payload['endDate'] as String? ?? start;
         final range = start == end
             ? shortDateText(start)
             : '${shortDateText(start)}~${shortDateText(end)}';
-        return '${payload['destination'] ?? ''} · $range · ${payload['days'] ?? 1}일';
+        return tr('{p0} · {range} · {p1}일', {
+          'p0': payload['destination'] ?? '',
+          'range': range,
+          'p1': payload['days'] ?? 1,
+        });
       case ApprovalKind.purchase:
-        return '품목 ${payload['itemCount'] ?? 0}건 · ${wonText((payload['total'] as num?)?.toInt() ?? 0)}';
+        return tr('품목 {p0}건 · {p1}', {
+          'p0': payload['itemCount'] ?? 0,
+          'p1': wonText((payload['total'] as num?)?.toInt() ?? 0),
+        });
       case ApprovalKind.overtime:
         final minutes = (payload['minutes'] as num?)?.toInt() ?? 0;
-        return '${payload['overtimeType'] ?? ''} · ${shortDateText(payload['workDate'] as String? ?? '')} '
-            '${payload['startTime'] ?? ''}~${payload['endTime'] ?? ''} · ${(minutes / 60).toStringAsFixed(minutes % 60 == 0 ? 0 : 1)}시간';
+        return tr('{p0} · {p1} {p2}~{p3} · {p4}시간', {
+          'p0': payload['overtimeType'] ?? '',
+          'p1': shortDateText(payload['workDate'] as String? ?? ''),
+          'p2': payload['startTime'] ?? '',
+          'p3': payload['endTime'] ?? '',
+          'p4': (minutes / 60).toStringAsFixed(minutes % 60 == 0 ? 0 : 1),
+        });
       case ApprovalKind.form:
         return kindLabel;
       case ApprovalKind.leave:
         final label =
             payload['leaveLabel'] as String? ??
             ctx?.leaveType(payload['leaveType'] as String?)?.label ??
-            '휴가';
+            tr('휴가');
         final start = payload['startDate'] as String? ?? '';
         final end = payload['endDate'] as String? ?? start;
         final range = start == end
@@ -984,8 +1037,11 @@ class ApprovalDocument {
         return '${payload['category'] ?? ''} · ${wonText(amount)}';
       case ApprovalKind.attendance:
         final out = payload['clockOut'] as String?;
-        return '${shortDateText(payload['workDate'] as String? ?? '')} · '
-            '출근 ${payload['clockIn'] ?? ''}${out == null ? '' : ' · 퇴근 $out'}';
+        return tr('{p0} · 출근 {p1}{p2}', {
+          'p0': shortDateText(payload['workDate'] as String? ?? ''),
+          'p1': payload['clockIn'] ?? '',
+          'p2': out == null ? '' : tr(' · 퇴근 {out}', {'out': out}),
+        });
     }
   }
 }
@@ -1269,13 +1325,21 @@ class AttendanceSummary {
   /// 연장근무 "3시간" / "1.5시간".
   String get overtimeText {
     final hours = overtimeMinutes / 60;
-    return '${hours == hours.roundToDouble() ? hours.toInt() : hours.toStringAsFixed(1)}시간';
+    return tr('{p0}시간', {
+      'p0': hours == hours.roundToDouble()
+          ? hours.toInt()
+          : hours.toStringAsFixed(1),
+    });
   }
 
   /// "152.5시간".
   String get hoursText {
     final hours = workedMinutes / 60;
-    return '${hours == hours.roundToDouble() ? hours.toInt() : hours.toStringAsFixed(1)}시간';
+    return tr('{p0}시간', {
+      'p0': hours == hours.roundToDouble()
+          ? hours.toInt()
+          : hours.toStringAsFixed(1),
+    });
   }
 }
 

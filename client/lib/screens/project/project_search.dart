@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import 'task_views.dart' show taskStatusDisplayColor;
+import '../../l10n/tr.dart';
 
 /// 프로젝트 창 맨 위 가운데 검색칸 — 내가 참여한 이 팀의 모든 프로젝트 업무를 제목이나 업무
 /// 번호(TA-12)로 찾는다. 결과를 누르면 [onOpen]으로 그 업무를 넘긴다.
@@ -83,7 +84,7 @@ class _ProjectSearchFieldState extends State<ProjectSearchField> {
             controller: controller,
             focusNode: focusNode,
             decoration: InputDecoration(
-              hintText: '검색어를 입력하세요.',
+              hintText: tr('검색어를 입력하세요.'),
               hintStyle: TextStyle(color: hint, fontSize: 13),
               prefixIcon: Icon(Icons.search, size: 18, color: hint),
               isDense: true,

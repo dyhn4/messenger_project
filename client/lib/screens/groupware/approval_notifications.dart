@@ -8,6 +8,7 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../project/project_notifications.dart' show projectNotificationAgo;
 import 'approval_tab.dart' show showApprovalDetail;
+import '../../l10n/tr.dart';
 
 /// 결재 알림 종류의 아이콘과 색 — 알림 센터 "결재" 탭의 줄 앞 동그라미.
 ({IconData icon, Color color}) approvalNotificationLook(
@@ -69,7 +70,7 @@ class ApprovalNotificationTile extends StatelessWidget {
         children: [
           Flexible(
             child: Text(
-              n.title.isNotEmpty ? n.title : '결재',
+              n.title.isNotEmpty ? trServer(n.title) : tr('결재'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -88,7 +89,7 @@ class ApprovalNotificationTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                '결재 차례',
+                tr('결재 차례'),
                 style: TextStyle(
                   fontSize: 10,
                   color: scheme.onPrimaryContainer,
@@ -98,7 +99,7 @@ class ApprovalNotificationTile extends StatelessWidget {
         ],
       ),
       subtitle: Text(
-        team.isEmpty ? n.body : '[$team] ${n.body}',
+        team.isEmpty ? trServer(n.body) : '[$team] ${trServer(n.body)}',
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(fontSize: 12, color: n.read ? hint : null),
@@ -169,7 +170,7 @@ Future<bool> openApprovalDocument(
   try {
     ctx = await api.context();
   } catch (e) {
-    final message = '결재 문서를 열지 못했습니다: $e';
+    final message = tr('결재 문서를 열지 못했습니다: {e}', {'e': e});
     if (onError != null) {
       onError(message);
     } else if (context.mounted) {

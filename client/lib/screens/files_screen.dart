@@ -16,6 +16,7 @@ import '../widgets/panel_filters.dart';
 import 'image_viewer_screen.dart';
 
 export '../models/file_category.dart';
+import '../l10n/tr.dart';
 
 /// 채팅방에 첨부된 이미지/파일을 한 번에 볼 수 있는 패널. 검색 패널과 같은 틀(헤더+검색칸+필터+
 /// 목록+페이지네이션)을 재사용한다 — 위에서부터 파일명 검색칸, 필터 줄(참여 대화방 / 모든 멤버 /
@@ -93,7 +94,8 @@ class _FilesScreenState extends State<FilesScreen> {
     session: widget.session,
     message: m,
     url: widget.session.resolveUrl(m.fileUrl ?? ''),
-    fileName: m.fileName ?? (m.type == MessageType.image ? 'image.png' : '파일'),
+    fileName:
+        m.fileName ?? (m.type == MessageType.image ? 'image.png' : tr('파일')),
     // 목록의 한 줄은 첨부 하나다 — 서버가 줄마다 그 첨부 id를 준다(옛 메시지는 메시지 id).
     attachmentId: m.attachmentId,
     // 지운 파일은 목록에서 사라진다 — 미리보기 화면이었다면 목록으로 돌아가서 다시 받는다.
@@ -214,7 +216,10 @@ class _FilesScreenState extends State<FilesScreen> {
       child: Row(
         children: [
           Expanded(
-            child: Text('파일', style: Theme.of(context).textTheme.titleLarge),
+            child: Text(
+              tr('파일'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
           ),
           IconButton(icon: const Icon(Icons.close), onPressed: widget.onClose),
         ],
@@ -227,7 +232,7 @@ class _FilesScreenState extends State<FilesScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         PanelFilterBar(
-          searchHint: '파일명 검색',
+          searchHint: tr('파일명 검색'),
           initialQuery: _query,
           onQueryChanged: (q) {
             _query = q;
@@ -274,7 +279,7 @@ class _FilesScreenState extends State<FilesScreen> {
     // "N개가 로딩되었습니다." 줄 — 비어 있어도 보이고, 직접 설정한 기간은 그 오른쪽에 보인다.
     final countLine = PanelResultLine(
       summary: Text(
-        '"${results.length}"개가 로딩되었습니다.',
+        tr('"{results.length}"개가 로딩되었습니다.', {'results.length': results.length}),
         key: const ValueKey('panel-loaded-count'),
         style: Theme.of(context).textTheme.labelLarge,
       ),
@@ -286,11 +291,11 @@ class _FilesScreenState extends State<FilesScreen> {
         children: [
           countLine,
           const Divider(height: 1),
-          const Expanded(
+          Expanded(
             child: Center(
               child: Padding(
                 padding: EdgeInsets.all(16),
-                child: Text('첨부된 파일이 없습니다.'),
+                child: Text(tr('첨부된 파일이 없습니다.')),
               ),
             ),
           ),
@@ -361,7 +366,10 @@ class _FilesScreenState extends State<FilesScreen> {
             onPressed: () => setState(() => _preview = null),
           ),
           Expanded(
-            child: Text('메시지', style: Theme.of(context).textTheme.titleLarge),
+            child: Text(
+              tr('메시지'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
           ),
           IconButton(icon: const Icon(Icons.close), onPressed: widget.onClose),
         ],
@@ -462,7 +470,10 @@ class _FilesScreenState extends State<FilesScreen> {
           const SizedBox(height: 8),
           Row(
             children: [
-              Text('대화방', style: TextStyle(color: Theme.of(context).hintColor)),
+              Text(
+                tr('대화방'),
+                style: TextStyle(color: Theme.of(context).hintColor),
+              ),
               const SizedBox(width: 4),
               Text(roomName),
             ],
@@ -492,7 +503,7 @@ class _FilesScreenState extends State<FilesScreen> {
             DownloadableFile(
               session: widget.session,
               url: widget.session.resolveUrl(m.fileUrl ?? ''),
-              fileName: m.fileName ?? '파일',
+              fileName: m.fileName ?? tr('파일'),
               message: m,
               attachmentId: m.attachmentId,
               onDeleted: _onFileDeleted,
@@ -589,13 +600,13 @@ class _FileResultRowState extends State<_FileResultRow> {
                   HoverToolbarButton(
                     icon: widget.favorited ? Icons.star : Icons.star_border,
                     color: widget.favorited ? Colors.amber : null,
-                    tooltip: widget.favorited ? '즐겨찾기 빼기' : '즐겨찾기',
+                    tooltip: widget.favorited ? tr('즐겨찾기 빼기') : tr('즐겨찾기'),
                     onPressed: widget.onToggleFavorite,
                   ),
                   if (_hovering || _menuOpen)
                     HoverToolbarButton(
                       icon: Icons.more_vert,
-                      tooltip: '더보기',
+                      tooltip: tr('더보기'),
                       onMenuOpenChanged: (v) => setState(() => _menuOpen = v),
                       menuChildren: fileActionMenuItems(
                         context,
@@ -650,7 +661,7 @@ class _FileResultRowState extends State<_FileResultRow> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        message.fileName ?? (isImage ? '이미지' : '파일'),
+                        message.fileName ?? (isImage ? tr('이미지') : tr('파일')),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w600),

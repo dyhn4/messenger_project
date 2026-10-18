@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/session.dart';
 import 'compact_menu.dart';
 import 'menu_entries.dart';
+import '../l10n/tr.dart';
 
 /// 상단 툴바의 "메뉴"(격자 아이콘) 드롭다운 — 둥근 색 아이콘 타일과 아래 라벨을 격자로 늘어놓은 모양이고
 /// "생성"(메시지 예약 · 투표) · "리스트"(파일 · 즐겨찾기 · 링크) · "툴"(캘린더 · 프로젝트 · 문의함) 세 묶음으로 나뉜다.
@@ -26,7 +27,7 @@ class AppMenuButton extends StatelessWidget {
     final buttonContext = context;
     return PopupMenuButton<void>(
       icon: const Icon(Icons.apps),
-      tooltip: '메뉴',
+      tooltip: tr('메뉴'),
       position: PopupMenuPosition.under,
       offset: const Offset(0, 10),
       color: CompactMenu.color(context),

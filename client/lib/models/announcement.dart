@@ -1,4 +1,5 @@
 import 'text_format.dart';
+import '../l10n/tr.dart';
 
 /// 토픽방 공지(카카오톡 공지와 같은 개념) — server/src/announcements.js의 응답과 1:1 대응.
 /// 여러 개를 쓸 수 있고(공지 목록 화면이 히스토리를 보여줌), [pinned]인 것(방마다 최대 1개)이
@@ -38,7 +39,7 @@ class Announcement {
   bool get hasImage => imageUrl != null;
 
   /// 배너·알림처럼 한 줄로 보여줄 글 — 사진만 있는 공지는 "[사진]".
-  String get previewText => text.trim().isEmpty && hasImage ? '[사진]' : text;
+  String get previewText => text.trim().isEmpty && hasImage ? tr('[사진]') : text;
 
   /// 이 인스턴스를 만들 때(서버 응답) 받은 댓글 수 — [liveCommentCount]의 기준점.
   final int _baseCommentCount;

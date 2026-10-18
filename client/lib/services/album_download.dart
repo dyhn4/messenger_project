@@ -11,6 +11,7 @@ import 'app_platform.dart';
 import 'download_progress.dart';
 import 'download_storage.dart';
 import 'session.dart';
+import '../l10n/tr.dart';
 
 /// 앨범 항목 여러 개를 내려받은 결과.
 class AlbumDownloadSummary {
@@ -89,7 +90,10 @@ Future<void> downloadAlbumItems(
   if (!ok || !context.mounted) return;
 
   // 진행 카드에 "파일 N개"로 보이고, 그 X로 멈추면 [task].cancelled.
-  final task = DownloadTask('파일 ${items.length}개', fileCount: items.length);
+  final task = DownloadTask(
+    tr('파일 {items.length}개', {'items.length': items.length}),
+    fileCount: items.length,
+  );
 
   Future<List<int>> fetch(AlbumItem item) => fetchAttachmentBytes(
     session: session,
@@ -131,7 +135,7 @@ Future<void> downloadAlbumItems(
   } else {
     final initial = session.settings.downloadFolder;
     final folder = await FilePicker.getDirectoryPath(
-      dialogTitle: '저장할 폴더 선택',
+      dialogTitle: tr('저장할 폴더 선택'),
       initialDirectory: initial.isEmpty ? null : initial,
     );
     if (folder == null) return;
@@ -151,13 +155,23 @@ Future<void> downloadAlbumItems(
       : ' (${displayDownloadPath(summary.folder!)})';
   final message = task.cancelled
       ? summary.saved == 0
-            ? '다운로드를 취소했습니다.'
-            : '다운로드를 취소했습니다. (${summary.saved}개는 받았습니다)$where'
+            ? tr('다운로드를 취소했습니다.')
+            : tr('다운로드를 취소했습니다. ({summary.saved}개는 받았습니다){where}', {
+                'summary.saved': summary.saved,
+                'where': where,
+              })
       : summary.failed == 0
-      ? '${summary.saved}개를 다운로드했습니다.$where'
+      ? tr('{summary.saved}개를 다운로드했습니다.{where}', {
+          'summary.saved': summary.saved,
+          'where': where,
+        })
       : summary.saved == 0
-      ? '다운로드하지 못했습니다.'
-      : '${summary.saved}개를 다운로드했습니다. ${summary.failed}개는 실패했습니다.$where';
+      ? tr('다운로드하지 못했습니다.')
+      : tr('{summary.saved}개를 다운로드했습니다. {summary.failed}개는 실패했습니다.{where}', {
+          'summary.saved': summary.saved,
+          'summary.failed': summary.failed,
+          'where': where,
+        });
   showAppToastOnOverlay(overlay, message, duration: const Duration(seconds: 4));
   // 폴더 선택 창에서 고른 곳(설정 폴더가 아닐 수 있다)을 연다.
   if (summary.saved > 0 && session.settings.openFolderAfterDownload) {

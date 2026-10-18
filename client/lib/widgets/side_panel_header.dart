@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
 /// 패널 머리글 — 제목 한 줄과 오른쪽 닫기(X). 파일 패널의 머리글과 같은 모양이라, 패널 위젯이 자기 머리글을
 /// 직접 그릴 때([SidePanelSpec.ownHeader]) 이걸 쓰면 다른 패널과 어긋나지 않는다.
@@ -25,7 +26,7 @@ class SidePanelHeader extends StatelessWidget {
           ...actions,
           IconButton(
             icon: const Icon(Icons.close),
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             onPressed: onClose,
           ),
         ],

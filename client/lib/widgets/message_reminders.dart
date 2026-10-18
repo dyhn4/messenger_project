@@ -10,6 +10,7 @@ import '../screens/home_screen.dart' show wideBreakpoint;
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'date_time_range_field.dart' show DateTimePointPanel;
+import '../l10n/tr.dart';
 
 /// 메시지 리마인더("나중에 알림") — 메시지 메뉴의 고르는 창([showReminderPicker]), 울렸을 때 "나와의 대화"에 올라오는 카드
 /// ([ReminderCardView]). 걸어 둔 리마인더 목록과 직접 만드는 리마인더는 리마인더 패널(reminders_panel.dart). 서버는
@@ -23,7 +24,7 @@ bool canRemindMessage(Message message) =>
 
 /// "10/15(수) 09:00" — 리마인더 시각 표기.
 String reminderTimeLabel(DateTime at) {
-  const days = ['월', '화', '수', '목', '금', '토', '일'];
+  final days = [tr('월'), tr('화'), tr('수'), tr('목'), tr('금'), tr('토'), tr('일')];
   final hh = at.hour.toString().padLeft(2, '0');
   final mm = at.minute.toString().padLeft(2, '0');
   return '${at.month}/${at.day}(${days[at.weekday - 1]}) $hh:$mm';
@@ -43,10 +44,15 @@ Future<void> showReminderPicker(
   try {
     await session.api!.createMessageReminder(message.id, picked);
     if (context.mounted) {
-      showAppToast(context, '${reminderTimeLabel(picked)}에 알려 드릴게요.');
+      showAppToast(
+        context,
+        tr('{p0}에 알려 드릴게요.', {'p0': reminderTimeLabel(picked)}),
+      );
     }
   } catch (e) {
-    if (context.mounted) showAppToast(context, '리마인더를 걸지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('리마인더를 걸지 못했습니다: {e}', {'e': e}));
+    }
   }
 }
 
@@ -86,9 +92,9 @@ class _ReminderPickerDialogState extends State<_ReminderPickerDialog> {
   String? _customProblem(DateTime now) {
     final at = _custom;
     if (at == null || !at.isAfter(now.add(const Duration(minutes: 1)))) {
-      return '1분 뒤 이후로 고르세요.';
+      return tr('1분 뒤 이후로 고르세요.');
     }
-    if (at.isAfter(now.add(_reminderMaxAhead))) return '1년 안으로 고르세요.';
+    if (at.isAfter(now.add(_reminderMaxAhead))) return tr('1년 안으로 고르세요.');
     return null;
   }
 
@@ -99,12 +105,12 @@ class _ReminderPickerDialogState extends State<_ReminderPickerDialog> {
     final custom = _custom;
     final problem = custom == null ? null : _customProblem(DateTime.now());
     return SimpleDialog(
-      title: const Text('나중에 알림'),
+      title: Text(tr('나중에 알림')),
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
           child: Text(
-            '정한 시각에 "나와의 대화"로 이 메시지를 다시 알려 드립니다.',
+            tr('정한 시각에 "나와의 대화"로 이 메시지를 다시 알려 드립니다.'),
             style: theme.textTheme.bodySmall?.copyWith(color: hint),
           ),
         ),
@@ -127,7 +133,7 @@ class _ReminderPickerDialogState extends State<_ReminderPickerDialog> {
           onPressed: _toggleCustom,
           child: Row(
             children: [
-              const Expanded(child: Text('날짜·시간 직접 고르기')),
+              Expanded(child: Text(tr('날짜·시간 직접 고르기'))),
               if (custom != null)
                 Text(
                   reminderTimeLabel(custom),
@@ -160,8 +166,8 @@ class _ReminderPickerDialogState extends State<_ReminderPickerDialog> {
                     child: DateTimePointPanel(
                       keyPrefix: 'reminder',
                       value: custom,
-                      caption: '언제 다시 알려 드릴까요?',
-                      timeLabel: '알림 시간',
+                      caption: tr('언제 다시 알려 드릴까요?'),
+                      timeLabel: tr('알림 시간'),
                       firstDay: DateTime.now(),
                       lastDay: DateTime.now().add(_reminderMaxAhead),
                       onChanged: (v) => setState(() => _custom = v),
@@ -184,7 +190,7 @@ class _ReminderPickerDialogState extends State<_ReminderPickerDialog> {
                   onPressed: problem != null
                       ? null
                       : () => Navigator.of(context).pop(custom),
-                  child: const Text('이 시각에 알림'),
+                  child: Text(tr('이 시각에 알림')),
                 ),
               ],
             ),
@@ -207,7 +213,7 @@ void openReminderTarget(
     if (r.id == roomId) room = r;
   }
   if (room == null) {
-    showAppToast(context, '이 대화방에 더 이상 참여하고 있지 않습니다.');
+    showAppToast(context, tr('이 대화방에 더 이상 참여하고 있지 않습니다.'));
     return;
   }
   if (MediaQuery.sizeOf(context).width >= wideBreakpoint) {
@@ -246,7 +252,7 @@ class ReminderCardView extends StatelessWidget {
       if (r.id == card.roomId) room = r;
     }
     final roomName =
-        room?.displayName(session.userId ?? '') ?? card.roomName ?? '대화방';
+        room?.displayName(session.userId ?? '') ?? card.roomName ?? tr('대화방');
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 360),
       child: Column(
@@ -258,7 +264,7 @@ class ReminderCardView extends StatelessWidget {
               const Text('⏰', style: TextStyle(fontSize: 16)),
               const SizedBox(width: 6),
               Text(
-                '리마인더',
+                tr('리마인더'),
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
@@ -267,7 +273,7 @@ class ReminderCardView extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '$roomName · ${card.senderName ?? '알 수 없음'}'
+            '$roomName · ${card.senderName ?? tr('알 수 없음')}'
             '${card.sentAt != null ? ' · ${reminderTimeLabel(card.sentAt!)}' : ''}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -275,7 +281,9 @@ class ReminderCardView extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            card.secret ? '🔒 비밀 대화 메시지' : (card.preview ?? '메시지를 확인하세요'),
+            card.secret
+                ? tr('🔒 비밀 대화 메시지')
+                : (card.preview ?? tr('메시지를 확인하세요')),
             maxLines: 4,
             overflow: TextOverflow.ellipsis,
           ),
@@ -289,7 +297,7 @@ class ReminderCardView extends StatelessWidget {
               messageId: card.messageId,
             ),
             icon: const Icon(Icons.open_in_new, size: 16),
-            label: const Text('메시지로 이동'),
+            label: Text(tr('메시지로 이동')),
           ),
         ],
       ),

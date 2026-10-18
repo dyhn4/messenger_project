@@ -70,9 +70,9 @@ class _ChatScreenState extends State<ChatScreen> {
         final Widget? stateBadge = !isTopic
             ? null
             : room.isArchived
-            ? const TopicBadge.archived(key: ValueKey('chat-header-archived'))
+            ? TopicBadge.archived(key: ValueKey('chat-header-archived'))
             : room.readOnly
-            ? const TopicBadge.readOnly(key: ValueKey('chat-header-read-only'))
+            ? TopicBadge.readOnly(key: ValueKey('chat-header-read-only'))
             : null;
         final avatar = room.isSelf
             ? SelfRoomAvatar(session: session, size: 24)

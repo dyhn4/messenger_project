@@ -8,6 +8,7 @@ import '../services/session.dart';
 import 'app_toast.dart';
 import 'muted_scrollbar.dart';
 import 'user_avatar.dart';
+import '../l10n/tr.dart';
 
 /// 조직도 "부서" 탭 — 부서 트리(위 부서 › 아래 부서)와 부서마다의 사람들, 부서장·상위자(서버 orgTree.js). 누구나 보고(회사 하나면
 /// 정회원 이상, 팀마다면 그 팀 멤버), 고칠 수 있는 사람(회사 하나면 서버 운영자·관리자, 팀마다면 팀 소유자도)에게는 부서 만들기·이름
@@ -98,7 +99,9 @@ class OrgTreeViewState extends State<OrgTreeView> {
   // ── 부서 고치기 ──
 
   Future<void> _addDepartment(String? parentId) async {
-    final name = await _askName(parentId == null ? '부서 만들기' : '하위 부서 만들기');
+    final name = await _askName(
+      parentId == null ? tr('부서 만들기') : tr('하위 부서 만들기'),
+    );
     if (name == null) return;
     await _run(() async {
       final made = await _session.api!.createDepartment(
@@ -108,38 +111,38 @@ class OrgTreeViewState extends State<OrgTreeView> {
       );
       if (parentId != null) _expanded.add(parentId);
       _expanded.add(made.id);
-    }, '부서를 만들지 못했습니다');
+    }, tr('부서를 만들지 못했습니다'));
   }
 
   Future<void> _rename(OrgDepartment d) async {
-    final name = await _askName('부서 이름 바꾸기', initial: d.name);
+    final name = await _askName(tr('부서 이름 바꾸기'), initial: d.name);
     if (name == null || name == d.name) return;
     await _run(
       () => _session.api!.updateDepartment(d.id, {'name': name}),
-      '이름을 바꾸지 못했습니다',
+      tr('이름을 바꾸지 못했습니다'),
     );
   }
 
   Future<void> _reparent(OrgDepartment d) async {
     final tree = _tree!;
     final picked = await _pickDepartment(
-      title: '"${d.name}"을(를) 옮길 위치',
+      title: tr('"{d.name}"을(를) 옮길 위치', {'d.name': d.name}),
       exclude: {d.id, ...tree.descendantsOf(d.id)},
-      noneLabel: '맨 위',
+      noneLabel: tr('맨 위'),
     );
     if (picked == null) return;
     final parentId = picked.isEmpty ? null : picked;
     if (parentId == d.parentId) return;
     await _run(
       () => _session.api!.updateDepartment(d.id, {'parentId': parentId}),
-      '옮기지 못했습니다',
+      tr('옮기지 못했습니다'),
     );
   }
 
   Future<void> _setHead(OrgDepartment d) async {
     final picked = await _pickPerson(
-      title: '"${d.name}" 부서장',
-      noneLabel: '부서장 없음',
+      title: tr('"{d.name}" 부서장', {'d.name': d.name}),
+      noneLabel: tr('부서장 없음'),
       current: d.headId,
     );
     if (picked == null) return;
@@ -147,7 +150,7 @@ class OrgTreeViewState extends State<OrgTreeView> {
       () => _session.api!.updateDepartment(d.id, {
         'headId': picked.isEmpty ? null : picked,
       }),
-      '부서장을 정하지 못했습니다',
+      tr('부서장을 정하지 못했습니다'),
     );
   }
 
@@ -157,36 +160,41 @@ class OrgTreeViewState extends State<OrgTreeView> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('부서 지우기'),
+        title: Text(tr('부서 지우기')),
         content: Text(
           parent == null
-              ? '"${d.name}"을(를) 지울까요? 하위 부서는 맨 위로 올라가고, 구성원은 부서 없음이 됩니다.'
-              : '"${d.name}"을(를) 지울까요? 하위 부서와 구성원은 "${parent.name}"(으)로 올라갑니다.',
+              ? tr('"{d.name}"을(를) 지울까요? 하위 부서는 맨 위로 올라가고, 구성원은 부서 없음이 됩니다.', {
+                  'd.name': d.name,
+                })
+              : tr(
+                  '"{d.name}"을(를) 지울까요? 하위 부서와 구성원은 "{parent.name}"(으)로 올라갑니다.',
+                  {'d.name': d.name, 'parent.name': parent.name},
+                ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('org-delete-confirm'),
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('지우기'),
+            child: Text(tr('지우기')),
           ),
         ],
       ),
     );
     if (ok != true) return;
-    await _run(() => _session.api!.deleteDepartment(d.id), '지우지 못했습니다');
+    await _run(() => _session.api!.deleteDepartment(d.id), tr('지우지 못했습니다'));
   }
 
   // ── 사람 고치기 ──
 
   Future<void> _moveMember(OrgMember m) async {
     final picked = await _pickDepartment(
-      title: '${m.name}의 부서',
-      noneLabel: '부서 없음',
+      title: tr('{m.name}의 부서', {'m.name': m.name}),
+      noneLabel: tr('부서 없음'),
       current: m.departmentId,
     );
     if (picked == null) return;
@@ -198,14 +206,14 @@ class OrgTreeViewState extends State<OrgTreeView> {
         teamId: _teamId,
         patch: {'departmentId': deptId},
       ),
-      '부서를 옮기지 못했습니다',
+      tr('부서를 옮기지 못했습니다'),
     );
   }
 
   Future<void> _setManager(OrgMember m) async {
     final picked = await _pickPerson(
-      title: '${m.name}의 상위자',
-      noneLabel: '따로 정하지 않음(부서장)',
+      title: tr('{m.name}의 상위자', {'m.name': m.name}),
+      noneLabel: tr('따로 정하지 않음(부서장)'),
       exclude: {m.id},
       current: m.managerId,
     );
@@ -218,7 +226,7 @@ class OrgTreeViewState extends State<OrgTreeView> {
         teamId: _teamId,
         patch: {'managerId': managerId},
       ),
-      '상위자를 정하지 못했습니다',
+      tr('상위자를 정하지 못했습니다'),
     );
   }
 
@@ -307,7 +315,7 @@ class OrgTreeViewState extends State<OrgTreeView> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(_error!, textAlign: TextAlign.center),
-            TextButton(onPressed: _load, child: const Text('다시 시도')),
+            TextButton(onPressed: _load, child: Text(tr('다시 시도'))),
           ],
         ),
       );
@@ -352,7 +360,7 @@ class OrgTreeViewState extends State<OrgTreeView> {
                     key: const ValueKey('org-add-department'),
                     onPressed: _busy ? null : () => _addDepartment(null),
                     icon: const Icon(Icons.add, size: 18),
-                    label: const Text('부서 만들기'),
+                    label: Text(tr('부서 만들기')),
                   ),
               ],
             ),
@@ -381,8 +389,10 @@ class OrgTreeViewState extends State<OrgTreeView> {
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
           child: Text(
             tree.canEdit
-                ? '아직 부서가 없습니다. "부서 만들기"로 부서를 만들고 사람을 넣으면 상위자(부서장)가 정해지고, 결재를 올릴 때 결재선이 미리 채워집니다.'
-                : '아직 부서가 없습니다.',
+                ? tr(
+                    '아직 부서가 없습니다. "부서 만들기"로 부서를 만들고 사람을 넣으면 상위자(부서장)가 정해지고, 결재를 올릴 때 결재선이 미리 채워집니다.',
+                  )
+                : tr('아직 부서가 없습니다.'),
             style: TextStyle(color: hint, fontSize: 13),
           ),
         ),
@@ -424,12 +434,14 @@ class OrgTreeViewState extends State<OrgTreeView> {
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    '부서 없음',
+                    tr('부서 없음'),
                     style: TextStyle(color: hint, fontWeight: FontWeight.w600),
                   ),
                 ),
                 Text(
-                  '${unassigned.length}명',
+                  tr('{unassigned.length}명', {
+                    'unassigned.length': unassigned.length,
+                  }),
                   style: TextStyle(fontSize: 12, color: hint),
                 ),
               ],
@@ -454,10 +466,10 @@ class OrgTreeViewState extends State<OrgTreeView> {
         .where((m) => m.name.toLowerCase().contains(filter))
         .toList();
     if (depts.isEmpty && people.isEmpty) {
-      return const [
+      return [
         Padding(
           padding: EdgeInsets.all(24),
-          child: Center(child: Text('검색 결과가 없습니다.')),
+          child: Center(child: Text(tr('검색 결과가 없습니다.'))),
         ),
       ];
     }
@@ -468,7 +480,12 @@ class OrgTreeViewState extends State<OrgTreeView> {
           dense: true,
           leading: const Icon(Icons.account_tree_outlined, size: 20),
           title: Text(d.name),
-          subtitle: Text('${tree.pathOf(d.id)} · ${tree.headcount(d.id)}명'),
+          subtitle: Text(
+            tr('{p0} · {p1}명', {
+              'p0': tree.pathOf(d.id),
+              'p1': tree.headcount(d.id),
+            }),
+          ),
           onTap: () {
             // 트리로 돌아가 그 부서까지 펼친다.
             String? cur = d.id;
@@ -478,7 +495,10 @@ class OrgTreeViewState extends State<OrgTreeView> {
               cur = tree.department(cur)?.parentId;
             }
             setState(() {});
-            showAppToast(context, '검색어를 지우면 "${d.name}"까지 펼쳐 보입니다.');
+            showAppToast(
+              context,
+              tr('검색어를 지우면 "{d.name}"까지 펼쳐 보입니다.', {'d.name': d.name}),
+            );
           },
         ),
       for (final m in people) _memberRow(context, tree, m, 0, showPath: true),
@@ -523,21 +543,21 @@ class OrgTreeViewState extends State<OrgTreeView> {
                   ),
                   if (head != null)
                     Text(
-                      '부서장 ${head.name}',
+                      tr('부서장 {head.name}', {'head.name': head.name}),
                       style: TextStyle(fontSize: 12, color: hint),
                     ),
                 ],
               ),
             ),
             Text(
-              '${tree.headcount(d.id)}명',
+              tr('{p0}명', {'p0': tree.headcount(d.id)}),
               style: TextStyle(fontSize: 12, color: hint),
             ),
             if (tree.canEdit)
               PopupMenuButton<String>(
                 key: ValueKey('org-department-menu-${d.id}'),
                 enabled: !_busy,
-                tooltip: '부서 메뉴',
+                tooltip: tr('부서 메뉴'),
                 icon: const Icon(Icons.more_vert, size: 18),
                 onSelected: (v) => switch (v) {
                   'child' => _addDepartment(d.id),
@@ -545,26 +565,29 @@ class OrgTreeViewState extends State<OrgTreeView> {
                   'head' => _setHead(d),
                   'up' => _run(
                     () => _session.api!.moveDepartment(d.id, up: true),
-                    '옮기지 못했습니다',
+                    tr('옮기지 못했습니다'),
                   ),
                   'down' => _run(
                     () => _session.api!.moveDepartment(d.id, up: false),
-                    '옮기지 못했습니다',
+                    tr('옮기지 못했습니다'),
                   ),
                   'move' => _reparent(d),
                   _ => _delete(d),
                 },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'child', child: Text('하위 부서 만들기')),
-                  PopupMenuItem(value: 'rename', child: Text('이름 바꾸기')),
-                  PopupMenuItem(value: 'head', child: Text('부서장 정하기')),
-                  PopupMenuItem(value: 'up', child: Text('위로')),
-                  PopupMenuItem(value: 'down', child: Text('아래로')),
-                  PopupMenuItem(value: 'move', child: Text('다른 부서 아래로 옮기기')),
+                itemBuilder: (_) => [
+                  PopupMenuItem(value: 'child', child: Text(tr('하위 부서 만들기'))),
+                  PopupMenuItem(value: 'rename', child: Text(tr('이름 바꾸기'))),
+                  PopupMenuItem(value: 'head', child: Text(tr('부서장 정하기'))),
+                  PopupMenuItem(value: 'up', child: Text(tr('위로'))),
+                  PopupMenuItem(value: 'down', child: Text(tr('아래로'))),
+                  PopupMenuItem(
+                    value: 'move',
+                    child: Text(tr('다른 부서 아래로 옮기기')),
+                  ),
                   PopupMenuItem(
                     value: 'delete',
                     child: Text(
-                      '지우기',
+                      tr('지우기'),
                       style: TextStyle(color: Colors.redAccent),
                     ),
                   ),
@@ -590,10 +613,13 @@ class OrgTreeViewState extends State<OrgTreeView> {
     final manager = tree.member(m.effectiveManagerId);
     final dept = tree.department(m.departmentId);
     final sub = [
-      if (showPath) dept == null ? '부서 없음' : tree.pathOf(dept.id),
+      if (showPath) dept == null ? tr('부서 없음') : tree.pathOf(dept.id),
       if (m.position != null && m.position!.isNotEmpty) m.position!,
       if (manager != null)
-        '상위자 ${manager.name}${m.managerId != null ? '(지정)' : ''}',
+        tr('상위자 {manager.name}{p0}', {
+          'manager.name': manager.name,
+          'p0': m.managerId != null ? tr('(지정)') : '',
+        }),
     ].join(' · ');
     return InkWell(
       key: ValueKey('org-member-${m.id}'),
@@ -634,7 +660,7 @@ class OrgTreeViewState extends State<OrgTreeView> {
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            '부서장',
+                            tr('부서장'),
                             style: TextStyle(
                               fontSize: 10,
                               color: Theme.of(context).colorScheme.primary,
@@ -658,13 +684,13 @@ class OrgTreeViewState extends State<OrgTreeView> {
               PopupMenuButton<String>(
                 key: ValueKey('org-member-menu-${m.id}'),
                 enabled: !_busy,
-                tooltip: '구성원 메뉴',
+                tooltip: tr('구성원 메뉴'),
                 icon: const Icon(Icons.more_vert, size: 18),
                 onSelected: (v) =>
                     v == 'department' ? _moveMember(m) : _setManager(m),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'department', child: Text('부서 옮기기')),
-                  PopupMenuItem(value: 'manager', child: Text('상위자 정하기')),
+                itemBuilder: (_) => [
+                  PopupMenuItem(value: 'department', child: Text(tr('부서 옮기기'))),
+                  PopupMenuItem(value: 'manager', child: Text(tr('상위자 정하기'))),
                 ],
               )
             else
@@ -709,21 +735,21 @@ class _DepartmentNameDialogState extends State<_DepartmentNameDialog> {
         controller: _controller,
         autofocus: true,
         maxLength: 30,
-        decoration: const InputDecoration(
-          labelText: '부서 이름',
-          hintText: '예: 영업1팀',
+        decoration: InputDecoration(
+          labelText: tr('부서 이름'),
+          hintText: tr('예: 영업1팀'),
         ),
         onSubmitted: (_) => _submit(),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('org-department-name-confirm'),
           onPressed: _submit,
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ],
     );
@@ -772,8 +798,8 @@ class _PersonPickerState extends State<_PersonPicker> {
             TextField(
               key: const ValueKey('org-person-search'),
               autofocus: true,
-              decoration: const InputDecoration(
-                hintText: '이름 검색',
+              decoration: InputDecoration(
+                hintText: tr('이름 검색'),
                 isDense: true,
                 prefixIcon: Icon(Icons.search, size: 18),
                 border: OutlineInputBorder(),
@@ -806,7 +832,7 @@ class _PersonPickerState extends State<_PersonPicker> {
                       subtitle: Text(
                         [
                           widget.tree.department(m.departmentId)?.name ??
-                              '부서 없음',
+                              tr('부서 없음'),
                           if (m.position != null && m.position!.isNotEmpty)
                             m.position!,
                         ].join(' · '),
@@ -826,7 +852,7 @@ class _PersonPickerState extends State<_PersonPicker> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
       ],
     );

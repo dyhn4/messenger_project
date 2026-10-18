@@ -6,6 +6,7 @@ import '../../../services/session.dart';
 import '../calendar_common.dart';
 import 'calendar_management_common.dart';
 import 'calendar_settings.dart';
+import '../../../l10n/tr.dart';
 
 /// 새 캘린더 이름의 최대 글자 수(서버 규약과 같다).
 const kCalendarNameMax = 30;
@@ -13,9 +14,11 @@ const kCalendarNameMax = 30;
 /// 캘린더 이름 검사 — 앞뒤 공백을 뺀 1~30자(글자 단위). 통과하면 null, 아니면 사유.
 String? validateCalendarName(String raw) {
   final v = raw.trim();
-  if (v.isEmpty) return '캘린더 이름을 입력하세요.';
+  if (v.isEmpty) return tr('캘린더 이름을 입력하세요.');
   if (v.characters.length > kCalendarNameMax) {
-    return '캘린더 이름은 $kCalendarNameMax자 이내로 입력하세요.';
+    return tr('캘린더 이름은 {kCalendarNameMax}자 이내로 입력하세요.', {
+      'kCalendarNameMax': kCalendarNameMax,
+    });
   }
   return null;
 }
@@ -28,7 +31,7 @@ Future<void> createCalendarFlow(
 ) async {
   final created = await showCalendarSheet<CalendarInfo>(
     context,
-    title: '새 캘린더 만들기',
+    title: tr('새 캘린더 만들기'),
     maxWidth: 440,
     child: CalendarCreateForm(controller: controller),
   );
@@ -93,7 +96,7 @@ class _CalendarCreateFormState extends State<CalendarCreateForm> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _error = calendarErrorText(e, '캘린더를 만들지 못했습니다. 잠시 후 다시 시도하세요.');
+          _error = calendarErrorText(e, tr('캘린더를 만들지 못했습니다. 잠시 후 다시 시도하세요.'));
         });
       }
     }
@@ -109,7 +112,7 @@ class _CalendarCreateFormState extends State<CalendarCreateForm> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('캘린더 이름', style: theme.textTheme.labelLarge),
+          Text(tr('캘린더 이름'), style: theme.textTheme.labelLarge),
           const SizedBox(height: 6),
           TextField(
             key: const ValueKey('cal-create-name'),
@@ -118,7 +121,7 @@ class _CalendarCreateFormState extends State<CalendarCreateForm> {
             enabled: !_busy,
             maxLength: kCalendarNameMax,
             decoration: InputDecoration(
-              hintText: '예: 디자인팀 일정',
+              hintText: tr('예: 디자인팀 일정'),
               border: const OutlineInputBorder(),
               isDense: true,
               errorText: nameError,
@@ -127,7 +130,7 @@ class _CalendarCreateFormState extends State<CalendarCreateForm> {
             onSubmitted: (_) => _submit(),
           ),
           const SizedBox(height: 8),
-          Text('색', style: theme.textTheme.labelLarge),
+          Text(tr('색'), style: theme.textTheme.labelLarge),
           const SizedBox(height: 8),
           CalendarColorGrid(
             selected: _color,
@@ -149,7 +152,7 @@ class _CalendarCreateFormState extends State<CalendarCreateForm> {
             children: [
               TextButton(
                 onPressed: _busy ? null : () => Navigator.of(context).pop(),
-                child: const Text('취소'),
+                child: Text(tr('취소')),
               ),
               const SizedBox(width: 8),
               FilledButton(
@@ -161,7 +164,7 @@ class _CalendarCreateFormState extends State<CalendarCreateForm> {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('만들기'),
+                    : Text(tr('만들기')),
               ),
             ],
           ),

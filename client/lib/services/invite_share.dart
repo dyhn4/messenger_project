@@ -13,14 +13,18 @@
 /// 않게 하려는 것이다.
 library;
 
-const kPublicWifiCaution =
-    '※ 밖에서 열 때는 공용 와이파이(카페·공항·호텔 등) 말고 LTE/5G나 집 와이파이에서 여세요.';
+import '../l10n/tr.dart';
+
+final kPublicWifiCaution = tr(
+  '※ 밖에서 열 때는 공용 와이파이(카페·공항·호텔 등) 말고 LTE/5G나 집 와이파이에서 여세요.',
+);
 
 /// 아이폰 안내 줄 바로 다음에 붙는 가입 안내. 사내 와이파이 밖에서는 초대 링크의 코드를 함께 보내야 가입되는데(server
 /// auth.js), 웹 앱은 그 코드를 주소의 `?invite=`로 받는다(web_launch_invite.dart) — 그래서 이 글의 웹 앱 주소에는 코드가 붙어
 /// 있고, 이 주소로 처음 열어야 밖에서도 가입된다.
-const kIphoneSignupCaution =
-    '※ 처음 가입할 때는 꼭 위 주소로 여세요(초대 코드가 들어 있어 사내 와이파이 밖에서도 가입됩니다). 가입한 뒤에는 홈 화면의 웹 앱으로 로그인합니다.';
+final kIphoneSignupCaution = tr(
+  '※ 처음 가입할 때는 꼭 위 주소로 여세요(초대 코드가 들어 있어 사내 와이파이 밖에서도 가입됩니다). 가입한 뒤에는 홈 화면의 웹 앱으로 로그인합니다.',
+);
 
 /// 초대 코드로 볼 수 있는 모양인지 — 서버가 만드는 코드는 16진수 24자(server/src/invites.js·teamInvites.js)지만, 웹 앱 주소에서
 /// 꺼낸 값을 그대로 서버에 보내기 전에 터무니없는 값(긴 글·기호)만 거른다.
@@ -39,8 +43,10 @@ String webAppInviteUrl(String webUrl, String? inviteToken) {
 
 /// 아이폰 사용자용 안내 줄. 주소와 "을" 사이를 띄우는 건, 메신저들이 글 속 주소를 링크로 바꿀 때 뒤에 붙은
 /// 글자까지 주소로 삼아 열리지 않는 링크가 되지 않게 하려는 것이다.
-String iphoneWebAppLine(String webUrl, {String? inviteToken}) =>
-    '아이폰은 앱 대신 웹 앱을 씁니다: ${webAppInviteUrl(webUrl, inviteToken)} 을 Safari로 열어 가입하고 홈 화면에 추가하세요.';
+String iphoneWebAppLine(String webUrl, {String? inviteToken}) => tr(
+  '아이폰은 앱 대신 웹 앱을 씁니다: {p0} 을 Safari로 열어 가입하고 홈 화면에 추가하세요.',
+  {'p0': webAppInviteUrl(webUrl, inviteToken)},
+);
 
 /// 서버가 알려 준 아이폰용 웹 앱 주소(GET /server-info의 webUrl — 서버에 공인 인증서가 실제로 걸려 있을 때만 값이
 /// 있다). 앱이 서버 정보를 받을 때마다 ApiClient가 [rememberWebAppUrl]로 고쳐 적는다 — 초대 링크 화면들은 링크
@@ -70,5 +76,12 @@ String _linkText(String url, String? externalUrl) {
   if (externalUrl == null || externalUrl == url) {
     return externalUrl == null ? url : '$url\n$kPublicWifiCaution';
   }
-  return '사내 와이파이에서: $url\n사내 와이파이 밖(LTE/5G)에서: $externalUrl\n$kPublicWifiCaution';
+  return tr(
+    '사내 와이파이에서: {url}\n사내 와이파이 밖(LTE/5G)에서: {externalUrl}\n{kPublicWifiCaution}',
+    {
+      'url': url,
+      'externalUrl': externalUrl,
+      'kPublicWifiCaution': kPublicWifiCaution,
+    },
+  );
 }

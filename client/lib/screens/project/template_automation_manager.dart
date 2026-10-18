@@ -6,6 +6,7 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/role_badge.dart';
 import 'automation_flow_editor.dart' show showAutomationFlowEditor;
+import '../../l10n/tr.dart';
 
 /// 편집 창과 목록 요약이 쓰는 프로젝트 정보.
 class _Ctx {
@@ -26,16 +27,16 @@ class _Ctx {
 
   String memberName(String? id) =>
       members.where((m) => m.id == id).map((m) => m.name).firstOrNull ??
-      '(알 수 없음)';
+      tr('(알 수 없음)');
   String statusName(String? id) =>
       statuses.where((s) => s.id == id).map((s) => s.name).firstOrNull ??
-      '(삭제된 상태)';
+      tr('(삭제된 상태)');
   String typeName(String? id) =>
       types.where((t) => t.id == id).map((t) => t.name).firstOrNull ??
-      '(삭제된 유형)';
+      tr('(삭제된 유형)');
   String priorityName(String? id) =>
       priorities.where((p) => p.id == id).map((p) => p.name).firstOrNull ??
-      '(삭제된 우선순위)';
+      tr('(삭제된 우선순위)');
 
   /// 자동화 노드의 필드 이름 — 사용자 정의 필드는 `field:<id>`로 온다.
   String fieldLabel(String field) =>
@@ -45,7 +46,7 @@ class _Ctx {
                     .where((f) => f.id == field.substring(6))
                     .map((f) => f.name)
                     .firstOrNull ??
-                '(삭제된 필드)'
+                tr('(삭제된 필드)')
           : field);
 
   /// IF 조건 값의 화면 이름 — 상태·우선순위·담당자·유형은 id로, 사용자 정의 필드는 글자 그대로 온다.
@@ -124,10 +125,10 @@ class _ProjectAutomationEditorState extends State<ProjectAutomationEditor> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const TabBar(
+                TabBar(
                   tabs: [
-                    Tab(text: '자동화 규칙'),
-                    Tab(text: '실행 기록'),
+                    Tab(text: tr('자동화 규칙')),
+                    Tab(text: tr('실행 기록')),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -165,12 +166,12 @@ Future<bool> _confirmDelete(
       actions: [
         TextButton(
           onPressed: () => Navigator.of(c).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
           onPressed: () => Navigator.of(c).pop(true),
-          child: const Text('삭제'),
+          child: Text(tr('삭제')),
         ),
       ],
     ),
@@ -182,33 +183,40 @@ Future<bool> _confirmDelete(
 
 // 이전 방식 규칙(노드 편집기 이전)의 요약 — 켜기·끄기·삭제만 되므로 목록에서 설명만 보여준다.
 String _describeAction(AutomationAction a, _Ctx ctx) => switch (a.kind) {
-  'set_assignee' => '담당자를 ${ctx.memberName(a.userId)}(으)로',
-  'set_status' => '상태를 ${ctx.statusName(a.statusId)}(으)로',
-  'set_priority' =>
-    '우선순위를 ${taskPriorityLabel(taskPriorityFromWire(a.priority))}(으)로',
-  'add_reference' => '${ctx.memberName(a.userId)}을(를) 참조자로 추가',
-  'add_comment' => "댓글 '${a.text}' 남기기",
-  'notify' => '${ctx.memberName(a.userId)}에게 알림',
+  'set_assignee' => tr('담당자를 {p0}(으)로', {'p0': ctx.memberName(a.userId)}),
+  'set_status' => tr('상태를 {p0}(으)로', {'p0': ctx.statusName(a.statusId)}),
+  'set_priority' => tr('우선순위를 {p0}(으)로', {
+    'p0': taskPriorityLabel(taskPriorityFromWire(a.priority)),
+  }),
+  'add_reference' => tr('{p0}을(를) 참조자로 추가', {'p0': ctx.memberName(a.userId)}),
+  'add_comment' => tr('댓글 \'{a.text}\' 남기기', {'a.text': a.text}),
+  'notify' => tr('{p0}에게 알림', {'p0': ctx.memberName(a.userId)}),
   _ => a.kind,
 };
 
 String _legacyWhen(AutomationRule r, _Ctx ctx) {
   final base = r.trigger == 'task_created'
-      ? '업무가 만들어질 때'
+      ? tr('업무가 만들어질 때')
       : r.triggerStatusId == null
-      ? '상태가 바뀔 때'
-      : "상태가 '${ctx.statusName(r.triggerStatusId)}'(으)로 바뀔 때";
+      ? tr('상태가 바뀔 때')
+      : tr('상태가 \'{p0}\'(으)로 바뀔 때', {'p0': ctx.statusName(r.triggerStatusId)});
   final cond = [
     if (r.conditionPriority != null)
-      '우선순위 ${taskPriorityLabel(taskPriorityFromWire(r.conditionPriority))}',
-    if (r.conditionTypeId != null) '유형 ${ctx.typeName(r.conditionTypeId)}',
+      tr('우선순위 {p0}', {
+        'p0': taskPriorityLabel(taskPriorityFromWire(r.conditionPriority)),
+      }),
+    if (r.conditionTypeId != null)
+      tr('유형 {p0}', {'p0': ctx.typeName(r.conditionTypeId)}),
   ];
-  return cond.isEmpty ? base : '$base (${cond.join(', ')}인 업무)';
+  return cond.isEmpty
+      ? base
+      : tr('{base} ({p0}인 업무)', {'base': base, 'p0': cond.join(', ')});
 }
 
-String _legacySummary(AutomationRule r, _Ctx ctx) =>
-    '언제: ${_legacyWhen(r, ctx)} · '
-    '동작: ${r.actions.map((a) => _describeAction(a, ctx)).join(' → ')}';
+String _legacySummary(AutomationRule r, _Ctx ctx) => tr('언제: {p0} · 동작: {p1}', {
+  'p0': _legacyWhen(r, ctx),
+  'p1': r.actions.map((a) => _describeAction(a, ctx)).join(' → '),
+});
 
 String _conditionSummary(Map<String, dynamic> c, _Ctx ctx) {
   final field = c['field'] is String ? c['field'] as String : 'status';
@@ -312,19 +320,23 @@ class _AutomationsTabState extends State<_AutomationsTab> {
       await widget.session.api!.setAutomationEnabled(r.id, v);
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('바꾸지 못했습니다: {e}', {'e': e}));
     }
   }
 
   Future<void> _delete(AutomationRule r) async {
-    if (!await _confirmDelete(context, '규칙 삭제', "'${r.name}' 규칙을 삭제할까요?")) {
+    if (!await _confirmDelete(
+      context,
+      tr('규칙 삭제'),
+      tr('\'{r.name}\' 규칙을 삭제할까요?', {'r.name': r.name}),
+    )) {
       return;
     }
     try {
       await widget.session.api!.deleteAutomation(r.id);
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -346,7 +358,7 @@ class _AutomationsTabState extends State<_AutomationsTab> {
           ),
           if (legacy) ...[
             const SizedBox(width: 6),
-            RoleBadge(label: '이전 방식', bg: chip.bg, fg: chip.fg),
+            RoleBadge(label: tr('이전 방식'), bg: chip.bg, fg: chip.fg),
           ],
         ],
       ),
@@ -365,8 +377,8 @@ class _AutomationsTabState extends State<_AutomationsTab> {
         children: [
           Switch(value: r.enabled, onChanged: (v) => _toggle(r, v)),
           if (legacy)
-            const Tooltip(
-              message: '새 편집기에서 다시 만들어 주세요',
+            Tooltip(
+              message: tr('새 편집기에서 다시 만들어 주세요'),
               child: IconButton(
                 icon: Icon(Icons.edit_outlined, size: 18),
                 onPressed: null,
@@ -375,12 +387,12 @@ class _AutomationsTabState extends State<_AutomationsTab> {
           else
             IconButton(
               icon: const Icon(Icons.edit_outlined, size: 18),
-              tooltip: '편집',
+              tooltip: tr('편집'),
               onPressed: () => _openEditor(r),
             ),
           IconButton(
             icon: const Icon(Icons.delete_outline, size: 18),
-            tooltip: '삭제',
+            tooltip: tr('삭제'),
             onPressed: () => _delete(r),
           ),
         ],
@@ -401,8 +413,9 @@ class _AutomationsTabState extends State<_AutomationsTab> {
           children: [
             Expanded(
               child: Text(
-                '트리거가 일어나고 조건이 맞으면 액션을 대신 실행합니다. '
-                '자동화가 일으킨 변화는 다른 규칙을 다시 부르지 않습니다.',
+                tr(
+                  '트리거가 일어나고 조건이 맞으면 액션을 대신 실행합니다. 자동화가 일으킨 변화는 다른 규칙을 다시 부르지 않습니다.',
+                ),
                 style: TextStyle(color: hint, fontSize: 12),
               ),
             ),
@@ -410,7 +423,7 @@ class _AutomationsTabState extends State<_AutomationsTab> {
             FilledButton.icon(
               onPressed: () => _openEditor(),
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('새 자동화'),
+              label: Text(tr('새 자동화')),
             ),
           ],
         ),
@@ -418,7 +431,10 @@ class _AutomationsTabState extends State<_AutomationsTab> {
         Expanded(
           child: items.isEmpty
               ? Center(
-                  child: Text('만든 규칙이 없습니다.', style: TextStyle(color: hint)),
+                  child: Text(
+                    tr('만든 규칙이 없습니다.'),
+                    style: TextStyle(color: hint),
+                  ),
                 )
               : ListView(children: [for (final r in items) _ruleTile(r, hint)]),
         ),
@@ -473,7 +489,7 @@ class _RunsTabState extends State<_RunsTab> {
   /// 이전 방식 규칙의 'status_changed'는 새 트리거 목록에 없어서 따로 적는다.
   static String _triggerLabel(String trigger) =>
       automationTriggerLabels[trigger] ??
-      (trigger == 'status_changed' ? '상태 변경' : trigger);
+      (trigger == 'status_changed' ? tr('상태 변경') : trigger);
 
   @override
   Widget build(BuildContext context) {
@@ -488,13 +504,13 @@ class _RunsTabState extends State<_RunsTab> {
           children: [
             Expanded(
               child: Text(
-                '규칙이 실행된 최근 기록입니다(최대 100개).',
+                tr('규칙이 실행된 최근 기록입니다(최대 100개).'),
                 style: TextStyle(color: hint, fontSize: 12),
               ),
             ),
             IconButton(
               icon: const Icon(Icons.refresh, size: 18),
-              tooltip: '새로고침',
+              tooltip: tr('새로고침'),
               onPressed: _load,
             ),
           ],
@@ -503,7 +519,7 @@ class _RunsTabState extends State<_RunsTab> {
           child: runs.isEmpty
               ? Center(
                   child: Text(
-                    '아직 실행된 규칙이 없습니다.',
+                    tr('아직 실행된 규칙이 없습니다.'),
                     style: TextStyle(color: hint),
                   ),
                 )

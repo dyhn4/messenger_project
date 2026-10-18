@@ -11,6 +11,7 @@ import 'package:web_socket/io_web_socket.dart';
 import 'package:web_socket/web_socket.dart' as ws;
 
 import 'app_platform.dart';
+import '../l10n/tr.dart';
 
 /// 서버가 자체 서명 인증서를 쓰기 때문에, 공인 CA 목록이 아니라 이 서버의 **공개키** 하나만
 /// 신뢰하도록 설정한다(핀닝). 인증서 검증을 통째로 꺼버리는 방식(아무 인증서나 허용)은
@@ -245,7 +246,7 @@ class PinnedTls {
     final res = await http.get(pairingUri).timeout(const Duration(seconds: 10));
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     if (res.statusCode != 200) {
-      throw body['error'] as String? ?? '코드가 올바르지 않거나 만료되었습니다.';
+      throw body['error'] as String? ?? tr('코드가 올바르지 않거나 만료되었습니다.');
     }
     return body['cert'] as String;
   }
@@ -274,12 +275,12 @@ class PinnedTls {
         return null; // 예전 서버(이 경로 없음 — Express 기본 404 페이지).
       }
       if (response.statusCode != 200) {
-        throw body['error'] as String? ?? '코드가 올바르지 않거나 만료되었습니다.';
+        throw body['error'] as String? ?? tr('코드가 올바르지 않거나 만료되었습니다.');
       }
       final pem = body['cert'] as String;
       final presented = response.certificate?.der;
       if (presented == null || !_sameCertificate(pem, presented)) {
-        throw '서버 인증서가 일치하지 않습니다. 네트워크를 바꿔 다시 시도하거나 관리자에게 문의하세요.';
+        throw tr('서버 인증서가 일치하지 않습니다. 네트워크를 바꿔 다시 시도하거나 관리자에게 문의하세요.');
       }
       return pem;
     } on SocketException {
@@ -365,11 +366,10 @@ class _Pin {
   _Pin(this.context, this.spkis);
 
   factory _Pin.fromPem(List<int> pem) {
-    final spkis = _pemCertificates(pem)
-        .map(PinnedTls.subjectPublicKeyInfo)
-        .whereType<List<int>>()
-        .toList();
-    if (spkis.isEmpty) throw const FormatException('핀닝할 서버 인증서를 읽지 못했습니다.');
+    final spkis = _pemCertificates(
+      pem,
+    ).map(PinnedTls.subjectPublicKeyInfo).whereType<List<int>>().toList();
+    if (spkis.isEmpty) throw FormatException(tr('핀닝할 서버 인증서를 읽지 못했습니다.'));
     final context = SecurityContext(withTrustedRoots: false)
       ..setTrustedCertificatesBytes(pem);
     return _Pin(context, spkis);
@@ -400,14 +400,18 @@ class _PinnedHttpOverrides extends HttpOverrides {
 List<List<int>> _pemCertificates(List<int> pem) {
   final text = utf8.decode(pem, allowMalformed: true);
   return RegExp(
-    r'-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----',
-  ).allMatches(text).map((m) {
-    try {
-      return base64Decode(m.group(1)!.replaceAll(RegExp(r'\s'), ''));
-    } on FormatException {
-      return null;
-    }
-  }).whereType<List<int>>().toList();
+        r'-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----',
+      )
+      .allMatches(text)
+      .map((m) {
+        try {
+          return base64Decode(m.group(1)!.replaceAll(RegExp(r'\s'), ''));
+        } on FormatException {
+          return null;
+        }
+      })
+      .whereType<List<int>>()
+      .toList();
 }
 
 bool _bytesEqual(List<int> a, List<int> b) {

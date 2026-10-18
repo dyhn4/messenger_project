@@ -15,6 +15,7 @@ import 'home_shell_scope.dart';
 import 'panel_create_button.dart';
 import 'panel_filters.dart';
 import 'side_panel_header.dart';
+import '../l10n/tr.dart';
 
 /// 앨범 목록 정렬 — 기본은 잔디처럼 "업데이트 순"(사진·영상을 올리거나 고친 시각).
 enum AlbumSort {
@@ -24,8 +25,11 @@ enum AlbumSort {
   title('제목순'),
   mostItems('사진·영상 많은 순');
 
-  final String label;
-  const AlbumSort(this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const AlbumSort(this._labelKo);
 
   List<Album> apply(List<Album> albums) {
     final sorted = List.of(albums);
@@ -210,7 +214,7 @@ class _AlbumsPanelState extends State<AlbumsPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SidePanelHeader(title: '앨범', onClose: widget.onClose),
+        SidePanelHeader(title: tr('앨범'), onClose: widget.onClose),
         // 제목 아래 가로 구분선 — 투표·북마크 패널과 같다.
         const Divider(height: 1),
         // 가로 전체 `+ 앨범 생성` — 투표 패널의 `+ 투표 만들기`와 같은 옅은 회색 둥근 단추.
@@ -218,7 +222,7 @@ class _AlbumsPanelState extends State<AlbumsPanel> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: PanelCreateButton(
             key: const ValueKey('album-create-button'),
-            label: '앨범 생성',
+            label: tr('앨범 생성'),
             onPressed: _create,
           ),
         ),
@@ -250,8 +254,11 @@ class _AlbumsPanelState extends State<AlbumsPanel> {
         PanelResultLine(
           summary: Text(
             _albums.listLoaded
-                ? '${albums.length}개의 앨범${_albums.listHasMore ? ' 이상' : ''}'
-                : '불러오는 중…',
+                ? tr('{albums.length}개의 앨범{p0}', {
+                    'albums.length': albums.length,
+                    'p0': _albums.listHasMore ? tr(' 이상') : '',
+                  })
+                : tr('불러오는 중…'),
             key: const ValueKey('album-count-line'),
             style: theme.textTheme.bodySmall,
           ),
@@ -281,7 +288,7 @@ class _AlbumsPanelState extends State<AlbumsPanel> {
               const SizedBox(height: 8),
               TextButton(
                 onPressed: () => _albums.loadAlbums(roomId: _roomId),
-                child: const Text('다시 시도'),
+                child: Text(tr('다시 시도')),
               ),
             ],
           ),
@@ -294,8 +301,8 @@ class _AlbumsPanelState extends State<AlbumsPanel> {
           padding: const EdgeInsets.all(24),
           child: Text(
             _roomId == null
-                ? '아직 앨범이 없습니다.\n앨범 생성으로 사진·영상을 주제별로 모아 보세요.'
-                : '이 대화방에는 아직 앨범이 없습니다.\n앨범 생성으로 사진·영상을 주제별로 모아 보세요.',
+                ? tr('아직 앨범이 없습니다.\n앨범 생성으로 사진·영상을 주제별로 모아 보세요.')
+                : tr('이 대화방에는 아직 앨범이 없습니다.\n앨범 생성으로 사진·영상을 주제별로 모아 보세요.'),
             key: const ValueKey('album-empty'),
             textAlign: TextAlign.center,
             style: TextStyle(color: theme.hintColor, height: 1.5),
@@ -532,7 +539,11 @@ class _AlbumListRowState extends State<AlbumListRow> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '사진·영상 ${album.itemCount}개 · ${album.roomName ?? ''} · ${formatPanelDate(album.createdAt)}',
+                      tr('사진·영상 {album.itemCount}개 · {p0} · {p1}', {
+                        'album.itemCount': album.itemCount,
+                        'p0': album.roomName ?? '',
+                        'p1': formatPanelDate(album.createdAt),
+                      }),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 11.5, color: hint),
@@ -654,7 +665,7 @@ class _AlbumMoreButton extends StatelessWidget {
     );
     return PopupMenuButton<AlbumAction>(
       key: ValueKey('album-card-more-${album.id}'),
-      tooltip: '더보기',
+      tooltip: tr('더보기'),
       position: PopupMenuPosition.under,
       offset: const Offset(0, 4),
       color: CompactMenu.color(context),
@@ -716,8 +727,8 @@ class _ViewToggle extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        button(AlbumListView.grid, Icons.grid_view_rounded, '격자로 보기'),
-        button(AlbumListView.list, Icons.view_list_rounded, '목록으로 보기'),
+        button(AlbumListView.grid, Icons.grid_view_rounded, tr('격자로 보기')),
+        button(AlbumListView.list, Icons.view_list_rounded, tr('목록으로 보기')),
       ],
     );
   }
@@ -748,7 +759,7 @@ class _AlbumSortButton extends StatelessWidget {
       builder: (context, open, toggle) => Semantics(
         expanded: open,
         child: Tooltip(
-          message: '정렬',
+          message: tr('정렬'),
           child: InkWell(
             key: const ValueKey('album-sort'),
             onTap: toggle,

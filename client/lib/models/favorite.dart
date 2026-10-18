@@ -1,6 +1,7 @@
 import 'app_user.dart';
 import 'comment.dart';
 import 'message.dart';
+import '../l10n/tr.dart';
 
 /// 통합 즐겨찾기의 종류(서버 `GET /api/favorites?type=`). 화면의 탭 순서이기도 하다 — 맨 앞 "전체"는 종류가 아니라
 /// null로 나타낸다.
@@ -11,22 +12,22 @@ extension FavoriteKindInfo on FavoriteKind {
   String get apiValue => name;
 
   String get label => switch (this) {
-    FavoriteKind.message => '메시지',
-    FavoriteKind.file => '파일',
-    FavoriteKind.comment => '댓글',
-    FavoriteKind.poll => '투표',
-    FavoriteKind.room => '대화방',
-    FavoriteKind.member => '멤버',
+    FavoriteKind.message => tr('메시지'),
+    FavoriteKind.file => tr('파일'),
+    FavoriteKind.comment => tr('댓글'),
+    FavoriteKind.poll => tr('투표'),
+    FavoriteKind.room => tr('대화방'),
+    FavoriteKind.member => tr('멤버'),
   };
 
   /// 종류마다 비었을 때 보여주는 안내 — 어디서 즐겨찾기를 켜는지 알려 준다.
   String get emptyHint => switch (this) {
-    FavoriteKind.message => '즐겨찾기한 메시지가 없습니다.\n메시지의 ⋯ 메뉴에서 즐겨찾기를 켤 수 있어요.',
-    FavoriteKind.file => '즐겨찾기한 파일이 없습니다.\n파일의 ⋯ 메뉴에서 즐겨찾기를 켤 수 있어요.',
-    FavoriteKind.comment => '즐겨찾기한 댓글이 없습니다.\n댓글의 ⋯ 메뉴에서 즐겨찾기를 켤 수 있어요.',
-    FavoriteKind.poll => '즐겨찾기한 투표가 없습니다.\n투표 카드의 ⋯ 메뉴에서 즐겨찾기를 켤 수 있어요.',
-    FavoriteKind.room => '즐겨찾기한 대화방이 없습니다.\n대화방 이름 옆 별을 눌러 즐겨찾기를 켤 수 있어요.',
-    FavoriteKind.member => '즐겨찾기한 멤버가 없습니다.\n멤버 프로필의 별을 눌러 즐겨찾기를 켤 수 있어요.',
+    FavoriteKind.message => tr('즐겨찾기한 메시지가 없습니다.\n메시지의 ⋯ 메뉴에서 즐겨찾기를 켤 수 있어요.'),
+    FavoriteKind.file => tr('즐겨찾기한 파일이 없습니다.\n파일의 ⋯ 메뉴에서 즐겨찾기를 켤 수 있어요.'),
+    FavoriteKind.comment => tr('즐겨찾기한 댓글이 없습니다.\n댓글의 ⋯ 메뉴에서 즐겨찾기를 켤 수 있어요.'),
+    FavoriteKind.poll => tr('즐겨찾기한 투표가 없습니다.\n투표 카드의 ⋯ 메뉴에서 즐겨찾기를 켤 수 있어요.'),
+    FavoriteKind.room => tr('즐겨찾기한 대화방이 없습니다.\n대화방 이름 옆 별을 눌러 즐겨찾기를 켤 수 있어요.'),
+    FavoriteKind.member => tr('즐겨찾기한 멤버가 없습니다.\n멤버 프로필의 별을 눌러 즐겨찾기를 켤 수 있어요.'),
   };
 
   static FavoriteKind? fromApi(String? value) {
@@ -99,7 +100,7 @@ class FavoriteItem {
   factory FavoriteItem.fromJson(Map<String, dynamic> json) {
     final kind = FavoriteKindInfo.fromApi(json['type'] as String?);
     if (kind == null) {
-      throw FormatException('알 수 없는 즐겨찾기 종류: ${json['type']}');
+      throw FormatException(tr('알 수 없는 즐겨찾기 종류: {p0}', {'p0': json['type']}));
     }
     Map<String, dynamic>? map(String key) =>
         json[key] is Map ? Map<String, dynamic>.from(json[key] as Map) : null;

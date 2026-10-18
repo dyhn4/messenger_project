@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/app_user.dart';
 import '../../models/project.dart';
 import 'filter_controls.dart';
+import '../../l10n/tr.dart';
 
 /// 숫자/날짜 필드의 범위 조건 — [min]/[max] 중 하나만 있어도 된다(날짜는 밀리초, [max]는 그날 끝까지).
 class FieldRange {
@@ -27,11 +28,11 @@ class FieldRange {
 enum QuickFilter { incomplete, done, overdue, mine, archived }
 
 String quickFilterLabel(QuickFilter q) => switch (q) {
-  QuickFilter.incomplete => '미완료 업무',
-  QuickFilter.done => '완료된 업무',
-  QuickFilter.overdue => '지연 업무',
-  QuickFilter.mine => '내 업무',
-  QuickFilter.archived => '보관된 업무',
+  QuickFilter.incomplete => tr('미완료 업무'),
+  QuickFilter.done => tr('완료된 업무'),
+  QuickFilter.overdue => tr('지연 업무'),
+  QuickFilter.mine => tr('내 업무'),
+  QuickFilter.archived => tr('보관된 업무'),
 };
 
 class TaskFilter {
@@ -282,7 +283,7 @@ List<Widget> activeFilterChips(
     for (final e in list) {
       if (idOf(e) == id) return name(e);
     }
-    return '(삭제됨)';
+    return tr('(삭제됨)');
   }
 
   Widget chip(String label, TaskFilter next) => Padding(
@@ -312,7 +313,7 @@ List<Widget> activeFilterChips(
     if (filter.assigneeId != null)
       chip(
         filter.assigneeId == noAssigneeFilter
-            ? '담당자 없음'
+            ? tr('담당자 없음')
             : nameOf(members, filter.assigneeId, (m) => m.name, (m) => m.id),
         filter.without(assignee: true),
       ),
@@ -333,12 +334,12 @@ List<Widget> activeFilterChips(
       ),
     if (filter.startFrom != null)
       chip(
-        '시작일 ${FilterDateField.format(filter.startFrom!)}부터',
+        tr('시작일 {p0}부터', {'p0': FilterDateField.format(filter.startFrom!)}),
         filter.without(start: true),
       ),
     if (filter.dueBy != null)
       chip(
-        '마감일 ${FilterDateField.format(filter.dueBy!)}까지',
+        tr('마감일 {p0}까지', {'p0': FilterDateField.format(filter.dueBy!)}),
         filter.without(due: true),
       ),
   ];
@@ -439,7 +440,7 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
       return TextFormField(
         initialValue: f.fieldValues[field.id] ?? '',
         style: const TextStyle(fontSize: 13),
-        decoration: _deco(context, '포함하는 글자'),
+        decoration: _deco(context, tr('포함하는 글자')),
         onChanged: (v) => widget.onChanged(f.copyFieldValue(field.id, v)),
       );
     }
@@ -451,7 +452,7 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
             initialValue: range.min?.toString() ?? '',
             keyboardType: TextInputType.number,
             style: const TextStyle(fontSize: 13),
-            decoration: _deco(context, '최소'),
+            decoration: _deco(context, tr('최소')),
             onChanged: (v) => widget.onChanged(
               f.copyFieldRange(
                 field.id,
@@ -466,7 +467,7 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
             initialValue: range.max?.toString() ?? '',
             keyboardType: TextInputType.number,
             style: const TextStyle(fontSize: 13),
-            decoration: _deco(context, '최대'),
+            decoration: _deco(context, tr('최대')),
             onChanged: (v) => widget.onChanged(
               f.copyFieldRange(
                 field.id,
@@ -488,8 +489,8 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
       ..._extraFields,
     };
     final rest = [
-      if (!shown.contains(_startId)) (id: _startId, label: '시작일'),
-      if (!shown.contains(_dueId)) (id: _dueId, label: '마감일'),
+      if (!shown.contains(_startId)) (id: _startId, label: tr('시작일')),
+      if (!shown.contains(_dueId)) (id: _dueId, label: tr('마감일')),
       for (final x in widget.fields)
         if (!shown.contains(x.id)) (id: x.id, label: x.name),
     ];
@@ -513,7 +514,7 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
       children: [
         if (widget.showStatus)
           FilterRow(
-            label: '상태',
+            label: tr('상태'),
             child: _pick(
               value: f.statusIds.firstOrNull,
               options: [
@@ -523,18 +524,18 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
             ),
           ),
         FilterRow(
-          label: '담당자',
+          label: tr('담당자'),
           child: _pick(
             value: f.assigneeId,
             options: [
-              (id: noAssigneeFilter, name: '담당자 없음'),
+              (id: noAssigneeFilter, name: tr('담당자 없음')),
               for (final m in widget.members) (id: m.id, name: m.name),
             ],
             onChanged: (v) => widget.onChanged(f.copyAssignee(v)),
           ),
         ),
         FilterRow(
-          label: '유형',
+          label: tr('유형'),
           child: _pick(
             value: f.typeId,
             options: [for (final t in widget.types) (id: t.id, name: t.name)],
@@ -542,7 +543,7 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
           ),
         ),
         FilterRow(
-          label: '우선순위',
+          label: tr('우선순위'),
           child: _pick(
             value: f.priorityIds.firstOrNull,
             options: [
@@ -554,7 +555,7 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
         if (shown.contains(_startId))
           FilterRow(
             key: const ValueKey('filter-start'),
-            label: '시작일',
+            label: tr('시작일'),
             child: FilterDateField(
               value: f.startFrom,
               onChanged: (d) => widget.onChanged(f.copyStartFrom(d)),
@@ -567,7 +568,7 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
         if (shown.contains(_dueId))
           FilterRow(
             key: const ValueKey('filter-due'),
-            label: '마감일',
+            label: tr('마감일'),
             child: FilterDateField(
               value: f.dueBy,
               onChanged: (d) => widget.onChanged(f.copyDueBy(d)),
@@ -599,7 +600,9 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
   @override
   Widget build(BuildContext context) {
     return FilterPanelButton(
-      label: f.isEmpty ? '필터링' : '필터링: ${f.activeCount}',
+      label: f.isEmpty
+          ? tr('필터링')
+          : tr('필터링: {f.activeCount}', {'f.activeCount': f.activeCount}),
       panelBuilder: _panel,
     );
   }

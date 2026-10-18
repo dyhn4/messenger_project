@@ -11,6 +11,7 @@ import 'app_toast.dart';
 import 'bookmark_image.dart';
 import 'panel_create_button.dart';
 import 'side_panel_header.dart';
+import '../l10n/tr.dart';
 
 /// 북마크 패널(side_panels.dart의 'bookmarks') — 잔디의 북마크와 같다. 이미지·제목·링크 카드를 팀 북마크/개인 북마크
 /// 탭으로 나눠 보여 주고, 카드를 누르면 외부 브라우저로 연다. 수정·삭제는 만든 사람과 팀 관리자만(⋯ 메뉴). 순서는 카드를
@@ -115,7 +116,7 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
     } catch (_) {
-      if (mounted) showAppToast(context, '링크를 열지 못했습니다.');
+      if (mounted) showAppToast(context, tr('링크를 열지 못했습니다.'));
     }
   }
 
@@ -126,7 +127,7 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
       controller: _controller,
       initialKind: _kind,
     );
-    if (saved && mounted) showAppToast(context, '북마크를 추가했습니다.');
+    if (saved && mounted) showAppToast(context, tr('북마크를 추가했습니다.'));
   }
 
   Future<void> _edit(Bookmark b) async {
@@ -136,19 +137,19 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
       controller: _controller,
       editing: b,
     );
-    if (saved && mounted) showAppToast(context, '북마크를 수정했습니다.');
+    if (saved && mounted) showAppToast(context, tr('북마크를 수정했습니다.'));
   }
 
   Future<void> _delete(Bookmark b) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('북마크 삭제'),
-        content: Text('"${b.title}" 북마크를 삭제할까요?'),
+        title: Text(tr('북마크 삭제')),
+        content: Text(tr('"{b.title}" 북마크를 삭제할까요?', {'b.title': b.title})),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('confirm-delete-bookmark'),
@@ -156,7 +157,7 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       ),
@@ -164,9 +165,9 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
     if (ok != true) return;
     try {
       await _controller.remove(b);
-      if (mounted) showAppToast(context, '북마크를 삭제했습니다.');
+      if (mounted) showAppToast(context, tr('북마크를 삭제했습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '북마크를 삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('북마크를 삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -182,11 +183,11 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
   void _startReorder() {
     if (_reordering) return;
     if (!_canReorderHere) {
-      showAppToast(context, '팀 북마크 순서는 관리자만 바꿀 수 있어요');
+      showAppToast(context, tr('팀 북마크 순서는 관리자만 바꿀 수 있어요'));
       return;
     }
     if (_controller.of(_kind).length < 2) {
-      showAppToast(context, '순서를 바꿀 북마크가 둘 이상 있어야 해요');
+      showAppToast(context, tr('순서를 바꿀 북마크가 둘 이상 있어야 해요'));
       return;
     }
     HapticFeedback.mediumImpact();
@@ -205,9 +206,9 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
     setState(() => _savingOrder = true);
     try {
       await _controller.reorder(_kind, after);
-      if (mounted) showAppToast(context, '순서를 바꿨습니다.');
+      if (mounted) showAppToast(context, tr('순서를 바꿨습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '순서를 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('순서를 바꾸지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) {
         setState(() {
@@ -233,7 +234,7 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SidePanelHeader(title: '북마크', onClose: widget.onClose),
+          SidePanelHeader(title: tr('북마크'), onClose: widget.onClose),
           const Divider(height: 1),
           _actionBar(context),
           _tabs(context),
@@ -250,7 +251,7 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: PanelCreateButton(
         key: const ValueKey('bookmark-add'),
-        label: '북마크 추가',
+        label: tr('북마크 추가'),
         onPressed: _reordering ? null : _add,
       ),
     );
@@ -269,7 +270,7 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '손잡이를 끌어서 순서를 바꾸세요',
+              tr('손잡이를 끌어서 순서를 바꾸세요'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall,
@@ -278,7 +279,7 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
           TextButton(
             key: const ValueKey('bookmark-reorder-done'),
             onPressed: _savingOrder ? null : _finishReorder,
-            child: const Text('완료'),
+            child: Text(tr('완료')),
           ),
         ],
       ),
@@ -336,7 +337,7 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
                 child: Text(c.error!, textAlign: TextAlign.center),
               ),
               const SizedBox(height: 8),
-              OutlinedButton(onPressed: c.load, child: const Text('다시 시도')),
+              OutlinedButton(onPressed: c.load, child: Text(tr('다시 시도'))),
             ],
           ),
         );
@@ -410,15 +411,15 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
             Icon(Icons.bookmark_border, size: 40, color: theme.hintColor),
             const SizedBox(height: 12),
             Text(
-              team ? '등록된 팀 북마크가 없어요.' : '등록된 개인 북마크가 없어요.',
+              team ? tr('등록된 팀 북마크가 없어요.') : tr('등록된 개인 북마크가 없어요.'),
               key: const ValueKey('bookmark-empty'),
               style: theme.textTheme.bodyLarge,
             ),
             const SizedBox(height: 4),
             Text(
               team
-                  ? '팀이 함께 쓰는 링크를 북마크로 추가해 보세요.'
-                  : '자주 가는 링크를 나만 보는 북마크로 추가해 보세요.',
+                  ? tr('팀이 함께 쓰는 링크를 북마크로 추가해 보세요.')
+                  : tr('자주 가는 링크를 나만 보는 북마크로 추가해 보세요.'),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
@@ -496,18 +497,18 @@ class _BookmarkCard extends StatelessWidget {
               if (hasMenu)
                 PopupMenuButton<String>(
                   key: ValueKey('bookmark-menu-${bookmark.id}'),
-                  tooltip: '더보기',
+                  tooltip: tr('더보기'),
                   icon: const Icon(Icons.more_vert),
                   onSelected: (v) =>
                       v == 'edit' ? onEdit?.call() : onDelete?.call(),
                   itemBuilder: (context) => [
                     if (onEdit != null)
-                      const PopupMenuItem(value: 'edit', child: Text('수정')),
+                      PopupMenuItem(value: 'edit', child: Text(tr('수정'))),
                     if (onDelete != null)
                       PopupMenuItem(
                         value: 'delete',
                         child: Text(
-                          '삭제',
+                          tr('삭제'),
                           style: TextStyle(color: theme.colorScheme.error),
                         ),
                       ),

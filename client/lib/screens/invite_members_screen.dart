@@ -12,6 +12,7 @@ import '../widgets/invite_result_dialog.dart';
 import '../widgets/room_options_menu.dart' show CloseWhenRoomRemoved;
 import '../widgets/user_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
+import '../l10n/tr.dart';
 
 /// "멤버 초대하기"를 연다 — 넓은 화면(PC)은 떠 있는 창, 좁은 화면(모바일)은 전체 화면. 채팅 헤더의
 /// 초대 버튼, 참여 멤버 창, 새 토픽을 만든 직후가 같이 쓴다.
@@ -125,7 +126,7 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
-      if (mounted) showAppToast(context, '초대하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('초대하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -134,19 +135,19 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
   @override
   Widget build(BuildContext context) {
     return MemberPickerFrame(
-      title: '멤버 초대하기',
+      title: tr('멤버 초대하기'),
       asDialog: widget.asDialog,
       child: MemberPicker(
         session: widget.session,
         excludeIds: _memberIds,
-        emptySelectedText: '초대할 멤버를 선택하세요.',
-        noMembersText: '초대할 수 있는 멤버가 없습니다.',
+        emptySelectedText: tr('초대할 멤버를 선택하세요.'),
+        noMembersText: tr('초대할 수 있는 멤버가 없습니다.'),
         actionsBuilder: (context, selected, _) => Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextButton(
               onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-              child: const Text('닫기'),
+              child: Text(tr('닫기')),
             ),
             const SizedBox(width: 8),
             FilledButton(
@@ -160,7 +161,11 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : Text(
-                      selected.isEmpty ? '초대하기' : '초대하기 (${selected.length})',
+                      selected.isEmpty
+                          ? tr('초대하기')
+                          : tr('초대하기 ({selected.length})', {
+                              'selected.length': selected.length,
+                            }),
                     ),
             ),
           ],
@@ -202,14 +207,14 @@ class PickMembersScreen extends StatelessWidget {
         session: session,
         excludeIds: {?session.userId},
         initialSelected: initialSelected,
-        emptySelectedText: '함께할 멤버를 선택하세요.',
-        noMembersText: '선택할 수 있는 멤버가 없습니다.',
+        emptySelectedText: tr('함께할 멤버를 선택하세요.'),
+        noMembersText: tr('선택할 수 있는 멤버가 없습니다.'),
         actionsBuilder: (context, selected, _) => Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('취소'),
+              child: Text(tr('취소')),
             ),
             const SizedBox(width: 8),
             FilledButton(
@@ -219,8 +224,8 @@ class PickMembersScreen extends StatelessWidget {
                   : () => Navigator.of(context).pop(selected),
               child: Text(
                 selected.isEmpty
-                    ? confirmLabel
-                    : '$confirmLabel (${selected.length})',
+                    ? tr(confirmLabel)
+                    : '${tr(confirmLabel)} (${selected.length})',
               ),
             ),
           ],
@@ -254,7 +259,7 @@ class MemberPickerFrame extends StatelessWidget {
       );
     }
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(title: Text(tr(title))),
       body: SafeArea(
         child: Padding(padding: const EdgeInsets.all(16), child: child),
       ),
@@ -375,7 +380,7 @@ class _MemberPickerState extends State<MemberPicker> {
       setState(
         () => _error = e is ApiException
             ? e.message
-            : '팀 멤버를 불러오지 못했습니다. 잠시 후 다시 시도하세요.',
+            : tr('팀 멤버를 불러오지 못했습니다. 잠시 후 다시 시도하세요.'),
       );
     }
   }
@@ -407,9 +412,9 @@ class _MemberPickerState extends State<MemberPicker> {
             .toList()
           ..sort();
     return [
-      (_allPositions, '전체'),
+      (_allPositions, tr('전체')),
       for (final l in {...labels, ...extra}) (l, l),
-      if (users.any((u) => _positionOf(u) == null)) (_noPosition, '직책 없음'),
+      if (users.any((u) => _positionOf(u) == null)) (_noPosition, tr('직책 없음')),
     ];
   }
 
@@ -489,7 +494,7 @@ class _MemberPickerState extends State<MemberPicker> {
                     key: const ValueKey('member-picker-retry'),
                     onPressed: _retry,
                     icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('다시 시도'),
+                    label: Text(tr('다시 시도')),
                   ),
                 ],
               ),
@@ -581,7 +586,12 @@ class _MemberPickerState extends State<MemberPicker> {
                 ),
                 if (selectedUsers.isNotEmpty) ...[
                   const SizedBox(height: 12),
-                  _paneLabel(context, '선택된 멤버 ${selectedUsers.length}'),
+                  _paneLabel(
+                    context,
+                    tr('선택된 멤버 {selectedUsers.length}', {
+                      'selectedUsers.length': selectedUsers.length,
+                    }),
+                  ),
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxHeight: 96),
                     child: SingleChildScrollView(
@@ -652,7 +662,7 @@ class _MemberPickerState extends State<MemberPicker> {
     // 검색 칸과 직책 드롭다운을 같은 회색 상자(_fieldBox)에 넣어 높이를 똑같이 맞춘다.
     final search = _labeled(
       context,
-      '멤버 검색',
+      tr('멤버 검색'),
       _fieldBox(
         context,
         TextField(
@@ -661,10 +671,10 @@ class _MemberPickerState extends State<MemberPicker> {
           onChanged: (_) => setState(() {}),
           style: const TextStyle(fontSize: 14),
           textAlignVertical: TextAlignVertical.center,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             isDense: true,
             border: InputBorder.none,
-            hintText: '검색어를 입력하세요.',
+            hintText: tr('검색어를 입력하세요.'),
             prefixIcon: Icon(Icons.search, size: 20),
             prefixIconConstraints: BoxConstraints(minWidth: 36),
             contentPadding: EdgeInsets.symmetric(vertical: 10),
@@ -681,7 +691,7 @@ class _MemberPickerState extends State<MemberPicker> {
     // 폼 필드가 아닌 DropdownButton을 쓴다 — "검색 조건 초기화"로 값을 바꾸면 바로 따라와야 해서.
     final position = _labeled(
       context,
-      '직책',
+      tr('직책'),
       _fieldBox(
         context,
         DropdownButtonHideUnderline(
@@ -730,7 +740,7 @@ class _MemberPickerState extends State<MemberPicker> {
   Widget _resetButton() => OutlinedButton.icon(
     onPressed: _hasConditions ? _resetConditions : null,
     icon: const Icon(Icons.refresh, size: 18),
-    label: const Text('검색 조건 초기화'),
+    label: Text(tr('검색 조건 초기화')),
   );
 
   /// 검색 칸·드롭다운이 함께 쓰는 회색 입력 상자(높이 44).
@@ -817,7 +827,11 @@ class _MemberPickerState extends State<MemberPicker> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _paneLabel(context, '팀 멤버 ${visible.length}', trailing: labelTrailing),
+        _paneLabel(
+          context,
+          tr('팀 멤버 {visible.length}', {'visible.length': visible.length}),
+          trailing: labelTrailing,
+        ),
         Expanded(
           child: Container(
             decoration: BoxDecoration(
@@ -852,8 +866,8 @@ class _MemberPickerState extends State<MemberPicker> {
                                   ? (_) => _toggleAll(visible)
                                   : null,
                             ),
-                            const Text(
-                              '모든 멤버 선택하기',
+                            Text(
+                              tr('모든 멤버 선택하기'),
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
@@ -871,7 +885,7 @@ class _MemberPickerState extends State<MemberPicker> {
                       ? _EmptyText(
                           _users!.isEmpty
                               ? widget.noMembersText
-                              : '조회 가능한 멤버가 없습니다.',
+                              : tr('조회 가능한 멤버가 없습니다.'),
                         )
                       : ListView.builder(
                           itemCount: visible.length,
@@ -903,7 +917,12 @@ class _MemberPickerState extends State<MemberPicker> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _paneLabel(context, '선택된 멤버 ${selectedUsers.length}'),
+        _paneLabel(
+          context,
+          tr('선택된 멤버 {selectedUsers.length}', {
+            'selectedUsers.length': selectedUsers.length,
+          }),
+        ),
         Expanded(
           child: Container(
             decoration: BoxDecoration(
@@ -1013,7 +1032,7 @@ class _MemberRow extends StatelessWidget {
                 ),
                 if (onRemove != null)
                   IconButton(
-                    tooltip: '선택 해제',
+                    tooltip: tr('선택 해제'),
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.close, size: 18),
                     onPressed: onRemove,

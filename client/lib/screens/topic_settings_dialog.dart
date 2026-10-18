@@ -16,6 +16,7 @@ import '../widgets/user_avatar.dart';
 import 'create_topic_screen.dart' show TopicVisibilityTile;
 import 'home_screen.dart' show wideBreakpoint;
 import 'topic_members_dialog.dart';
+import '../l10n/tr.dart';
 
 /// 토픽 정보 변경하기의 탭 — 마지막 토픽 관리자가 나가려다 막히면 "토픽 멤버 관리"로 바로 연다.
 enum TopicSettingsTab { settings, members }
@@ -120,7 +121,7 @@ class _TopicSettingsScreenState extends State<TopicSettingsScreen>
     if (room == null || room.canManage(widget.session)) return;
     _closing = true;
     if (!_leavingAdmin) {
-      showAppToast(context, '토픽을 관리할 수 있는 권한이 없어져 창을 닫았습니다.');
+      showAppToast(context, tr('토픽을 관리할 수 있는 권한이 없어져 창을 닫았습니다.'));
     }
     closeOwnRoute(context);
   }
@@ -134,9 +135,9 @@ class _TopicSettingsScreenState extends State<TopicSettingsScreen>
   Widget build(BuildContext context) {
     final tabBar = TabBar(
       controller: _tabs,
-      tabs: const [
-        Tab(text: '토픽 설정'),
-        Tab(text: '토픽 멤버 관리'),
+      tabs: [
+        Tab(text: tr('토픽 설정')),
+        Tab(text: tr('토픽 멤버 관리')),
       ],
     );
     final views = TabBarView(
@@ -158,7 +159,7 @@ class _TopicSettingsScreenState extends State<TopicSettingsScreen>
     );
     if (widget.asDialog) {
       return FloatingDialog(
-        title: '토픽 정보 변경하기',
+        title: tr('토픽 정보 변경하기'),
         maxWidth: 600,
         maxHeight: 760,
         child: Column(
@@ -172,7 +173,7 @@ class _TopicSettingsScreenState extends State<TopicSettingsScreen>
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('토픽 정보 변경하기'), bottom: tabBar),
+      appBar: AppBar(title: Text(tr('토픽 정보 변경하기')), bottom: tabBar),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -309,7 +310,7 @@ class _SettingsTabState extends State<_SettingsTab>
     final room = _room;
     final name = _name.text.trim();
     if (name.isEmpty) {
-      setState(() => _nameError = '토픽 이름을 입력하세요.');
+      setState(() => _nameError = tr('토픽 이름을 입력하세요.'));
       return;
     }
     final description = _description.text.trim();
@@ -332,9 +333,9 @@ class _SettingsTabState extends State<_SettingsTab>
             : null,
         quietLeave: _quietLeave != room.quietLeave ? _quietLeave : null,
       );
-      if (mounted) showAppToast(context, '토픽 정보를 저장했습니다.');
+      if (mounted) showAppToast(context, tr('토픽 정보를 저장했습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -347,26 +348,29 @@ class _SettingsTabState extends State<_SettingsTab>
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(archiving ? '토픽 보관' : '토픽 보관 해제'),
+        title: Text(archiving ? tr('토픽 보관') : tr('토픽 보관 해제')),
         content: SizedBox(
           width: 360,
           child: Text(
             archiving
-                ? "'$name' 토픽을 보관할까요?\n\n보관한 토픽은 목록의 '보관된 토픽'으로 옮겨지고, "
-                      '읽기 전용이 되어 토픽 관리자만 글을 쓸 수 있습니다. 메시지와 파일은 그대로 '
-                      '남고, 언제든 보관을 해제할 수 있습니다.'
-                : "'$name' 토픽의 보관을 해제할까요?\n\n토픽 목록으로 다시 돌아오고, 멤버가 다시 "
-                      '글을 쓸 수 있습니다(읽기 전용 설정이 켜져 있으면 토픽 관리자만).',
+                ? tr(
+                    '\'{name}\' 토픽을 보관할까요?\n\n보관한 토픽은 목록의 \'보관된 토픽\'으로 옮겨지고, 읽기 전용이 되어 토픽 관리자만 글을 쓸 수 있습니다. 메시지와 파일은 그대로 남고, 언제든 보관을 해제할 수 있습니다.',
+                    {'name': name},
+                  )
+                : tr(
+                    '\'{name}\' 토픽의 보관을 해제할까요?\n\n토픽 목록으로 다시 돌아오고, 멤버가 다시 글을 쓸 수 있습니다(읽기 전용 설정이 켜져 있으면 토픽 관리자만).',
+                    {'name': name},
+                  ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(archiving ? '보관' : '보관 해제'),
+            child: Text(archiving ? tr('보관') : tr('보관 해제')),
           ),
         ],
       ),
@@ -376,10 +380,13 @@ class _SettingsTabState extends State<_SettingsTab>
     try {
       await widget.session.setTopicArchived(room.id, archiving);
       if (mounted) {
-        showAppToast(context, archiving ? '토픽을 보관했습니다.' : '토픽 보관을 해제했습니다.');
+        showAppToast(
+          context,
+          archiving ? tr('토픽을 보관했습니다.') : tr('토픽 보관을 해제했습니다.'),
+        );
       }
     } catch (e) {
-      if (mounted) showAppToast(context, '바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('바꾸지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _archiving = false);
     }
@@ -399,12 +406,12 @@ class _SettingsTabState extends State<_SettingsTab>
       // 목록에서 이미 빠졌다 — 이 기기에는 room:removed 안내가 안 오므로 여기서 알린다. 창과
       // 대화 화면은 방이 사라진 것을 보고 각자 닫힌다(대화 패널·모바일 대화 화면).
       if (!mounted) return;
-      showAppToast(context, "'$name' 토픽을 삭제했습니다.");
+      showAppToast(context, tr('\'{name}\' 토픽을 삭제했습니다.', {'name': name}));
       widget.onDeleted();
     } catch (e) {
       if (!mounted) return;
       setState(() => _deleting = false);
-      showAppToast(context, '토픽을 삭제하지 못했습니다: $e');
+      showAppToast(context, tr('토픽을 삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -420,14 +427,14 @@ class _SettingsTabState extends State<_SettingsTab>
     final form = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _FieldLabel('이름'),
+        _FieldLabel(tr('이름')),
         TextField(
           key: const ValueKey('topic-settings-name'),
           controller: _name,
           maxLength: topicNameMaxLength,
           textInputAction: TextInputAction.done,
           decoration: InputDecoration(
-            hintText: '토픽 이름을 입력하세요',
+            hintText: tr('토픽 이름을 입력하세요'),
             border: const OutlineInputBorder(),
             isDense: true,
             errorText: _nameError,
@@ -436,25 +443,25 @@ class _SettingsTabState extends State<_SettingsTab>
           onSubmitted: (_) => _save(),
         ),
         const SizedBox(height: 12),
-        const _FieldLabel('토픽 설명', optional: true),
+        _FieldLabel(tr('토픽 설명'), optional: true),
         TextField(
           key: const ValueKey('topic-settings-description'),
           controller: _description,
           maxLength: topicDescriptionMaxLength,
           minLines: 2,
           maxLines: 4,
-          decoration: const InputDecoration(
-            hintText: '어떤 이야기를 나누는 토픽인지 적어 주세요',
+          decoration: InputDecoration(
+            hintText: tr('어떤 이야기를 나누는 토픽인지 적어 주세요'),
             border: OutlineInputBorder(),
             isDense: true,
           ),
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 12),
-        const _FieldLabel('보기 방식'),
+        _FieldLabel(tr('보기 방식')),
         _ViewModeReadOnly(viewMode: room.viewMode),
         const SizedBox(height: 20),
-        const _FieldLabel('공개 여부'),
+        _FieldLabel(tr('공개 여부')),
         RadioGroup<bool>(
           groupValue: _isPublic,
           onChanged: (v) => setState(() => _isPublic = v ?? _isPublic),
@@ -476,8 +483,10 @@ class _SettingsTabState extends State<_SettingsTab>
             key: const ValueKey('topic-settings-visibility-notice'),
             icon: Icons.info_outline,
             text: _isPublic
-                ? '공개로 바꾸면 정회원 누구나 이 토픽을 찾아 참여할 수 있고, 참여하면 이전 메시지도 볼 수 있습니다.'
-                : '비공개로 바꾸면 이후에는 초대된 멤버만 참여할 수 있습니다. 지금 멤버는 그대로 남습니다.',
+                ? tr(
+                    '공개로 바꾸면 정회원 누구나 이 토픽을 찾아 참여할 수 있고, 참여하면 이전 메시지도 볼 수 있습니다.',
+                  )
+                : tr('비공개로 바꾸면 이후에는 초대된 멤버만 참여할 수 있습니다. 지금 멤버는 그대로 남습니다.'),
           ),
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 12),
@@ -488,20 +497,21 @@ class _SettingsTabState extends State<_SettingsTab>
           contentPadding: EdgeInsets.zero,
           value: _quietLeave,
           onChanged: (v) => setState(() => _quietLeave = v),
-          title: const Text('조용히 나가기'),
-          subtitle: Text('멤버가 나가거나 내보내져도 안내 메시지를 남기지 않습니다', style: small),
+          title: Text(tr('조용히 나가기')),
+          subtitle: Text(tr('멤버가 나가거나 내보내져도 안내 메시지를 남기지 않습니다'), style: small),
         ),
         SwitchListTile(
           key: const ValueKey('topic-settings-auto-invite'),
           contentPadding: EdgeInsets.zero,
           value: _effectiveAutoInvite,
           onChanged: _isPublic ? (v) => setState(() => _autoInvite = v) : null,
-          title: const Text('정회원 자동 초대'),
+          title: Text(tr('정회원 자동 초대')),
           subtitle: Text(
             _isPublic
-                ? '새로 팀에 들어오는 정회원을 이 토픽에 자동으로 초대합니다. '
-                      '설정한 뒤 새로 팀에 들어오는 정회원부터 적용됩니다'
-                : '비공개 토픽은 자동 초대를 쓸 수 없습니다',
+                ? tr(
+                    '새로 팀에 들어오는 정회원을 이 토픽에 자동으로 초대합니다. 설정한 뒤 새로 팀에 들어오는 정회원부터 적용됩니다',
+                  )
+                : tr('비공개 토픽은 자동 초대를 쓸 수 없습니다'),
             style: small,
           ),
         ),
@@ -510,8 +520,8 @@ class _SettingsTabState extends State<_SettingsTab>
           contentPadding: EdgeInsets.zero,
           value: _readOnly,
           onChanged: (v) => setState(() => _readOnly = v),
-          title: const Text('읽기 전용 설정'),
-          subtitle: Text('토픽 관리자만 글을 쓸 수 있고, 다른 멤버는 읽기만 합니다', style: small),
+          title: Text(tr('읽기 전용 설정')),
+          subtitle: Text(tr('토픽 관리자만 글을 쓸 수 있고, 다른 멤버는 읽기만 합니다'), style: small),
         ),
         // 보관·삭제는 [저장]과 따로, 누르는 즉시(확인을 거쳐) 실행된다.
         const Padding(
@@ -519,12 +529,13 @@ class _SettingsTabState extends State<_SettingsTab>
           child: Divider(height: 1),
         ),
         _DangerCard(
-          title: room.isArchived ? '토픽 보관 해제' : '토픽 보관',
+          title: room.isArchived ? tr('토픽 보관 해제') : tr('토픽 보관'),
           description: room.isArchived
-              ? '보관된 토픽입니다. 보관을 해제하면 토픽 목록으로 돌아오고 멤버가 다시 글을 쓸 수 있습니다.'
-              : "보관하면 목록의 '보관된 토픽'으로 옮겨지고 읽기 전용이 됩니다. 내용은 그대로 남고, "
-                    '언제든 해제할 수 있습니다.',
-          badge: room.isArchived ? const TopicBadge.archived() : null,
+              ? tr('보관된 토픽입니다. 보관을 해제하면 토픽 목록으로 돌아오고 멤버가 다시 글을 쓸 수 있습니다.')
+              : tr(
+                  '보관하면 목록의 \'보관된 토픽\'으로 옮겨지고 읽기 전용이 됩니다. 내용은 그대로 남고, 언제든 해제할 수 있습니다.',
+                ),
+          badge: room.isArchived ? TopicBadge.archived() : null,
           action: OutlinedButton.icon(
             key: const ValueKey('topic-settings-archive'),
             onPressed: _archiving || _deleting ? null : _toggleArchived,
@@ -534,14 +545,14 @@ class _SettingsTabState extends State<_SettingsTab>
                   : Icons.inventory_2_outlined,
               size: 18,
             ),
-            label: Text(room.isArchived ? '보관 해제' : '토픽 보관'),
+            label: Text(room.isArchived ? tr('보관 해제') : tr('토픽 보관')),
           ),
         ),
         const SizedBox(height: 12),
         _DangerCard(
           danger: true,
-          title: '토픽 삭제',
-          description: '토픽을 삭제하면 모든 멤버의 목록에서 사라지고, 메시지와 파일은 복구되지 않습니다.',
+          title: tr('토픽 삭제'),
+          description: tr('토픽을 삭제하면 모든 멤버의 목록에서 사라지고, 메시지와 파일은 복구되지 않습니다.'),
           action: FilledButton.icon(
             key: const ValueKey('topic-settings-delete'),
             style: FilledButton.styleFrom(
@@ -559,7 +570,7 @@ class _SettingsTabState extends State<_SettingsTab>
                     ),
                   )
                 : const Icon(Icons.delete_outline, size: 18),
-            label: const Text('토픽 삭제'),
+            label: Text(tr('토픽 삭제')),
           ),
         ),
         const SizedBox(height: 8),
@@ -588,7 +599,9 @@ class _SettingsTabState extends State<_SettingsTab>
           children: [
             Expanded(
               child: Text(
-                dirty ? '저장하지 않은 변경 사항이 있습니다.' : '바꾼 내용이 있으면 저장할 수 있습니다.',
+                dirty
+                    ? tr('저장하지 않은 변경 사항이 있습니다.')
+                    : tr('바꾼 내용이 있으면 저장할 수 있습니다.'),
                 style: TextStyle(
                   fontSize: 12,
                   color: dirty ? theme.colorScheme.primary : hint,
@@ -605,7 +618,7 @@ class _SettingsTabState extends State<_SettingsTab>
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('저장'),
+                  : Text(tr('저장')),
             ),
           ],
         ),
@@ -632,7 +645,7 @@ class _FieldLabel extends StatelessWidget {
           ),
           if (optional)
             TextSpan(
-              text: '  (선택)',
+              text: tr('  (선택)'),
               style: TextStyle(
                 fontSize: 12,
                 color: Theme.of(context).hintColor,
@@ -698,7 +711,7 @@ class _ViewModeReadOnly extends StatelessWidget {
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
-                        '만든 뒤에는 바꿀 수 없습니다',
+                        tr('만든 뒤에는 바꿀 수 없습니다'),
                         style: TextStyle(fontSize: 11, color: theme.hintColor),
                       ),
                     ),
@@ -831,17 +844,19 @@ class _DeleteTopicDialogState extends State<_DeleteTopicDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
-      title: const Text('토픽 삭제'),
+      title: Text(tr('토픽 삭제')),
       content: SizedBox(
         width: 360,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("'${widget.name}' 토픽을 삭제할까요?"),
+            Text(
+              tr('\'{widget.name}\' 토픽을 삭제할까요?', {'widget.name': widget.name}),
+            ),
             const SizedBox(height: 8),
             Text(
-              '삭제된 토픽의 메시지와 파일은 복구되지 않습니다.',
+              tr('삭제된 토픽의 메시지와 파일은 복구되지 않습니다.'),
               style: TextStyle(
                 color: theme.colorScheme.error,
                 fontWeight: FontWeight.w600,
@@ -849,7 +864,7 @@ class _DeleteTopicDialogState extends State<_DeleteTopicDialog> {
             ),
             const SizedBox(height: 16),
             Text(
-              '계속하려면 토픽 이름을 그대로 입력하세요.',
+              tr('계속하려면 토픽 이름을 그대로 입력하세요.'),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
@@ -875,7 +890,7 @@ class _DeleteTopicDialogState extends State<_DeleteTopicDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('topic-delete-confirm'),
@@ -884,7 +899,7 @@ class _DeleteTopicDialogState extends State<_DeleteTopicDialog> {
             backgroundColor: theme.colorScheme.error,
             foregroundColor: theme.colorScheme.onError,
           ),
-          child: const Text('삭제'),
+          child: Text(tr('삭제')),
         ),
       ],
     );
@@ -969,10 +984,12 @@ class _MembersTabState extends State<_MembersTab>
     try {
       await session.setTopicAdmins(room.id, ids);
       _adminsEdited = false;
-      if (mounted) showAppToast(context, '토픽 관리자를 저장했습니다.');
+      if (mounted) showAppToast(context, tr('토픽 관리자를 저장했습니다.'));
     } catch (e) {
       widget.onLeavingAdmin(false);
-      if (mounted) showAppToast(context, '토픽 관리자를 저장하지 못했습니다: $e');
+      if (mounted) {
+        showAppToast(context, tr('토픽 관리자를 저장하지 못했습니다: {e}', {'e': e}));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -989,12 +1006,16 @@ class _MembersTabState extends State<_MembersTab>
         showAppToast(
           context,
           targets.length == 1
-              ? "'${targets.single.name}' 님을 내보냈습니다."
-              : '멤버 ${targets.length}명을 내보냈습니다.',
+              ? tr('\'{targets.single.name}\' 님을 내보냈습니다.', {
+                  'targets.single.name': targets.single.name,
+                })
+              : tr('멤버 {targets.length}명을 내보냈습니다.', {
+                  'targets.length': targets.length,
+                }),
         );
       }
     } catch (e) {
-      if (mounted) showAppToast(context, '내보내지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('내보내지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1038,9 +1059,12 @@ class _MembersTabState extends State<_MembersTab>
       children: [
         SegmentedButton<_MemberMode>(
           showSelectedIcon: false,
-          segments: const [
-            ButtonSegment(value: _MemberMode.admins, label: Text('토픽 관리자 지정')),
-            ButtonSegment(value: _MemberMode.kick, label: Text('멤버 내보내기')),
+          segments: [
+            ButtonSegment(
+              value: _MemberMode.admins,
+              label: Text(tr('토픽 관리자 지정')),
+            ),
+            ButtonSegment(value: _MemberMode.kick, label: Text(tr('멤버 내보내기'))),
           ],
           selected: {_mode},
           onSelectionChanged: (s) => setState(() => _mode = s.first),
@@ -1049,7 +1073,7 @@ class _MembersTabState extends State<_MembersTab>
         TopicSearchField(
           fieldKey: const ValueKey('topic-manage-search'),
           controller: _search,
-          hintText: '이름이나 직책으로 검색',
+          hintText: tr('이름이나 직책으로 검색'),
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 10),
@@ -1083,23 +1107,23 @@ class _MembersTabState extends State<_MembersTab>
         !_isTeamManagerOf(session, room);
     final status = none
         ? Text(
-            '토픽 관리자를 한 명 이상 지정하세요.',
+            tr('토픽 관리자를 한 명 이상 지정하세요.'),
             style: TextStyle(fontSize: 12, color: theme.colorScheme.error),
           )
         : leavingSelf
         ? Text(
-            '나를 빼면 저장한 뒤 이 토픽을 관리할 수 없습니다.',
+            tr('나를 빼면 저장한 뒤 이 토픽을 관리할 수 없습니다.'),
             style: TextStyle(fontSize: 12, color: theme.colorScheme.error),
           )
         : Text(
-            '토픽 관리자 ${_admins.length}명',
+            tr('토픽 관리자 {_admins.length}명', {'_admins.length': _admins.length}),
             style: TextStyle(fontSize: 13, color: theme.hintColor),
           );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '토픽 관리자는 토픽 정보를 바꾸고 멤버를 내보낼 수 있습니다. 정회원 이상 멤버만 지정할 수 있습니다.',
+          tr('토픽 관리자는 토픽 정보를 바꾸고 멤버를 내보낼 수 있습니다. 정회원 이상 멤버만 지정할 수 있습니다.'),
           style: TextStyle(fontSize: 12, color: theme.hintColor),
         ),
         const SizedBox(height: 8),
@@ -1108,8 +1132,8 @@ class _MembersTabState extends State<_MembersTab>
             child: visible.isEmpty
                 ? _EmptyText(
                     eligible.isEmpty
-                        ? '토픽 관리자로 지정할 수 있는 정회원 이상 멤버가 없습니다.'
-                        : '검색 결과가 없습니다.',
+                        ? tr('토픽 관리자로 지정할 수 있는 정회원 이상 멤버가 없습니다.')
+                        : tr('검색 결과가 없습니다.'),
                   )
                 : _scrollable(
                     ListView.builder(
@@ -1157,7 +1181,7 @@ class _MembersTabState extends State<_MembersTab>
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('저장'),
+                  : Text(tr('저장')),
             ),
           ],
         ),
@@ -1200,8 +1224,8 @@ class _MembersTabState extends State<_MembersTab>
       children: [
         Text(
           adminsProtected
-              ? '내보낸 멤버는 이 토픽을 더 볼 수 없습니다. 토픽 관리자는 다른 토픽 관리자를 내보낼 수 없습니다.'
-              : '내보낸 멤버는 이 토픽을 더 볼 수 없습니다. 공개 토픽이면 다시 찾아서 참여할 수 있습니다.',
+              ? tr('내보낸 멤버는 이 토픽을 더 볼 수 없습니다. 토픽 관리자는 다른 토픽 관리자를 내보낼 수 없습니다.')
+              : tr('내보낸 멤버는 이 토픽을 더 볼 수 없습니다. 공개 토픽이면 다시 찾아서 참여할 수 있습니다.'),
           style: TextStyle(fontSize: 12, color: theme.hintColor),
         ),
         const SizedBox(height: 8),
@@ -1245,8 +1269,8 @@ class _MembersTabState extends State<_MembersTab>
                                     }
                                   }),
                           ),
-                          const Text(
-                            '모든 멤버 선택',
+                          Text(
+                            tr('모든 멤버 선택'),
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
@@ -1262,8 +1286,8 @@ class _MembersTabState extends State<_MembersTab>
                   child: others.isEmpty
                       ? _EmptyText(
                           room.members.length <= 1
-                              ? '나 말고 다른 멤버가 없습니다.'
-                              : '검색 결과가 없습니다.',
+                              ? tr('나 말고 다른 멤버가 없습니다.')
+                              : tr('검색 결과가 없습니다.'),
                         )
                       : _scrollable(
                           ListView.builder(
@@ -1302,7 +1326,9 @@ class _MembersTabState extends State<_MembersTab>
           children: [
             Expanded(
               child: Text(
-                '선택한 멤버 ${selected.length}명',
+                tr('선택한 멤버 {selected.length}명', {
+                  'selected.length': selected.length,
+                }),
                 style: TextStyle(fontSize: 13, color: theme.hintColor),
               ),
             ),
@@ -1325,7 +1351,7 @@ class _MembersTabState extends State<_MembersTab>
                         color: theme.colorScheme.onError,
                       ),
                     )
-                  : const Text('내보내기'),
+                  : Text(tr('내보내기')),
             ),
           ],
         ),
@@ -1428,7 +1454,7 @@ class _CheckRow extends StatelessWidget {
                             TextSpan(text: member.name),
                             if (isMe)
                               TextSpan(
-                                text: ' (나)',
+                                text: tr(' (나)'),
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.normal,

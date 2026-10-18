@@ -4,6 +4,7 @@ import '../../models/calendar.dart';
 import '../../services/calendar_controller.dart';
 import '../../services/calendar_search.dart';
 import 'calendar_common.dart';
+import '../../l10n/tr.dart';
 
 /// 캘린더 일정 검색 화면 조각 — PC 툴바의 검색창([CalendarSearchField])과 그 아래 결과 패널, 모바일 전체 화면 검색
 /// ([CalendarSearchScreen])이 같은 [CalendarSearchResults]를 쓴다. 일정 **제목**만 검색한다(참석자·내용은 안 됨).
@@ -74,14 +75,14 @@ class _CalendarSearchFieldState extends State<CalendarSearchField> {
         style: const TextStyle(fontSize: 14),
         decoration: InputDecoration(
           isDense: true,
-          hintText: '일정 제목 검색',
+          hintText: tr('일정 제목 검색'),
           prefixIcon: const Icon(Icons.search, size: 20),
           prefixIconConstraints: const BoxConstraints(minWidth: 36),
           suffixIcon: _text.text.isEmpty
               ? null
               : IconButton(
                   key: const ValueKey('cal-search-clear'),
-                  tooltip: '지우기',
+                  tooltip: tr('지우기'),
                   visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.close, size: 18),
                   onPressed: () {
@@ -158,7 +159,7 @@ class CalendarSearchResults extends StatelessWidget {
   Widget _body(BuildContext context) {
     final c = controller;
     if (!c.hasQuery) {
-      return _message(context, '일정 제목의 일부를 입력하세요.\n참석자·내용으로는 검색되지 않습니다.');
+      return _message(context, tr('일정 제목의 일부를 입력하세요.\n참석자·내용으로는 검색되지 않습니다.'));
     }
     final items = c.visibleItems;
     if (c.loading && items.isEmpty) {
@@ -183,7 +184,7 @@ class CalendarSearchResults extends StatelessWidget {
         action: TextButton(
           key: const ValueKey('cal-search-retry'),
           onPressed: c.search,
-          child: const Text('다시 시도'),
+          child: Text(tr('다시 시도')),
         ),
       );
     }
@@ -192,7 +193,7 @@ class CalendarSearchResults extends StatelessWidget {
       return const SizedBox(height: 56);
     }
     if (items.isEmpty && !c.hasMore) {
-      return _message(context, '검색 결과가 없습니다.');
+      return _message(context, tr('검색 결과가 없습니다.'));
     }
     return ListView(
       key: const ValueKey('cal-search-list'),
@@ -229,7 +230,7 @@ class CalendarSearchResults extends StatelessWidget {
                 : TextButton(
                     key: const ValueKey('cal-search-more'),
                     onPressed: c.loadMore,
-                    child: const Text('더 보기'),
+                    child: Text(tr('더 보기')),
                   ),
           ),
       ],
@@ -241,7 +242,9 @@ class CalendarSearchResults extends StatelessWidget {
 String? searchAttendeeText(CalendarSearchItem item) {
   final names = [for (final a in item.attendees) a.name];
   if (names.isEmpty) return null;
-  return names.length <= 2 ? '참석자 ${names.join(', ')}' : '참석자 ${names.length}명';
+  return names.length <= 2
+      ? tr('참석자 {p0}', {'p0': names.join(', ')})
+      : tr('참석자 {names.length}명', {'names.length': names.length});
 }
 
 /// 결과 한 줄 — 색 점 + 제목, 날짜·시간, 캘린더 이름, 반복·참석자 표시, 오른쪽 "이동" 버튼.
@@ -315,7 +318,7 @@ class CalendarSearchTile extends StatelessWidget {
                               color: theme.hintColor,
                             ),
                             const SizedBox(width: 2),
-                            Text('반복', style: hint),
+                            Text(tr('반복'), style: hint),
                           ],
                         ),
                       if (attendees != null) Text(attendees, style: hint),
@@ -332,7 +335,7 @@ class CalendarSearchTile extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 8),
               ),
               onPressed: onMove,
-              child: const Text('이동'),
+              child: Text(tr('이동')),
             ),
           ],
         ),

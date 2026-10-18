@@ -17,6 +17,7 @@ import '../widgets/sort_menu_button.dart';
 import '../widgets/team_avatar.dart';
 import '../widgets/user_avatar.dart';
 import 'team_invite_link_screen.dart';
+import '../l10n/tr.dart';
 
 /// 팀 설정(소유자·관리자만). "팀 정보"(이름·도메인·아이콘·초대 권한, 소유자에게는 소유권
 /// 이양/팀 삭제까지)와 "멤버"(추가·등급 변경·부서/직책·빼기) 두 탭으로 나뉜다.
@@ -157,7 +158,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   Future<void> _editIcon() async {
     final result = await showIconEditDialog(
       context,
-      title: '팀 아이콘 편집',
+      title: tr('팀 아이콘 편집'),
       session: widget.session,
       initial: _iconChoice,
       preview: (icon, size) => TeamAvatar(
@@ -206,7 +207,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
       );
       if (mounted) Navigator.of(context).pop(team);
     } catch (e) {
-      _toast('팀 생성 실패: $e');
+      _toast(tr('팀 생성 실패: {e}', {'e': e}));
       if (mounted) setState(() => _savingInfo = false);
     }
   }
@@ -230,9 +231,9 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
         messageEditDeleteEnabled: _messageEditDeleteEnabled,
         messageEditDeleteWindowSeconds: _messageEditDeleteWindow,
       );
-      if (mounted) showAppToast(context, '팀 정보를 저장했습니다.');
+      if (mounted) showAppToast(context, tr('팀 정보를 저장했습니다.'));
     } catch (e) {
-      _toast('저장 실패: $e');
+      _toast(tr('저장 실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _savingInfo = false);
     }
@@ -244,7 +245,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   Future<List<String>?> _pickTopicCreators() async {
     final members = _members;
     if (members == null) {
-      _toast('팀원 목록을 불러오는 중입니다. 잠시 후 다시 시도하세요.');
+      _toast(tr('팀원 목록을 불러오는 중입니다. 잠시 후 다시 시도하세요.'));
       return null;
     }
     final candidates = members
@@ -318,7 +319,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
       );
       if (mounted) setState(() => _members = members);
     } catch (e) {
-      _toast('실패: $e');
+      _toast(tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -326,12 +327,12 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
     // 서버는 팀에서 뺀 사람을 그 팀의 모든 방에서도 뺀다(teams.js의 팀원 빼기) — 지난 대화까지 못 보게
     // 되는 줄 모르고 누르지 않게 미리 알린다.
     final ok = await _confirm(
-      title: '팀에서 빼기',
-      message:
-          '${user.name} 님을 ${widget.team.name} 팀에서 뺄까요?\n'
-          '이 팀의 모든 대화방(토픽·그룹채팅·1:1 대화·비밀 대화)에서도 함께 빠지고, '
-          '지난 대화도 더 이상 볼 수 없습니다.',
-      confirmLabel: '빼기',
+      title: tr('팀에서 빼기'),
+      message: tr(
+        '{user.name} 님을 {widget.team.name} 팀에서 뺄까요?\n이 팀의 모든 대화방(토픽·그룹채팅·1:1 대화·비밀 대화)에서도 함께 빠지고, 지난 대화도 더 이상 볼 수 없습니다.',
+        {'user.name': user.name, 'widget.team.name': widget.team.name},
+      ),
+      confirmLabel: tr('빼기'),
     );
     if (ok != true || !mounted) return;
     try {
@@ -341,7 +342,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
       );
       if (mounted) setState(() => _members = members);
     } catch (e) {
-      _toast('실패: $e');
+      _toast(tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -375,11 +376,12 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
 
   Future<void> _transferOwnership(AppUser user) async {
     final ok = await _confirm(
-      title: '소유권 넘기기',
-      message:
-          '${user.name} 님을 이 팀의 소유자로 만들까요?\n'
-          '넘기고 나면 나는 관리자가 되고, 팀 삭제·소유권 이양은 더 이상 할 수 없습니다.',
-      confirmLabel: '넘기기',
+      title: tr('소유권 넘기기'),
+      message: tr(
+        '{user.name} 님을 이 팀의 소유자로 만들까요?\n넘기고 나면 나는 관리자가 되고, 팀 삭제·소유권 이양은 더 이상 할 수 없습니다.',
+        {'user.name': user.name},
+      ),
+      confirmLabel: tr('넘기기'),
     );
     if (ok != true || !mounted) return;
     try {
@@ -388,9 +390,9 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
         user.id,
       );
       if (mounted) setState(() => _members = members);
-      _toast('${user.name} 님에게 소유권을 넘겼습니다.');
+      _toast(tr('{user.name} 님에게 소유권을 넘겼습니다.', {'user.name': user.name}));
     } catch (e) {
-      _toast('실패: $e');
+      _toast(tr('실패: {e}', {'e': e}));
     }
   }
 
@@ -407,7 +409,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -429,7 +431,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
       // 서버가 team:left(deleted)를 보내서 팀 목록/방을 정리하고 토스트도 띄운다.
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      _toast('삭제 실패: $e');
+      _toast(tr('삭제 실패: {e}', {'e': e}));
     }
   }
 
@@ -438,7 +440,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
     if (widget.creating) {
       // 새 팀에는 아직 멤버가 없으니 "멤버" 탭 없이 팀 정보만 보여준다.
       return FloatingDialog(
-        title: '팀 생성하기',
+        title: tr('팀 생성하기'),
         maxWidth: 520,
         maxHeight: 700,
         padding: const EdgeInsets.fromLTRB(20, 20, 0, 20),
@@ -448,7 +450,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
     return DefaultTabController(
       length: 2,
       child: FloatingDialog(
-        title: '팀 설정',
+        title: tr('팀 설정'),
         maxWidth: 520,
         maxHeight: 700,
         // 오른쪽 여백을 0으로 줘서 "팀 정보" 탭의 스크롤 영역이 실제 레이아웃 상으로 창
@@ -459,12 +461,12 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(right: 20),
               child: TabBar(
                 tabs: [
-                  Tab(text: '팀 정보'),
-                  Tab(text: '멤버'),
+                  Tab(text: tr('팀 정보')),
+                  Tab(text: tr('멤버')),
                 ],
               ),
             ),
@@ -497,11 +499,11 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                 children: [
                   // 팀 아이콘(왼쪽)과 팀 이름(오른쪽)을 한 줄에 두고, 이름 입력칸은 아이콘
                   // 높이의 가운데에 맞춘다.
-                  const Row(
+                  Row(
                     children: [
-                      SizedBox(width: 72, child: _SectionLabel('팀 아이콘')),
+                      SizedBox(width: 72, child: _SectionLabel(tr('팀 아이콘'))),
                       SizedBox(width: 24),
-                      Expanded(child: _SectionLabel('팀 이름')),
+                      Expanded(child: _SectionLabel(tr('팀 이름'))),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -522,7 +524,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                           autofocus: widget.creating,
                           maxLength: 30,
                           decoration: InputDecoration(
-                            hintText: widget.creating ? '예: 개발팀' : null,
+                            hintText: widget.creating ? tr('예: 개발팀') : null,
                             border: const OutlineInputBorder(),
                             isDense: true,
                             // 글자 수 표시가 입력칸 아래에 붙으면 가운데 정렬이 어긋나서 숨긴다
@@ -542,10 +544,10 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                   if (widget.session.canCreateTeamInviteLink &&
                       !widget.creating) ...[
                     const _SectionDivider(),
-                    const _SectionLabel('팀 초대 링크'),
+                    _SectionLabel(tr('팀 초대 링크')),
                     const SizedBox(height: 4),
                     Text(
-                      '이 링크로 가입하면 자동으로 이 팀에 합류하고 지정한 등급이 함께 부여됩니다.',
+                      tr('이 링크로 가입하면 자동으로 이 팀에 합류하고 지정한 등급이 함께 부여됩니다.'),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).hintColor,
                       ),
@@ -560,16 +562,17 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                           initialTeamId: widget.team.id,
                         ),
                         icon: const Icon(Icons.group_add_outlined, size: 18),
-                        label: const Text('팀 초대 링크 생성'),
+                        label: Text(tr('팀 초대 링크 생성')),
                       ),
                     ),
                   ],
                   const _SectionDivider(),
-                  const _SectionLabel('토픽 생성 권한'),
+                  _SectionLabel(tr('토픽 생성 권한')),
                   const SizedBox(height: 4),
                   Text(
-                    '새 토픽을 만들 수 있는 등급입니다. 그룹채팅은 이 설정과 무관하게 정회원 '
-                    '이상이면 항상 만들 수 있고, 준회원은 어느 설정에서도 만들 수 없습니다.',
+                    tr(
+                      '새 토픽을 만들 수 있는 등급입니다. 그룹채팅은 이 설정과 무관하게 정회원 이상이면 항상 만들 수 있고, 준회원은 어느 설정에서도 만들 수 없습니다.',
+                    ),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).hintColor,
                     ),
@@ -595,31 +598,35 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                         Expanded(
                           child: Text(
                             _designatedTopicCreatorIds.isEmpty
-                                ? '지정된 사람 없음'
-                                : '지정된 사람: ${_designatedTopicCreatorNames()}',
+                                ? tr('지정된 사람 없음')
+                                : tr('지정된 사람: {p0}', {
+                                    'p0': _designatedTopicCreatorNames(),
+                                  }),
                             style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(color: Theme.of(context).hintColor),
                           ),
                         ),
                         TextButton(
                           onPressed: _editDesignatedTopicCreators,
-                          child: const Text('변경'),
+                          child: Text(tr('변경')),
                         ),
                       ],
                     ),
                   ],
                   const _SectionDivider(),
-                  const _SectionLabel('메시지 설정'),
+                  _SectionLabel(tr('메시지 설정')),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     value: _messageEditDeleteEnabled,
                     onChanged: (v) =>
                         setState(() => _messageEditDeleteEnabled = v),
-                    title: const Text('메시지 수정/삭제'),
+                    title: Text(tr('메시지 수정/삭제')),
                     subtitle: Text(
                       _messageEditDeleteEnabled
-                          ? '작성 후 정해진 시간 안에서만 메시지·댓글을 수정하거나 삭제할 수 있습니다.'
-                          : '이 팀에서는 아무도(소유자·관리자 포함) 메시지·댓글을 수정하거나 삭제할 수 없습니다.',
+                          ? tr('작성 후 정해진 시간 안에서만 메시지·댓글을 수정하거나 삭제할 수 있습니다.')
+                          : tr(
+                              '이 팀에서는 아무도(소유자·관리자 포함) 메시지·댓글을 수정하거나 삭제할 수 없습니다.',
+                            ),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).hintColor,
                       ),
@@ -627,10 +634,10 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                   ),
                   if (_messageEditDeleteEnabled) ...[
                     const SizedBox(height: 4),
-                    const _SectionLabel('수정/삭제 가능 시간'),
+                    _SectionLabel(tr('수정/삭제 가능 시간')),
                     const SizedBox(height: 4),
                     Text(
-                      '작성 후 이 시간이 지나면 본인 메시지도, 관리자의 콘텐츠 관리도 수정·삭제할 수 없습니다.',
+                      tr('작성 후 이 시간이 지나면 본인 메시지도, 관리자의 콘텐츠 관리도 수정·삭제할 수 없습니다.'),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).hintColor,
                       ),
@@ -654,12 +661,12 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                   if (_isOwner) ...[
                     const _SectionDivider(),
                     _SectionLabel(
-                      '팀 삭제',
+                      tr('팀 삭제'),
                       color: Theme.of(context).colorScheme.error,
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '이 팀의 모든 채팅방·메시지·댓글이 함께 사라지며 되돌릴 수 없습니다.',
+                      tr('이 팀의 모든 채팅방·메시지·댓글이 함께 사라지며 되돌릴 수 없습니다.'),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).hintColor,
                       ),
@@ -670,7 +677,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                       child: OutlinedButton.icon(
                         onPressed: _deleteTeam,
                         icon: const Icon(Icons.delete_outline, size: 18),
-                        label: const Text('팀 삭제하기'),
+                        label: Text(tr('팀 삭제하기')),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Theme.of(context).colorScheme.error,
                         ),
@@ -703,7 +710,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : Text(widget.creating ? '만들기' : '저장'),
+                  : Text(widget.creating ? tr('만들기') : tr('저장')),
             ),
           ),
         ),
@@ -725,11 +732,13 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
         children: [
           Row(
             children: [
-              Expanded(child: _SectionLabel('멤버 ${_members!.length}')),
+              Expanded(
+                child: _SectionLabel(tr('멤버 {p0}', {'p0': _members!.length})),
+              ),
               TextButton.icon(
                 onPressed: _addMembers,
                 icon: const Icon(Icons.person_add_alt, size: 18),
-                label: const Text('추가'),
+                label: Text(tr('추가')),
               ),
             ],
           ),
@@ -796,11 +805,11 @@ class _MembersTableHead extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          Expanded(flex: 9, child: Text('이름', style: style)),
+          Expanded(flex: 9, child: Text(tr('이름'), style: style)),
           const SizedBox(width: 16),
-          Expanded(flex: 5, child: Text('등급', style: style)),
+          Expanded(flex: 5, child: Text(tr('등급'), style: style)),
           const SizedBox(width: 16),
-          Expanded(flex: 5, child: Text('직책', style: style)),
+          Expanded(flex: 5, child: Text(tr('직책'), style: style)),
           SortMenuButton<MemberSortField>(
             fields: const [
               MemberSortField.name,
@@ -874,7 +883,7 @@ class _MemberRow extends StatelessWidget {
                         Padding(
                           padding: const EdgeInsets.only(left: 6),
                           child: Text(
-                            '(나)',
+                            tr('(나)'),
                             style: TextStyle(
                               fontSize: 12,
                               color: Theme.of(context).hintColor,
@@ -901,7 +910,7 @@ class _MemberRow extends StatelessWidget {
                 ),
                 if (user.isOwner)
                   RoleBadge(
-                    label: '소유자',
+                    label: tr('소유자'),
                     bg: ownerColors.bg,
                     fg: ownerColors.fg,
                   ),
@@ -912,7 +921,7 @@ class _MemberRow extends StatelessWidget {
           Expanded(
             flex: 5,
             child: Text(
-              user.position?.isNotEmpty == true ? user.position! : '미등록',
+              user.position?.isNotEmpty == true ? user.position! : tr('미등록'),
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: Theme.of(context).hintColor,
@@ -926,7 +935,7 @@ class _MemberRow extends StatelessWidget {
           SizedBox(
             width: sortMenuButtonWidth,
             child: PopupMenuButton<_MemberAction>(
-              tooltip: '팀원 관리',
+              tooltip: tr('팀원 관리'),
               position: PopupMenuPosition.under,
               onSelected: (action) => switch (action) {
                 _MemberAction.editOrg => onEditOrg(),
@@ -934,31 +943,31 @@ class _MemberRow extends StatelessWidget {
                 _MemberAction.remove => onRemove(),
               },
               itemBuilder: (context) => [
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: _MemberAction.editOrg,
                   child: Row(
                     children: [
                       Icon(Icons.badge_outlined, size: 20),
                       SizedBox(width: 8),
-                      Text('직책 수정'),
+                      Text(tr('직책 수정')),
                     ],
                   ),
                 ),
                 // 소유권 이양은 그 팀의 소유자만, 자기 자신 말고 다른 사람에게.
                 if (isTeamOwner && !isMe && !user.isOwner)
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: _MemberAction.transferOwnership,
                     child: Row(
                       children: [
                         Icon(Icons.workspace_premium_outlined, size: 20),
                         SizedBox(width: 8),
-                        Text('소유권 넘기기'),
+                        Text(tr('소유권 넘기기')),
                       ],
                     ),
                   ),
                 if (canRemove) ...[
                   const PopupMenuDivider(),
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: _MemberAction.remove,
                     child: Row(
                       children: [
@@ -969,7 +978,7 @@ class _MemberRow extends StatelessWidget {
                         ),
                         SizedBox(width: 8),
                         Text(
-                          '팀에서 빼기',
+                          tr('팀에서 빼기'),
                           style: TextStyle(color: Colors.redAccent),
                         ),
                       ],
@@ -1010,7 +1019,7 @@ class _DeleteTeamDialogState extends State<_DeleteTeamDialog> {
   Widget build(BuildContext context) {
     final matches = _controller.text.trim() == widget.team.name;
     return AlertDialog(
-      title: const Text('팀 삭제'),
+      title: Text(tr('팀 삭제')),
       content: SizedBox(
         width: 340,
         child: Column(
@@ -1018,11 +1027,14 @@ class _DeleteTeamDialogState extends State<_DeleteTeamDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              "'${widget.team.name}' 팀의 모든 채팅방·메시지·댓글이 영구히 삭제됩니다. 되돌릴 수 없습니다.",
+              tr(
+                '\'{widget.team.name}\' 팀의 모든 채팅방·메시지·댓글이 영구히 삭제됩니다. 되돌릴 수 없습니다.',
+                {'widget.team.name': widget.team.name},
+              ),
             ),
             const SizedBox(height: 12),
             Text(
-              '계속하려면 팀 이름을 그대로 입력하세요.',
+              tr('계속하려면 팀 이름을 그대로 입력하세요.'),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).hintColor,
               ),
@@ -1044,14 +1056,14 @@ class _DeleteTeamDialogState extends State<_DeleteTeamDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: matches ? () => Navigator.of(context).pop(true) : null,
           style: FilledButton.styleFrom(
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
-          child: const Text('영구 삭제'),
+          child: Text(tr('영구 삭제')),
         ),
       ],
     );
@@ -1149,7 +1161,7 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
     // 가입 규칙(4~20자)에 안 맞는 값은 서버에 묻지 않는다 — 그런 아이디는 없고, 찾기 횟수만 깎인다.
     if (username.length < 4 || username.length > 20) {
       setState(() {
-        _notice = '찾을 사람의 아이디를 정확히 입력하세요(4~20자).';
+        _notice = tr('찾을 사람의 아이디를 정확히 입력하세요(4~20자).');
         _noticeIsError = true;
       });
       return;
@@ -1166,9 +1178,10 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
       if (!mounted) return;
       if (found == null || widget.existingIds.contains(found.id)) {
         setState(() {
-          _notice =
-              "'$username' 아이디로 추가할 수 있는 사람이 없습니다. "
-              '아이디가 정확한지(대소문자까지), 이미 팀원은 아닌지 확인하세요.';
+          _notice = tr(
+            '\'{username}\' 아이디로 추가할 수 있는 사람이 없습니다. 아이디가 정확한지(대소문자까지), 이미 팀원은 아닌지 확인하세요.',
+            {'username': username},
+          );
           _noticeIsError = true;
         });
         return;
@@ -1177,7 +1190,7 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
         final list = _candidates!;
         if (!list.any((u) => u.id == found.id)) list.insert(0, found);
         _selected.add(found.id);
-        _notice = '${found.name} 님을 찾아 선택했습니다.';
+        _notice = tr('{found.name} 님을 찾아 선택했습니다.', {'found.name': found.name});
         _noticeIsError = false;
       });
     } catch (e) {
@@ -1204,7 +1217,7 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('추가 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('추가 실패: {e}', {'e': e}))));
       }
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -1217,8 +1230,8 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
     final field = TextField(
       key: const ValueKey('add-team-members-search'),
       controller: _search,
-      decoration: const InputDecoration(
-        hintText: '이름 또는 아이디',
+      decoration: InputDecoration(
+        hintText: tr('이름 또는 아이디'),
         isDense: true,
         prefixIcon: Icon(Icons.search, size: 18),
         border: OutlineInputBorder(),
@@ -1242,7 +1255,7 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
                   height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('아이디로 찾기'),
+              : Text(tr('아이디로 찾기')),
         ),
       ],
     );
@@ -1264,11 +1277,13 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
               child: Text(
                 _search.text.trim().isEmpty
                     ? (_complete
-                          ? '추가할 수 있는 사람이 없습니다.'
-                          : '팀을 같이 쓰는 사람 중에는 추가할 수 있는 사람이 없습니다.')
+                          ? tr('추가할 수 있는 사람이 없습니다.')
+                          : tr('팀을 같이 쓰는 사람 중에는 추가할 수 있는 사람이 없습니다.'))
                     : (_complete
-                          ? '검색 결과가 없습니다.'
-                          : "목록에 없는 사람입니다. 아이디를 정확히 입력했다면 '아이디로 찾기'를 누르세요."),
+                          ? tr('검색 결과가 없습니다.')
+                          : tr(
+                              '목록에 없는 사람입니다. 아이디를 정확히 입력했다면 \'아이디로 찾기\'를 누르세요.',
+                            )),
                 textAlign: TextAlign.center,
               ),
             ),
@@ -1306,7 +1321,7 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
 
     final small = theme.textTheme.bodySmall;
     return FloatingDialog(
-      title: '팀원 추가',
+      title: tr('팀원 추가'),
       maxWidth: 420,
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1317,9 +1332,16 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
             if (!_complete) ...[
               const SizedBox(height: 6),
               Text(
-                '팀을 같이 쓰는 사람만 목록에 나옵니다. 다른 사람은 아이디를 정확히 '
-                "입력하고 '아이디로 찾기'를 누르세요."
-                '${widget.session.canCreateTeamInviteLink ? " 새로 가입할 사람은 '팀 정보' 탭의 팀 초대 링크로 이 팀에 바로 들어오게 할 수 있습니다." : ''}',
+                tr(
+                  '팀을 같이 쓰는 사람만 목록에 나옵니다. 다른 사람은 아이디를 정확히 입력하고 \'아이디로 찾기\'를 누르세요.{p0}',
+                  {
+                    'p0': widget.session.canCreateTeamInviteLink
+                        ? tr(
+                            ' 새로 가입할 사람은 \'팀 정보\' 탭의 팀 초대 링크로 이 팀에 바로 들어오게 할 수 있습니다.',
+                          )
+                        : '',
+                  },
+                ),
                 style: small?.copyWith(color: theme.hintColor),
               ),
             ],
@@ -1345,7 +1367,7 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
                   onPressed: _submitting
                       ? null
                       : () => Navigator.of(context).pop(),
-                  child: const Text('취소'),
+                  child: Text(tr('취소')),
                 ),
               ),
               const SizedBox(width: 12),
@@ -1358,7 +1380,11 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
                           height: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : Text('추가하기 (${_selected.length})'),
+                      : Text(
+                          tr('추가하기 ({_selected.length})', {
+                            '_selected.length': _selected.length,
+                          }),
+                        ),
                 ),
               ),
             ],
@@ -1394,9 +1420,9 @@ class _DesignateTopicCreatorsDialogState
   @override
   Widget build(BuildContext context) {
     final list = widget.candidates.isEmpty
-        ? const Padding(
+        ? Padding(
             padding: EdgeInsets.symmetric(vertical: 20),
-            child: Center(child: Text('지정할 수 있는 정회원 이상 팀원이 없습니다.')),
+            child: Center(child: Text(tr('지정할 수 있는 정회원 이상 팀원이 없습니다.'))),
           )
         : ListView(
             shrinkWrap: true,
@@ -1427,14 +1453,14 @@ class _DesignateTopicCreatorsDialogState
           );
 
     return FloatingDialog(
-      title: '토픽 생성 권한 지정',
+      title: tr('토픽 생성 권한 지정'),
       maxWidth: 420,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '정회원 이상 중에서 새 토픽을 만들 수 있는 사람을 고르세요.',
+            tr('정회원 이상 중에서 새 토픽을 만들 수 있는 사람을 고르세요.'),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
@@ -1447,7 +1473,7 @@ class _DesignateTopicCreatorsDialogState
               Expanded(
                 child: OutlinedButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('취소'),
+                  child: Text(tr('취소')),
                 ),
               ),
               const SizedBox(width: 12),
@@ -1456,7 +1482,11 @@ class _DesignateTopicCreatorsDialogState
                   onPressed: _selected.isEmpty
                       ? null
                       : () => Navigator.of(context).pop(_selected.toList()),
-                  child: Text('확인 (${_selected.length})'),
+                  child: Text(
+                    tr('확인 ({_selected.length})', {
+                      '_selected.length': _selected.length,
+                    }),
+                  ),
                 ),
               ),
             ],
@@ -1521,7 +1551,7 @@ class _TeamIconPickerDialogState extends State<_TeamIconPickerDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '팀 아이콘 선택하기',
+                tr('팀 아이콘 선택하기'),
                 style: Theme.of(
                   context,
                 ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
@@ -1533,7 +1563,7 @@ class _TeamIconPickerDialogState extends State<_TeamIconPickerDialog> {
                 size: 88,
               ),
               const SizedBox(height: 16),
-              const _SectionLabel('아이콘'),
+              _SectionLabel(tr('아이콘')),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -1552,7 +1582,7 @@ class _TeamIconPickerDialogState extends State<_TeamIconPickerDialog> {
                 ],
               ),
               const SizedBox(height: 16),
-              const _SectionLabel('배경색'),
+              _SectionLabel(tr('배경색')),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 10,
@@ -1572,7 +1602,7 @@ class _TeamIconPickerDialogState extends State<_TeamIconPickerDialog> {
                   Expanded(
                     child: OutlinedButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('취소'),
+                      child: Text(tr('취소')),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1580,7 +1610,7 @@ class _TeamIconPickerDialogState extends State<_TeamIconPickerDialog> {
                     child: FilledButton(
                       onPressed: () =>
                           Navigator.of(context).pop((_emoji, _color)),
-                      child: const Text('확인'),
+                      child: Text(tr('확인')),
                     ),
                   ),
                 ],

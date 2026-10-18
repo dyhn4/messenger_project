@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app_platform.dart';
 import 'browser_files.dart';
+import '../l10n/tr.dart';
 
 /// 안드로이드에서 다운로드한 파일이 모이는 폴더 — 휴대폰 공용 Download 아래의 이 이름.
 const kAndroidDownloadSubfolder = 'TangoTalk';
@@ -44,7 +45,7 @@ Future<String> mobileDownloadFolder() =>
 /// 알림 등에 보여줄 경로 — 안드로이드는 "/storage/emulated/0/"을 떼고 "Download/…"부터 보인다. 아이폰은 "파일" 앱에서
 /// 찾는 이름으로 보인다.
 String displayDownloadPath(String path) {
-  if (AppPlatform.isIOS) return '파일 앱 > 나의 iPhone > TangoTalk';
+  if (AppPlatform.isIOS) return tr('파일 앱 > 나의 iPhone > TangoTalk');
   if (!AppPlatform.isAndroid) return path;
   final i = path.indexOf('/Download/');
   return i < 0 ? path : path.substring(i + 1);
@@ -82,7 +83,7 @@ Future<String> writeDownloadFile({
   _pathInFolder(folder, name);
   final shared = AppPlatform.isAndroid && !_isAppPrivateFolder(folder);
   if (shared && !await _ensureAndroidWritePermission()) {
-    throw const FileSystemException('저장 권한이 없어 다운로드할 수 없습니다.');
+    throw FileSystemException(tr('저장 권한이 없어 다운로드할 수 없습니다.'));
   }
   await Directory(folder).create(recursive: true);
 
@@ -158,7 +159,7 @@ Future<String> _writeNumbered(
       lastError = e;
     }
   }
-  throw lastError ?? FileSystemException('저장할 이름을 찾지 못했습니다.', folder);
+  throw lastError ?? FileSystemException(tr('저장할 이름을 찾지 못했습니다.'), folder);
 }
 
 bool _sameContent(File file, List<int> bytes) {
@@ -195,13 +196,13 @@ Future<String?> openLocalFile(String path) async {
     case ResultType.done:
       return null;
     case ResultType.noAppToOpen:
-      throw const FileSystemException('이 파일을 열 수 있는 앱이 없습니다.');
+      throw FileSystemException(tr('이 파일을 열 수 있는 앱이 없습니다.'));
     case ResultType.fileNotFound:
-      throw const FileSystemException('파일을 찾을 수 없습니다.');
+      throw FileSystemException(tr('파일을 찾을 수 없습니다.'));
     case ResultType.permissionDenied:
-      throw const FileSystemException('파일을 열 권한이 없습니다.');
+      throw FileSystemException(tr('파일을 열 권한이 없습니다.'));
     case ResultType.error:
-      throw FileSystemException('파일을 열지 못했습니다.', result.message);
+      throw FileSystemException(tr('파일을 열지 못했습니다.'), result.message);
   }
 }
 
@@ -425,12 +426,12 @@ String _savedFileName(String fileName, {required bool utf16}) {
 String _pathInFolder(String folder, String name) {
   if (folder.trim().isEmpty) {
     // 빈 폴더에 이어 붙이면 드라이브 맨 위(\이름)가 된다.
-    throw const FileSystemException('저장할 폴더가 정해지지 않았습니다.');
+    throw FileSystemException(tr('저장할 폴더가 정해지지 않았습니다.'));
   }
   final sep = AppPlatform.pathSeparator;
   final path = folder.endsWith(sep) ? '$folder$name' : '$folder$sep$name';
   if (!isDirectChildPath(folder, path)) {
-    throw FileSystemException('이 이름으로는 저장할 수 없습니다.', name);
+    throw FileSystemException(tr('이 이름으로는 저장할 수 없습니다.'), name);
   }
   return path;
 }
@@ -537,7 +538,7 @@ bool isRiskyToOpen(String fileName) {
   return ext.startsWith('{') || _riskyExtensions.contains(ext);
 }
 
-const _riskyFileNotice = '실행될 수 있는 파일이라 바로 열지 않았습니다. 내용을 확인한 뒤 직접 여세요.';
+final _riskyFileNotice = tr('실행될 수 있는 파일이라 바로 열지 않았습니다. 내용을 확인한 뒤 직접 여세요.');
 
 /// [path]를 바로 열면 안 될 때([isRiskyToOpen]) 사용자에게 보일 안내 — 열어도 되면 null.
 @visibleForTesting
@@ -549,7 +550,7 @@ String? riskyFileNotice(String path) {
   // 안드로이드의 공용 Download 밖(비밀 대화 파일을 두는 이 앱만의 임시 폴더)은 "파일" 앱에서 보이지
   // 않는다 — 다운로드해서 보라고 한다.
   return shown == path
-      ? '실행될 수 있는 파일이라 바로 열지 않았습니다. 다운로드해서 내용을 확인한 뒤 직접 여세요.'
+      ? tr('실행될 수 있는 파일이라 바로 열지 않았습니다. 다운로드해서 내용을 확인한 뒤 직접 여세요.')
       : '$_riskyFileNotice ($shown)';
 }
 

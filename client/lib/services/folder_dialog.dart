@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:win32/win32.dart';
+import '../l10n/tr.dart';
 
 /// 파일 고르기 대화상자의 결과 — 파일을 골랐으면 [files], 파일을 고르지 않고 [열기]를 눌렀으면 그때 열려 있던 폴더
 /// [folder]. 둘 중 하나만 있다.
@@ -16,7 +17,7 @@ class FilesOrFolder {
 
 /// 대화상자의 파일 이름 칸에 미리 넣어 두는 글자 — 파일을 고르지 않고 [열기]를 누르면 이 이름이 그대로 돌아오고, 그러면
 /// 지금 열려 있는 폴더를 고른 것으로 본다(Windows 열기 대화상자는 폴더와 파일을 함께 고르는 모드가 없어 쓰는 방법).
-const folderPickPlaceholder = '폴더 선택';
+final folderPickPlaceholder = tr('폴더 선택');
 
 /// [path]가 "파일 없이 [열기]"의 결과(폴더 안의 [folderPickPlaceholder])인지 — 그렇다면 그 폴더 경로, 아니면 null.
 @visibleForTesting
@@ -34,7 +35,7 @@ String? folderFromPlaceholderPath(String path) {
 /// 취소하면 null. 대화상자는 다른 isolate에서 띄운다 — 떠 있는 동안 앱 화면이 멈추지 않게(file_picker와 같은 방식).
 Future<FilesOrFolder?> pickFilesOrFolder({String? title}) async {
   if (!Platform.isWindows) return null;
-  final paths = await compute(_showDialog, title ?? '파일 또는 폴더 선택');
+  final paths = await compute(_showDialog, title ?? tr('파일 또는 폴더 선택'));
   if (paths == null || paths.isEmpty) return null;
   if (paths.length == 1) {
     final folder = folderFromPlaceholderPath(paths.single);
@@ -137,10 +138,10 @@ List<String>? _showDialog(String title) {
 
 /// [path] 폴더를 윈도우 탐색기로 연다. 열었으면 null, 못 열면 사용자에게 보일 까닭. PC(Windows)가 아니면 열 수 없다.
 Future<String?> openFolderInExplorer(String path) async {
-  if (!Platform.isWindows) return 'PC(Windows)에서 열 수 있는 경로입니다.';
+  if (!Platform.isWindows) return tr('PC(Windows)에서 열 수 있는 경로입니다.');
   try {
     if (!await Directory(path).exists()) {
-      return '이 PC에서 폴더를 찾을 수 없습니다: $path';
+      return tr('이 PC에서 폴더를 찾을 수 없습니다: {path}', {'path': path});
     }
     // 이름만 주면 Windows가 현재 폴더부터 찾는다 — 같은 이름의 explorer.exe를 심어 두는 수법을 피해 전체 경로로 부른다
     // (download_storage.dart와 같은 방식 — 검토 S32).
@@ -148,6 +149,6 @@ Future<String?> openFolderInExplorer(String path) async {
     await Process.start('$root\\explorer.exe', [path]);
     return null;
   } catch (e) {
-    return '폴더를 열지 못했습니다: $e';
+    return tr('폴더를 열지 못했습니다: {e}', {'e': e});
   }
 }

@@ -6,6 +6,7 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/grab_cursors.dart';
 import 'project_forms.dart' show projectColorChoices;
+import '../../l10n/tr.dart';
 
 String _categoryLabel(TaskStatus c) => taskStatusLabel(c);
 
@@ -22,12 +23,12 @@ Future<bool> _confirm(
       actions: [
         TextButton(
           onPressed: () => Navigator.of(c).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
           onPressed: () => Navigator.of(c).pop(true),
-          child: const Text('삭제'),
+          child: Text(tr('삭제')),
         ),
       ],
     ),
@@ -370,22 +371,25 @@ class _ProjectStatusEditorState extends State<ProjectStatusEditor> {
       }
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     }
   }
 
   Future<void> _delete(TaskStatusDef s) async {
     final ok = await _confirm(
       context,
-      '상태 삭제',
-      "'${s.name}' 상태를 삭제할까요? 이 상태의 업무는 같은 분류(${_categoryLabel(s.category)})의 첫 상태로 옮겨집니다.",
+      tr('상태 삭제'),
+      tr('\'{s.name}\' 상태를 삭제할까요? 이 상태의 업무는 같은 분류({p0})의 첫 상태로 옮겨집니다.', {
+        's.name': s.name,
+        'p0': _categoryLabel(s.category),
+      }),
     );
     if (!ok) return;
     try {
       await widget.session.api!.deleteTaskStatus(s.id);
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -398,7 +402,7 @@ class _ProjectStatusEditorState extends State<ProjectStatusEditor> {
         for (final s in list) s.id,
       ]);
     } catch (e) {
-      if (mounted) showAppToast(context, '순서를 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('순서를 바꾸지 못했습니다: {e}', {'e': e}));
       await _load();
     }
   }
@@ -411,11 +415,11 @@ class _ProjectStatusEditorState extends State<ProjectStatusEditor> {
       return const Center(child: CircularProgressIndicator());
     }
     return ConfigSection(
-      title: '상태',
-      description: '칸반보드의 열이 되는 상태입니다. 위에서부터 왼쪽 열 순서이고, 끌어서 순서를 바꿀 수 있습니다.',
-      addLabel: '추가',
+      title: tr('상태'),
+      description: tr('칸반보드의 열이 되는 상태입니다. 위에서부터 왼쪽 열 순서이고, 끌어서 순서를 바꿀 수 있습니다.'),
+      addLabel: tr('추가'),
       onAdd: _edit,
-      emptyHint: '등록된 상태가 없습니다.',
+      emptyHint: tr('등록된 상태가 없습니다.'),
       children: [
         ReorderableBubbleList<TaskStatusDef>(
           items: statuses,
@@ -426,8 +430,12 @@ class _ProjectStatusEditorState extends State<ProjectStatusEditor> {
             title: s.name,
             subtitle: _categoryLabel(s.category),
             actions: [
-              configAction(Icons.edit_outlined, '수정', () => _edit(existing: s)),
-              configAction(Icons.delete_outline, '삭제', () => _delete(s)),
+              configAction(
+                Icons.edit_outlined,
+                tr('수정'),
+                () => _edit(existing: s),
+              ),
+              configAction(Icons.delete_outline, tr('삭제'), () => _delete(s)),
             ],
           ),
         ),
@@ -473,7 +481,7 @@ class _StatusEditDialogState extends State<_StatusEditDialog> {
   Widget build(BuildContext context) {
     final creating = widget.existing == null;
     return AlertDialog(
-      title: Text(creating ? '상태 추가' : '상태 수정'),
+      title: Text(creating ? tr('상태 추가') : tr('상태 수정')),
       content: SizedBox(
         width: 340,
         child: Column(
@@ -484,14 +492,14 @@ class _StatusEditDialogState extends State<_StatusEditDialog> {
               controller: _name,
               autofocus: true,
               maxLength: 20,
-              decoration: const InputDecoration(
-                labelText: '상태 이름',
+              decoration: InputDecoration(
+                labelText: tr('상태 이름'),
                 border: OutlineInputBorder(),
               ),
               onSubmitted: (_) => _submit(),
             ),
             const SizedBox(height: 8),
-            const Text('색'),
+            Text(tr('색')),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -520,7 +528,7 @@ class _StatusEditDialogState extends State<_StatusEditDialog> {
             ),
             const SizedBox(height: 16),
             Text(
-              creating ? '분류 (진행률·완료 집계에 쓰입니다)' : '분류 (바꿀 수 없습니다)',
+              creating ? tr('분류 (진행률·완료 집계에 쓰입니다)') : tr('분류 (바꿀 수 없습니다)'),
               style: TextStyle(color: Theme.of(context).hintColor),
             ),
             const SizedBox(height: 6),
@@ -543,9 +551,9 @@ class _StatusEditDialogState extends State<_StatusEditDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
-        FilledButton(onPressed: _submit, child: const Text('저장')),
+        FilledButton(onPressed: _submit, child: Text(tr('저장'))),
       ],
     );
   }
@@ -553,13 +561,13 @@ class _StatusEditDialogState extends State<_StatusEditDialog> {
 
 // ───────────────────────── 필드 ─────────────────────────
 
-const _kindLabels = {
-  'text': '텍스트',
-  'number': '숫자',
-  'date': '날짜',
-  'select': '단일 선택',
-  'multiSelect': '다중 선택',
-  'progress': '진행률',
+final _kindLabels = {
+  'text': tr('텍스트'),
+  'number': tr('숫자'),
+  'date': tr('날짜'),
+  'select': tr('단일 선택'),
+  'multiSelect': tr('다중 선택'),
+  'progress': tr('진행률'),
 };
 
 /// 프로젝트의 사용자 정의 필드(텍스트/숫자/날짜/선택)를 추가·수정·삭제한다.
@@ -624,22 +632,24 @@ class _ProjectFieldEditorState extends State<ProjectFieldEditor> {
       }
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     }
   }
 
   Future<void> _delete(TaskFieldDef f) async {
     final ok = await _confirm(
       context,
-      '필드 삭제',
-      "'${f.name}' 필드를 삭제할까요? 업무에 입력해 둔 이 필드의 값은 더 이상 보이지 않습니다.",
+      tr('필드 삭제'),
+      tr('\'{f.name}\' 필드를 삭제할까요? 업무에 입력해 둔 이 필드의 값은 더 이상 보이지 않습니다.', {
+        'f.name': f.name,
+      }),
     );
     if (!ok) return;
     try {
       await widget.session.api!.deleteTaskField(f.id);
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -653,14 +663,17 @@ class _ProjectFieldEditorState extends State<ProjectFieldEditor> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '업무 등록·상세에 "추가 정보"로 나타나는 입력 항목입니다. (최대 20개)',
+          tr('업무 등록·상세에 "추가 정보"로 나타나는 입력 항목입니다. (최대 20개)'),
           style: TextStyle(color: hint, fontSize: 12),
         ),
         const SizedBox(height: 4),
         Expanded(
           child: fields.isEmpty
               ? Center(
-                  child: Text('만든 필드가 없습니다.', style: TextStyle(color: hint)),
+                  child: Text(
+                    tr('만든 필드가 없습니다.'),
+                    style: TextStyle(color: hint),
+                  ),
                 )
               : ListView(
                   children: [
@@ -682,12 +695,12 @@ class _ProjectFieldEditorState extends State<ProjectFieldEditor> {
                           children: [
                             IconButton(
                               icon: const Icon(Icons.edit_outlined, size: 18),
-                              tooltip: '수정',
+                              tooltip: tr('수정'),
                               onPressed: () => _edit(existing: f),
                             ),
                             IconButton(
                               icon: const Icon(Icons.delete_outline, size: 18),
-                              tooltip: '삭제',
+                              tooltip: tr('삭제'),
                               onPressed: () => _delete(f),
                             ),
                           ],
@@ -701,7 +714,7 @@ class _ProjectFieldEditorState extends State<ProjectFieldEditor> {
           child: FilledButton.icon(
             onPressed: () => _edit(),
             icon: const Icon(Icons.add, size: 18),
-            label: const Text('필드 추가'),
+            label: Text(tr('필드 추가')),
           ),
         ),
       ],
@@ -742,7 +755,7 @@ class _FieldEditDialogState extends State<_FieldEditDialog> {
   void _submit() {
     final name = _name.text.trim();
     if (name.isEmpty) {
-      setState(() => _error = '필드 이름을 입력하세요.');
+      setState(() => _error = tr('필드 이름을 입력하세요.'));
       return;
     }
     final options = _kind == 'select' || _kind == 'multiSelect'
@@ -754,7 +767,7 @@ class _FieldEditDialogState extends State<_FieldEditDialog> {
               .toList()
         : <String>[];
     if ((_kind == 'select' || _kind == 'multiSelect') && options.isEmpty) {
-      setState(() => _error = '선택지를 하나 이상 입력하세요(쉼표로 구분).');
+      setState(() => _error = tr('선택지를 하나 이상 입력하세요(쉼표로 구분).'));
       return;
     }
     Navigator.of(context).pop(_FieldEditResult(name, _kind, options));
@@ -764,7 +777,7 @@ class _FieldEditDialogState extends State<_FieldEditDialog> {
   Widget build(BuildContext context) {
     final creating = widget.existing == null;
     return AlertDialog(
-      title: Text(creating ? '필드 추가' : '필드 수정'),
+      title: Text(creating ? tr('필드 추가') : tr('필드 수정')),
       content: SizedBox(
         width: 340,
         child: Column(
@@ -775,14 +788,14 @@ class _FieldEditDialogState extends State<_FieldEditDialog> {
               controller: _name,
               autofocus: true,
               maxLength: 20,
-              decoration: const InputDecoration(
-                labelText: '필드 이름',
+              decoration: InputDecoration(
+                labelText: tr('필드 이름'),
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              creating ? '종류' : '종류 (바꿀 수 없습니다)',
+              creating ? tr('종류') : tr('종류 (바꿀 수 없습니다)'),
               style: TextStyle(color: Theme.of(context).hintColor),
             ),
             const SizedBox(height: 6),
@@ -803,9 +816,9 @@ class _FieldEditDialogState extends State<_FieldEditDialog> {
               const SizedBox(height: 12),
               TextField(
                 controller: _options,
-                decoration: const InputDecoration(
-                  labelText: '선택지 (쉼표로 구분)',
-                  hintText: '예: 상, 중, 하',
+                decoration: InputDecoration(
+                  labelText: tr('선택지 (쉼표로 구분)'),
+                  hintText: tr('예: 상, 중, 하'),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -820,9 +833,9 @@ class _FieldEditDialogState extends State<_FieldEditDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
-        FilledButton(onPressed: _submit, child: const Text('저장')),
+        FilledButton(onPressed: _submit, child: Text(tr('저장'))),
       ],
     );
   }
@@ -896,22 +909,25 @@ class _ProjectPriorityEditorState extends State<ProjectPriorityEditor> {
       }
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     }
   }
 
   Future<void> _delete(TaskPriorityDef s) async {
     final ok = await _confirm(
       context,
-      '우선순위 삭제',
-      "'${s.name}' 우선순위를 삭제할까요? 이 우선순위의 업무는 같은 단계(${taskPriorityLabel(s.level)})의 첫 우선순위로 옮겨집니다.",
+      tr('우선순위 삭제'),
+      tr('\'{s.name}\' 우선순위를 삭제할까요? 이 우선순위의 업무는 같은 단계({p0})의 첫 우선순위로 옮겨집니다.', {
+        's.name': s.name,
+        'p0': taskPriorityLabel(s.level),
+      }),
     );
     if (!ok) return;
     try {
       await widget.session.api!.deleteTaskPriority(s.id);
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -924,7 +940,7 @@ class _ProjectPriorityEditorState extends State<ProjectPriorityEditor> {
         for (final s in list) s.id,
       ]);
     } catch (e) {
-      if (mounted) showAppToast(context, '순서를 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('순서를 바꾸지 못했습니다: {e}', {'e': e}));
       await _load();
     }
   }
@@ -937,11 +953,11 @@ class _ProjectPriorityEditorState extends State<ProjectPriorityEditor> {
       return const Center(child: CircularProgressIndicator());
     }
     return ConfigSection(
-      title: '우선순위',
-      description: '업무에 붙는 우선순위입니다. 위에서부터 보여주는 순서이고, 끌어서 순서를 바꿀 수 있습니다.',
-      addLabel: '추가',
+      title: tr('우선순위'),
+      description: tr('업무에 붙는 우선순위입니다. 위에서부터 보여주는 순서이고, 끌어서 순서를 바꿀 수 있습니다.'),
+      addLabel: tr('추가'),
       onAdd: _edit,
-      emptyHint: '등록된 우선순위가 없습니다.',
+      emptyHint: tr('등록된 우선순위가 없습니다.'),
       children: [
         ReorderableBubbleList<TaskPriorityDef>(
           items: priorities,
@@ -952,8 +968,12 @@ class _ProjectPriorityEditorState extends State<ProjectPriorityEditor> {
             title: p.name,
             subtitle: taskPriorityLabel(p.level),
             actions: [
-              configAction(Icons.edit_outlined, '수정', () => _edit(existing: p)),
-              configAction(Icons.delete_outline, '삭제', () => _delete(p)),
+              configAction(
+                Icons.edit_outlined,
+                tr('수정'),
+                () => _edit(existing: p),
+              ),
+              configAction(Icons.delete_outline, tr('삭제'), () => _delete(p)),
             ],
           ),
         ),
@@ -999,7 +1019,7 @@ class _PriorityEditDialogState extends State<_PriorityEditDialog> {
   Widget build(BuildContext context) {
     final creating = widget.existing == null;
     return AlertDialog(
-      title: Text(creating ? '우선순위 추가' : '우선순위 수정'),
+      title: Text(creating ? tr('우선순위 추가') : tr('우선순위 수정')),
       content: SizedBox(
         width: 340,
         child: Column(
@@ -1010,14 +1030,14 @@ class _PriorityEditDialogState extends State<_PriorityEditDialog> {
               controller: _name,
               autofocus: true,
               maxLength: 20,
-              decoration: const InputDecoration(
-                labelText: '우선순위 이름',
+              decoration: InputDecoration(
+                labelText: tr('우선순위 이름'),
                 border: OutlineInputBorder(),
               ),
               onSubmitted: (_) => _submit(),
             ),
             const SizedBox(height: 8),
-            const Text('색'),
+            Text(tr('색')),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -1046,7 +1066,7 @@ class _PriorityEditDialogState extends State<_PriorityEditDialog> {
             ),
             const SizedBox(height: 16),
             Text(
-              creating ? '단계 (정렬·통계에 쓰입니다)' : '단계 (바꿀 수 없습니다)',
+              creating ? tr('단계 (정렬·통계에 쓰입니다)') : tr('단계 (바꿀 수 없습니다)'),
               style: TextStyle(color: Theme.of(context).hintColor),
             ),
             const SizedBox(height: 6),
@@ -1069,9 +1089,9 @@ class _PriorityEditDialogState extends State<_PriorityEditDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
-        FilledButton(onPressed: _submit, child: const Text('저장')),
+        FilledButton(onPressed: _submit, child: Text(tr('저장'))),
       ],
     );
   }

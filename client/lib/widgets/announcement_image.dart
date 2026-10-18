@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/announcement.dart';
 import '../services/session.dart';
 import 'retrying_network_image.dart';
+import '../l10n/tr.dart';
 
 /// 공지에 딸린 사진 한 장(이미지 메시지를 공지로 등록했을 때) — 축소본이 있으면 그걸 보여주고, 누르면 원본을
 /// 크게 띄운다. 배너(펼친 모양)와 공지 상세가 함께 쓴다.
@@ -52,7 +53,7 @@ class AnnouncementImage extends StatelessWidget {
                 right: 4,
                 child: IconButton(
                   icon: const Icon(Icons.close),
-                  tooltip: '닫기',
+                  tooltip: tr('닫기'),
                   onPressed: () => Navigator.of(dialogContext).pop(),
                 ),
               ),

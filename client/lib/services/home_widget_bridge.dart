@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../models/room.dart';
 import 'app_platform.dart';
 import 'session.dart';
+import '../l10n/tr.dart';
 
 /// 홈 화면 위젯 "안 읽은 대화"(안드로이드 — UnreadWidgetProvider.kt)에 줄 내용 — 안 읽은 메시지 합계와 안 읽은 방 세 개.
 /// 알림을 끈(muted) 방은 빼고, 비밀 대화는 이름 대신 "비밀 대화"로, 앱 잠금을 켰으면 방 이름 없이 합계만, 로그아웃했으면 안내만
@@ -31,7 +32,7 @@ Map<String, dynamic> homeWidgetState({
             for (final r in unread.take(3))
               {
                 'id': r.id,
-                'name': r.isSecret ? '비밀 대화' : r.displayName(myUserId),
+                'name': r.isSecret ? tr('비밀 대화') : r.displayName(myUserId),
                 'unread': r.unreadCount,
               },
           ],

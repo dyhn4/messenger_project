@@ -9,6 +9,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/message.dart';
 import 'secret_peer_store.dart';
 import 'secret_ratchet.dart';
+import '../l10n/tr.dart';
 
 /// 예전 규약(v1) 비밀 대화 방 하나의 현재 래칫 상태. chainKey는 항상 "다음 메시지에 쓸" 체인키를 가리킨다
 /// (secret_chat_crypto.dart의 ratchet 함수가 매 메시지 후 이 자리를 갱신한다). 새 규약(v3) 방은
@@ -302,7 +303,7 @@ class SecretStorageBusyException implements Exception {
   const SecretStorageBusyException();
 
   @override
-  String toString() => '비밀 대화 저장소가 응답하지 않습니다. 잠시 뒤 다시 시도해 주세요.';
+  String toString() => tr('비밀 대화 저장소가 응답하지 않습니다. 잠시 뒤 다시 시도해 주세요.');
 }
 
 /// flutter_secure_storage(Windows DPAPI / Android Keystore)에 방별 네임스페이스로 래칫 상태를

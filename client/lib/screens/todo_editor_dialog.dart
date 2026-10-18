@@ -28,6 +28,7 @@ import '../widgets/user_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'post_editor_dialog.dart' show fileIconFor;
 import 'schedule_message_dialog.dart' show SchedulePicker;
+import '../l10n/tr.dart';
 
 /// 할 일 만들기·고치기 화면을 연다 — [mode]를 안 주면 넓은 창(PC)은 대화상자, 좁은 창(모바일)은 전체 화면.
 /// [TodoViewMode.panel]이면 가장 가까운 Navigator(PC 할 일 패널의 중첩 Navigator)에 패널 안 화면으로 올린다 — 머리
@@ -462,17 +463,17 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
   Future<bool> _confirmRoomChange() async {
     final change = await _showDialog<bool>(
       (dialogContext) => AlertDialog(
-        content: const Text('대화방을 변경하면\n첨부한 파일과 담당자 정보가 초기화됩니다.'),
+        content: Text(tr('대화방을 변경하면\n첨부한 파일과 담당자 정보가 초기화됩니다.')),
         actions: [
           TextButton(
             key: const ValueKey('todo-room-change-cancel'),
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('todo-room-change-confirm'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('변경'),
+            child: Text(tr('변경')),
           ),
         ],
       ),
@@ -517,7 +518,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     // 폴더 경로는 할 일을 관리하는 사람(만든 사람)만 바꿀 수 있어서(서버도 담당자의 경로 변경을 거절한다) 담당자는 파일만 고른다.
     if (!AppPlatform.isWindows || !_canManageAssignees) return _pickFiles();
     final picked = await pickFilesOrFolder(
-      title: '파일을 고르거나, 폴더를 연 채로 [열기]를 누르면 그 폴더 경로가 지정됩니다',
+      title: tr('파일을 고르거나, 폴더를 연 채로 [열기]를 누르면 그 폴더 경로가 지정됩니다'),
     );
     if (picked == null || !mounted) return;
     final folder = picked.folder;
@@ -531,7 +532,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
   /// `업로드 경로 지정` — 결과물을 올릴 폴더를 고른다(PC).
   Future<void> _pickUploadFolder() async {
     final folder = await FilePicker.getDirectoryPath(
-      dialogTitle: '담당자가 파일을 올릴 폴더 선택',
+      dialogTitle: tr('담당자가 파일을 올릴 폴더 선택'),
       // Windows 폴더 창은 시작 위치를 받자마자 그 서버에 접속한다(확인 없이 SMB 로그인 정보가 간다) — 저장된 경로가 공유
       // 폴더(UNC)면 시작 위치로 넘기지 않는다(localFolderOrNull).
       initialDirectory: localFolderOrNull(_uploadPath),
@@ -567,7 +568,11 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     final room = todoAttachmentsMaxCount - _files.length;
     final accepted = files.take(math.max(0, room)).toList();
     if (accepted.length < files.length) {
-      _toast('첨부 파일은 $todoAttachmentsMaxCount개까지 올릴 수 있습니다.');
+      _toast(
+        tr('첨부 파일은 {todoAttachmentsMaxCount}개까지 올릴 수 있습니다.', {
+          'todoAttachmentsMaxCount': todoAttachmentsMaxCount,
+        }),
+      );
     }
     if (accepted.isEmpty) return;
     final added = [
@@ -617,7 +622,12 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
         } catch (e) {
           if (!mounted || next.removed) continue;
           setState(() => next.error = '$e');
-          _toast("'${next.name}' 파일을 올리지 못했습니다: $e");
+          _toast(
+            tr('\'{next.name}\' 파일을 올리지 못했습니다: {e}', {
+              'next.name': next.name,
+              'e': e,
+            }),
+          );
         }
       }
     } finally {
@@ -645,15 +655,19 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
 
   void _addReminder(DateTime at) {
     if (_reminders.length >= todoRemindersMaxCount) {
-      _toast('알림은 $todoRemindersMaxCount개까지 추가할 수 있습니다.');
+      _toast(
+        tr('알림은 {todoRemindersMaxCount}개까지 추가할 수 있습니다.', {
+          'todoRemindersMaxCount': todoRemindersMaxCount,
+        }),
+      );
       return;
     }
     if (!at.isAfter(DateTime.now())) {
-      _toast('이미 지난 시각에는 알림을 만들 수 없습니다.');
+      _toast(tr('이미 지난 시각에는 알림을 만들 수 없습니다.'));
       return;
     }
     if (_reminders.any((r) => r.at == at)) {
-      _toast('같은 시각의 알림이 이미 있습니다.');
+      _toast(tr('같은 시각의 알림이 이미 있습니다.'));
       return;
     }
     setState(() {
@@ -668,7 +682,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
   void _addRelativeReminder(Duration before) {
     final due = _due;
     if (due == null) {
-      _toast('기한을 먼저 정하세요.');
+      _toast(tr('기한을 먼저 정하세요.'));
       return;
     }
     _addReminder(todoReminderBeforeDue(due, before, dueMinutes: _dueMinutes));
@@ -690,7 +704,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     final picked = await _showDialog<DateTime>(
       (dialogContext) => StatefulBuilder(
         builder: (context, setLocal) => AlertDialog(
-          title: const Text('알림 시각'),
+          title: Text(tr('알림 시각')),
           content: SizedBox(
             width: 360,
             child: SchedulePicker(
@@ -701,12 +715,12 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('취소'),
+              child: Text(tr('취소')),
             ),
             FilledButton(
               key: const ValueKey('todo-reminder-custom-ok'),
               onPressed: () => Navigator.of(dialogContext).pop(value),
-              child: const Text('추가'),
+              child: Text(tr('추가')),
             ),
           ],
         ),
@@ -835,16 +849,18 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     if (!isDirty) return true;
     final discard = await _showDialog<bool>(
       (dialogContext) => AlertDialog(
-        title: const Text('작성 취소'),
-        content: Text(_isEdit ? '수정한 내용을 버리고 닫을까요?' : '작성 중인 할 일을 버리고 닫을까요?'),
+        title: Text(tr('작성 취소')),
+        content: Text(
+          _isEdit ? tr('수정한 내용을 버리고 닫을까요?') : tr('작성 중인 할 일을 버리고 닫을까요?'),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(_isEdit ? '계속 수정' : '계속 쓰기'),
+            child: Text(_isEdit ? tr('계속 수정') : tr('계속 쓰기')),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('닫기', style: TextStyle(color: Colors.redAccent)),
+            child: Text(tr('닫기'), style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -868,7 +884,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
 
   // ── 화면 ──────────────────────────────────────────────────────────
 
-  String get _heading => _isEdit ? '할 일 수정' : '할 일 생성';
+  String get _heading => _isEdit ? tr('할 일 수정') : tr('할 일 생성');
 
   @override
   Widget build(BuildContext context) {
@@ -946,7 +962,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
                   IconButton(
                     key: const ValueKey('todo-editor-close'),
                     icon: const Icon(Icons.close),
-                    tooltip: '닫기',
+                    tooltip: tr('닫기'),
                     onPressed: _submitting ? null : _requestClose,
                   ),
                 ],
@@ -975,7 +991,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
         leading: IconButton(
           key: const ValueKey('todo-editor-close'),
           icon: const Icon(Icons.close),
-          tooltip: '취소',
+          tooltip: tr('취소'),
           onPressed: _submitting ? null : _requestClose,
         ),
         title: Text(_heading),
@@ -1023,7 +1039,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
             style: TextButton.styleFrom(
               foregroundColor: Theme.of(context).hintColor,
             ),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           const SizedBox(width: 8),
           _submitButton(),
@@ -1063,7 +1079,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
               height: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : Text(uploading ? '업로드 중' : '저장하기'),
+          : Text(uploading ? tr('업로드 중') : tr('저장하기')),
     );
   }
 
@@ -1107,14 +1123,14 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
       _FieldRow(
         id: 'room',
         icon: Icons.chat_bubble_outline,
-        label: '대화방',
+        label: tr('대화방'),
         child: _roomField(context),
       ),
       gap,
       _FieldRow(
         id: 'title',
         icon: Icons.title,
-        label: '제목',
+        label: tr('제목'),
         child: TextField(
           key: const ValueKey('todo-title-field'),
           controller: _title,
@@ -1123,14 +1139,14 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           maxLength: todoTitleMaxLength,
           textInputAction: TextInputAction.next,
           style: theme.textTheme.bodyMedium,
-          decoration: _inputDecoration(theme, hint: '제목을 입력하세요'),
+          decoration: _inputDecoration(theme, hint: tr('제목을 입력하세요')),
         ),
       ),
       gap,
       _FieldRow(
         id: 'description',
         icon: Icons.format_quote,
-        label: '설명',
+        label: tr('설명'),
         child: TextField(
           key: const ValueKey('todo-description-field'),
           controller: _description,
@@ -1141,7 +1157,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           style: theme.textTheme.bodyMedium,
           decoration: _inputDecoration(
             theme,
-            hint: '설명을 입력하세요 (선택)',
+            hint: tr('설명을 입력하세요 (선택)'),
             errorText: check.descriptionError,
           ),
         ),
@@ -1150,28 +1166,28 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
       _FieldRow(
         id: 'files',
         icon: Icons.insert_drive_file_outlined,
-        label: '파일',
+        label: tr('파일'),
         child: _fileField(context),
       ),
       gap,
       _FieldRow(
         id: 'assignees',
         icon: Icons.people_outline,
-        label: '담당자',
+        label: tr('담당자'),
         child: _assigneeField(context),
       ),
       gap,
       _FieldRow(
         id: 'period',
         icon: Icons.schedule,
-        label: '기간',
+        label: tr('기간'),
         child: _periodField(context, check),
       ),
       gap,
       _FieldRow(
         id: 'reminders',
         icon: Icons.alarm,
-        label: '알림',
+        label: tr('알림'),
         child: _reminderField(context),
       ),
       // 만들 때만 — 고칠 때는 카드를 다시 올리지 않는다(새로 추가된 담당자에게는 알림만 간다).
@@ -1207,12 +1223,12 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('대화방에 알리기'),
+                    Text(tr('대화방에 알리기')),
                     const SizedBox(height: 2),
                     Text(
                       _announce
-                          ? '대화방 멤버 모두에게 알리고, 담당자는 멘션합니다.'
-                          : '할 일 카드는 대화방에 올라가고, 알림은 담당자에게만 멘션으로 갑니다.',
+                          ? tr('대화방 멤버 모두에게 알리고, 담당자는 멘션합니다.')
+                          : tr('할 일 카드는 대화방에 올라가고, 알림은 담당자에게만 멘션으로 갑니다.'),
                       style: TextStyle(fontSize: 12, color: hint),
                     ),
                   ],
@@ -1249,7 +1265,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
                   child: Text(
                     _room?.displayName(widget.session.userId ?? '') ??
                         _editing?.roomName ??
-                        '대화방',
+                        tr('대화방'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1283,8 +1299,8 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           padding: const EdgeInsets.only(top: 6),
           child: Text(
             _isEdit
-                ? '한 번 만든 할 일은 다른 대화방으로 옮길 수 없습니다.'
-                : '할 일 생성 후에는 대화방 변경이 불가능합니다.',
+                ? tr('한 번 만든 할 일은 다른 대화방으로 옮길 수 없습니다.')
+                : tr('할 일 생성 후에는 대화방 변경이 불가능합니다.'),
             style: TextStyle(fontSize: 12, color: hint),
           ),
         ),
@@ -1319,7 +1335,9 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           key: const ValueKey('todo-attach'),
           onPressed: _submitting || full ? null : _pickDownload,
           icon: const Icon(Icons.add, size: 18),
-          label: Text(_canManageAssignees ? '파일 첨부(또는 폴더 경로 지정)' : '파일 첨부'),
+          label: Text(
+            _canManageAssignees ? tr('파일 첨부(또는 폴더 경로 지정)') : tr('파일 첨부'),
+          ),
           style: buttonStyle,
         ),
         Padding(
@@ -1378,7 +1396,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
             key: const ValueKey('todo-upload-path-button'),
             onPressed: _submitting ? null : _pickUploadFolder,
             icon: const Icon(Icons.drive_folder_upload_outlined, size: 18),
-            label: const Text('업로드 경로 지정'),
+            label: Text(tr('업로드 경로 지정')),
             style: buttonStyle,
           ),
         ],
@@ -1397,7 +1415,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
-              '지정하지 않으면 담당자가 올린 파일은 나에게 메시지로 옵니다.',
+              tr('지정하지 않으면 담당자가 올린 파일은 나에게 메시지로 옵니다.'),
               key: const ValueKey('todo-upload-path-hint'),
               style: TextStyle(fontSize: 12, color: theme.hintColor),
             ),
@@ -1435,10 +1453,10 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Text(
                 readOnly
-                    ? '담당자가 없습니다.'
+                    ? tr('담당자가 없습니다.')
                     : _room == null && !_isEdit
-                    ? '대화방을 먼저 선택하세요.'
-                    : '담당자를 지정하지 않았습니다.',
+                    ? tr('대화방을 먼저 선택하세요.')
+                    : tr('담당자를 지정하지 않았습니다.'),
                 style: TextStyle(fontSize: 13, color: hint),
               ),
             ),
@@ -1451,7 +1469,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
-              '담당자는 만든 사람만 바꿀 수 있습니다.',
+              tr('담당자는 만든 사람만 바꿀 수 있습니다.'),
               style: TextStyle(fontSize: 12, color: hint),
             ),
           )
@@ -1462,7 +1480,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
               key: const ValueKey('todo-assignee-add'),
               onPressed: _submitting || _room == null ? null : _pickAssignees,
               icon: const Icon(Icons.edit, size: 14),
-              label: const Text('담당자 관리'),
+              label: Text(tr('담당자 관리')),
               style: TextButton.styleFrom(
                 foregroundColor: hint,
                 // 단추 글꼴은 테마에서 이어받는다(새 TextStyle은 글꼴·옛한글 대체 글꼴을 잃는다).
@@ -1489,7 +1507,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
       resolveUrl: widget.session.resolveUrl,
       radius: 10,
     );
-    final label = Text(me ? '${a.name} (나)' : a.name);
+    final label = Text(me ? tr('{a.name} (나)', {'a.name': a.name}) : a.name);
     final labelStyle = theme.textTheme.bodyMedium;
     final background = theme.colorScheme.surface;
     if (readOnly) {
@@ -1514,7 +1532,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
       shape: const StadiumBorder(),
       visualDensity: VisualDensity.compact,
       deleteIcon: const Icon(Icons.close, size: 16),
-      deleteButtonTooltipMessage: '담당자에서 빼기',
+      deleteButtonTooltipMessage: tr('담당자에서 빼기'),
       onDeleted: _submitting
           ? null
           : () => setState(() => _assignees.remove(a)),
@@ -1542,7 +1560,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
             endMinutes: _dueMinutes,
           ),
           enabled: !_submitting,
-          placeholder: '기간을 선택하세요 (선택)',
+          placeholder: tr('기간을 선택하세요 (선택)'),
           defaultMinutes: todoDefaultTimeMinutes,
           formatPoint: formatTodoDay,
           formatClock: formatTodoClock,
@@ -1588,7 +1606,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           builder: (context, constraints) => PopupMenuButton<String>(
             key: const ValueKey('todo-reminder-add'),
             enabled: enabled,
-            tooltip: '알림 추가',
+            tooltip: tr('알림 추가'),
             useRootNavigator: true,
             routeSettings: todoPopupRouteSettings,
             position: PopupMenuPosition.under,
@@ -1614,20 +1632,20 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
                 (
                   'day',
                   _relativeReminderLabel(
-                    '기한 하루 전',
+                    tr('기한 하루 전'),
                     const Duration(days: 1),
-                    '전날 오후 6시',
+                    tr('전날 오후 6시'),
                   ),
                 ),
                 (
                   'hour',
                   _relativeReminderLabel(
-                    '기한 1시간 전',
+                    tr('기한 1시간 전'),
                     const Duration(hours: 1),
-                    '기한일 오후 5시',
+                    tr('기한일 오후 5시'),
                   ),
                 ),
-                ('custom', '직접 지정'),
+                ('custom', tr('직접 지정')),
               ])
                 PopupMenuItem<String>(
                   key: ValueKey('todo-reminder-option-$value'),
@@ -1654,8 +1672,10 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
                   Expanded(
                     child: Text(
                       full
-                          ? '알림은 $todoRemindersMaxCount개까지 추가할 수 있습니다.'
-                          : '알림을 받아보세요 (선택)',
+                          ? tr('알림은 {todoRemindersMaxCount}개까지 추가할 수 있습니다.', {
+                              'todoRemindersMaxCount': todoRemindersMaxCount,
+                            })
+                          : tr('알림을 받아보세요 (선택)'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
@@ -1688,7 +1708,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
                   Expanded(
                     child: Text(
                       formatTodoDateTime(_reminders[i].at) +
-                          (_reminders[i].sent ? ' (알림 보냄)' : ''),
+                          (_reminders[i].sent ? tr(' (알림 보냄)') : ''),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
@@ -1699,7 +1719,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
                   IconButton(
                     key: ValueKey('todo-reminder-remove-$i'),
                     icon: const Icon(Icons.close, size: 16),
-                    tooltip: '알림 삭제',
+                    tooltip: tr('알림 삭제'),
                     color: hint,
                     visualDensity: VisualDensity.compact,
                     onPressed: _submitting
@@ -1799,7 +1819,7 @@ class _FolderPathTile extends StatelessWidget {
           if (editable)
             IconButton(
               key: clearKey,
-              tooltip: '경로 지우기',
+              tooltip: tr('경로 지우기'),
               icon: const Icon(Icons.close, size: 18),
               onPressed: onClear,
             )
@@ -1831,7 +1851,7 @@ class _FileTile extends StatelessWidget {
       status = InkWell(
         onTap: onRetry,
         child: Text(
-          '올리지 못함 · 다시 시도',
+          tr('올리지 못함 · 다시 시도'),
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
@@ -1904,7 +1924,7 @@ class _FileTile extends StatelessWidget {
           if (onRemove != null)
             IconButton(
               icon: const Icon(Icons.close, size: 16),
-              tooltip: '첨부 빼기',
+              tooltip: tr('첨부 빼기'),
               color: hint,
               visualDensity: VisualDensity.compact,
               onPressed: onRemove,
@@ -1944,7 +1964,7 @@ class _AssigneePickerDialogState extends State<_AssigneePickerDialog> {
         if (q.isEmpty || m.name.toLowerCase().contains(q)) m,
     ]..sort((a, b) => a.name.compareTo(b.name));
     return AlertDialog(
-      title: const Text('담당자 관리'),
+      title: Text(tr('담당자 관리')),
       contentPadding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
       content: SizedBox(
         width: 360,
@@ -1955,8 +1975,8 @@ class _AssigneePickerDialogState extends State<_AssigneePickerDialog> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: TextField(
                 key: const ValueKey('todo-assignee-search'),
-                decoration: const InputDecoration(
-                  hintText: '이름 검색',
+                decoration: InputDecoration(
+                  hintText: tr('이름 검색'),
                   isDense: true,
                   prefixIcon: Icon(Icons.search, size: 20),
                   border: OutlineInputBorder(),
@@ -1980,7 +2000,7 @@ class _AssigneePickerDialogState extends State<_AssigneePickerDialog> {
                       ),
                       title: Text(
                         m.id == widget.session.userId
-                            ? '${m.name} (나)'
+                            ? tr('{m.name} (나)', {'m.name': m.name})
                             : m.name,
                       ),
                       onChanged: (v) => setState(() {
@@ -1988,7 +2008,13 @@ class _AssigneePickerDialogState extends State<_AssigneePickerDialog> {
                           if (_ids.length >= todoAssigneesMaxCount) {
                             showAppToast(
                               context,
-                              '담당자는 $todoAssigneesMaxCount명까지 지정할 수 있습니다.',
+                              tr(
+                                '담당자는 {todoAssigneesMaxCount}명까지 지정할 수 있습니다.',
+                                {
+                                  'todoAssigneesMaxCount':
+                                      todoAssigneesMaxCount,
+                                },
+                              ),
                             );
                             return;
                           }
@@ -2007,7 +2033,7 @@ class _AssigneePickerDialogState extends State<_AssigneePickerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('todo-assignee-ok'),
@@ -2015,7 +2041,7 @@ class _AssigneePickerDialogState extends State<_AssigneePickerDialog> {
             for (final m in widget.members)
               if (_ids.contains(m.id)) m,
           ]),
-          child: Text('확인 (${_ids.length})'),
+          child: Text(tr('확인 ({_ids.length})', {'_ids.length': _ids.length})),
         ),
       ],
     );

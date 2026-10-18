@@ -27,6 +27,7 @@ import 'project_templates_view.dart';
 import 'all_projects_view.dart';
 import 'task_detail_panel.dart';
 import 'team_tasks_view.dart';
+import '../../l10n/tr.dart';
 
 /// "프로젝트" 창 — 토픽(대화)과 별개로 업무를 계획·추적하는 공간. 상단 툴바의 과녁 아이콘
 /// 버튼으로 연다. 왼쪽 사이드바(홈/내 업무/캘린더/간트차트/노트 + 프로젝트 목록)와 오른쪽
@@ -166,7 +167,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
         _taskExpanded = false;
       });
     } catch (e) {
-      if (mounted) showAppToast(context, '업무를 열지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('업무를 열지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -194,7 +195,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
   Future<void> _loadProjects() async {
     final teamId = _teamId;
     if (teamId == null) {
-      setState(() => _error = '먼저 팀을 선택하세요.');
+      setState(() => _error = tr('먼저 팀을 선택하세요.'));
       return;
     }
     try {
@@ -289,7 +290,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
       if (!mounted) return;
     }
     if (!known()) {
-      showAppToast(context, '더 이상 참여 중이 아닌 프로젝트입니다.');
+      showAppToast(context, tr('더 이상 참여 중이 아닌 프로젝트입니다.'));
       return;
     }
     _select(ProjectView.project, projectId: n.projectId);
@@ -341,7 +342,9 @@ class _ProjectDialogState extends State<ProjectDialog> {
       if (!mounted) return;
       _openTemplateEditor(draft);
     } catch (e) {
-      if (mounted) showAppToast(context, '프로젝트 설정을 불러오지 못했습니다: $e');
+      if (mounted) {
+        showAppToast(context, tr('프로젝트 설정을 불러오지 못했습니다: {e}', {'e': e}));
+      }
     }
   }
 
@@ -375,7 +378,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
     } catch (e) {
       if (!mounted) return;
       setState(() => project.favorite = !next);
-      showAppToast(context, '즐겨찾기를 바꾸지 못했습니다: $e');
+      showAppToast(context, tr('즐겨찾기를 바꾸지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -424,7 +427,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      '프로젝트',
+                      tr('프로젝트'),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -450,7 +453,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
                     if (!widget.embedInWindow)
                       IconButton(
                         icon: const Icon(Icons.close),
-                        tooltip: '닫기',
+                        tooltip: tr('닫기'),
                         onPressed: () => Navigator.of(context).pop(),
                       ),
                   ],
@@ -653,7 +656,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
     final teamId = _teamId;
     if (_error != null) return Center(child: Text(_error!));
     if (teamId == null) {
-      return const Center(child: Text('먼저 팀을 선택하세요.'));
+      return Center(child: Text(tr('먼저 팀을 선택하세요.')));
     }
 
     return Column(
@@ -803,7 +806,7 @@ class _ProjectHeader extends StatelessWidget {
                     if (onToggleFavorite != null) ...[
                       const SizedBox(width: 4),
                       IconButton(
-                        tooltip: project.favorite ? '즐겨찾기 해제' : '즐겨찾기',
+                        tooltip: project.favorite ? tr('즐겨찾기 해제') : tr('즐겨찾기'),
                         onPressed: onToggleFavorite,
                         visualDensity: VisualDensity.compact,
                         icon: Icon(
@@ -929,13 +932,13 @@ class _SidebarState extends State<_Sidebar> {
   Future<void> _addFolder({Project? moveIn}) async {
     final teamId = session.currentTeam?.id;
     if (teamId == null) return;
-    final name = await _askFolderName(title: '폴더 추가', action: '추가');
+    final name = await _askFolderName(title: tr('폴더 추가'), action: tr('추가'));
     if (name == null || !mounted) return;
     final ProjectFolder folder;
     try {
       folder = await session.api!.createProjectFolder(teamId, name);
     } catch (e) {
-      if (mounted) showAppToast(context, '폴더를 만들지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('폴더를 만들지 못했습니다: {e}', {'e': e}));
       return;
     }
     if (moveIn != null) {
@@ -945,7 +948,7 @@ class _SidebarState extends State<_Sidebar> {
         // 폴더는 이미 만들어졌다 — "못 만들었다"고 하면 다시 눌러 같은 이름 폴더가 또 생기므로
         // 옮기기만 실패했다고 알린다.
         if (mounted) {
-          showAppToast(context, '폴더는 만들었지만 프로젝트를 옮기지 못했습니다: $e');
+          showAppToast(context, tr('폴더는 만들었지만 프로젝트를 옮기지 못했습니다: {e}', {'e': e}));
         }
       }
     }
@@ -955,8 +958,8 @@ class _SidebarState extends State<_Sidebar> {
 
   Future<void> _renameFolder(ProjectFolder folder) async {
     final name = await _askFolderName(
-      title: '폴더 이름 변경',
-      action: '변경',
+      title: tr('폴더 이름 변경'),
+      action: tr('변경'),
       initial: folder.name,
     );
     if (name == null || name == folder.name || !mounted) return;
@@ -964,7 +967,7 @@ class _SidebarState extends State<_Sidebar> {
       await session.api!.updateProjectFolder(folder.id, name: name);
       await widget.onFoldersChanged();
     } catch (e) {
-      if (mounted) showAppToast(context, '폴더 이름을 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('폴더 이름을 바꾸지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -972,16 +975,18 @@ class _SidebarState extends State<_Sidebar> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text("'${folder.name}' 폴더 삭제"),
-        content: const Text('폴더만 삭제되고 안의 프로젝트는 목록에 그대로 남습니다.'),
+        title: Text(
+          tr('\'{folder.name}\' 폴더 삭제', {'folder.name': folder.name}),
+        ),
+        content: Text(tr('폴더만 삭제되고 안의 프로젝트는 목록에 그대로 남습니다.')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       ),
@@ -991,7 +996,7 @@ class _SidebarState extends State<_Sidebar> {
       await session.api!.deleteProjectFolder(folder.id);
       await widget.onFoldersChanged();
     } catch (e) {
-      if (mounted) showAppToast(context, '폴더를 삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('폴더를 삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -1005,7 +1010,7 @@ class _SidebarState extends State<_Sidebar> {
     } catch (e) {
       if (!mounted) return;
       setState(() => folder.collapsed = !next);
-      showAppToast(context, '폴더 상태를 저장하지 못했습니다: $e');
+      showAppToast(context, tr('폴더 상태를 저장하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -1018,7 +1023,9 @@ class _SidebarState extends State<_Sidebar> {
       if (!mounted) return;
       showAppToast(
         context,
-        folderId == null ? '폴더에서 빼지 못했습니다: $e' : '폴더로 옮기지 못했습니다: $e',
+        folderId == null
+            ? tr('폴더에서 빼지 못했습니다: {e}', {'e': e})
+            : tr('폴더로 옮기지 못했습니다: {e}', {'e': e}),
       );
     }
   }
@@ -1078,31 +1085,31 @@ class _SidebarState extends State<_Sidebar> {
           children: [
             _SidebarItem(
               icon: Icons.home_outlined,
-              label: '홈',
+              label: tr('홈'),
               selected: view == ProjectView.home,
               onTap: () => onSelect(ProjectView.home),
             ),
             _SidebarItem(
               icon: Icons.checklist_outlined,
-              label: '내 업무',
+              label: tr('내 업무'),
               selected: view == ProjectView.myTasks,
               onTap: () => onSelect(ProjectView.myTasks),
             ),
             _SidebarItem(
               icon: Icons.calendar_today_outlined,
-              label: '캘린더',
+              label: tr('캘린더'),
               selected: view == ProjectView.calendar,
               onTap: () => onSelect(ProjectView.calendar),
             ),
             _SidebarItem(
               icon: Icons.view_timeline_outlined,
-              label: '간트차트',
+              label: tr('간트차트'),
               selected: view == ProjectView.gantt,
               onTap: () => onSelect(ProjectView.gantt),
             ),
             _SidebarItem(
               icon: Icons.description_outlined,
-              label: '노트',
+              label: tr('노트'),
               selected: view == ProjectView.notes,
               onTap: () => onSelect(ProjectView.notes),
             ),
@@ -1119,7 +1126,7 @@ class _SidebarState extends State<_Sidebar> {
                     children: [
                       Expanded(
                         child: Text(
-                          '프로젝트',
+                          tr('프로젝트'),
                           style: Theme.of(
                             context,
                           ).textTheme.labelMedium?.copyWith(color: hint),
@@ -1130,20 +1137,20 @@ class _SidebarState extends State<_Sidebar> {
                       MenuAnchor(
                         menuChildren: [
                           if (session.canCreateProject)
-                            _menuItem('프로젝트 생성', onCreateProject),
+                            _menuItem(tr('프로젝트 생성'), onCreateProject),
                           _menuItem(
-                            '전체 프로젝트',
+                            tr('전체 프로젝트'),
                             () => onSelect(ProjectView.allProjects),
                           ),
                           _menuItem(
-                            '템플릿',
+                            tr('템플릿'),
                             () => onSelect(ProjectView.templates),
                           ),
-                          _menuItem('폴더 추가', _addFolder),
+                          _menuItem(tr('폴더 추가'), _addFolder),
                         ],
                         builder: (context, controller, _) => IconButton(
                           icon: const Icon(Icons.add, size: 18),
-                          tooltip: '추가',
+                          tooltip: tr('추가'),
                           visualDensity: VisualDensity.compact,
                           onPressed: () => controller.isOpen
                               ? controller.close()
@@ -1171,8 +1178,8 @@ class _SidebarState extends State<_Sidebar> {
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                 child: Text(
                   session.canCreateProject
-                      ? '아직 참여 중인 프로젝트가 없습니다. 위 + 로 만들어보세요.'
-                      : '아직 참여 중인 프로젝트가 없습니다.',
+                      ? tr('아직 참여 중인 프로젝트가 없습니다. 위 + 로 만들어보세요.')
+                      : tr('아직 참여 중인 프로젝트가 없습니다.'),
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: hint),
@@ -1196,7 +1203,9 @@ class _SidebarState extends State<_Sidebar> {
                       ),
                       const SizedBox(width: 2),
                       Text(
-                        '즐겨찾기 ${favorites.length}',
+                        tr('즐겨찾기 {favorites.length}', {
+                          'favorites.length': favorites.length,
+                        }),
                         style: Theme.of(
                           context,
                         ).textTheme.labelSmall?.copyWith(color: hint),
@@ -1236,7 +1245,9 @@ class _SidebarState extends State<_Sidebar> {
                   (p) => view == ProjectView.project && projectId == p.id,
                 ),
                 title: Text(
-                  '종료된 프로젝트 ${archivedProjects.length}',
+                  tr('종료된 프로젝트 {archivedProjects.length}', {
+                    'archivedProjects.length': archivedProjects.length,
+                  }),
                   style: Theme.of(
                     context,
                   ).textTheme.labelMedium?.copyWith(color: hint),
@@ -1461,15 +1472,15 @@ class _ProjectItemState extends State<_ProjectItem> {
                     onPressed: widget.onToggleFavorite,
                     child: Padding(
                       padding: const EdgeInsets.only(right: 20),
-                      child: Text(favorite ? '즐겨찾기 해제' : '즐겨찾기'),
+                      child: Text(favorite ? tr('즐겨찾기 해제') : tr('즐겨찾기')),
                     ),
                   ),
                   MenuItemButton(
                     leadingIcon: const Icon(Icons.grid_view_outlined, size: 18),
                     onPressed: widget.onSaveAsTemplate,
-                    child: const Padding(
+                    child: Padding(
                       padding: EdgeInsets.only(right: 20),
-                      child: Text('템플릿 저장'),
+                      child: Text(tr('템플릿 저장')),
                     ),
                   ),
                   // 폴더로 이동 — 내 폴더 목록(지금 든 폴더는 체크 표시·비활성) + 새 폴더.
@@ -1499,10 +1510,10 @@ class _ProjectItemState extends State<_ProjectItem> {
                           size: 18,
                         ),
                         onPressed: widget.onNewFolder,
-                        child: _menuLabel('새 폴더'),
+                        child: _menuLabel(tr('새 폴더')),
                       ),
                     ],
-                    child: _menuLabel('폴더로 이동'),
+                    child: _menuLabel(tr('폴더로 이동')),
                   ),
                   if (widget.folderId != null)
                     MenuItemButton(
@@ -1511,7 +1522,7 @@ class _ProjectItemState extends State<_ProjectItem> {
                         size: 18,
                       ),
                       onPressed: () => widget.onMoveToFolder(null),
-                      child: _menuLabel('폴더에서 빼기'),
+                      child: _menuLabel(tr('폴더에서 빼기')),
                     ),
                   if (widget.onOpenSettings != null) ...[
                     const Divider(height: 8),
@@ -1521,14 +1532,14 @@ class _ProjectItemState extends State<_ProjectItem> {
                         size: 18,
                       ),
                       onPressed: widget.onOpenSettings,
-                      child: _menuLabel('프로젝트 설정'),
+                      child: _menuLabel(tr('프로젝트 설정')),
                     ),
                   ],
                 ],
                 builder: (context, controller, _) => IconButton(
                   icon: const Icon(Icons.more_horiz, size: 18),
                   visualDensity: VisualDensity.compact,
-                  tooltip: '프로젝트 메뉴',
+                  tooltip: tr('프로젝트 메뉴'),
                   onPressed: () => setState(
                     () => controller.isOpen
                         ? controller.close()
@@ -1650,9 +1661,9 @@ class _FolderHeaderState extends State<_FolderHeader> {
                             size: 18,
                           ),
                           onPressed: widget.onRename,
-                          child: const Padding(
+                          child: Padding(
                             padding: EdgeInsets.only(right: 20),
-                            child: Text('이름 변경'),
+                            child: Text(tr('이름 변경')),
                           ),
                         ),
                         MenuItemButton(
@@ -1661,16 +1672,16 @@ class _FolderHeaderState extends State<_FolderHeader> {
                             size: 18,
                           ),
                           onPressed: widget.onDelete,
-                          child: const Padding(
+                          child: Padding(
                             padding: EdgeInsets.only(right: 20),
-                            child: Text('폴더 삭제'),
+                            child: Text(tr('폴더 삭제')),
                           ),
                         ),
                       ],
                       builder: (context, controller, _) => IconButton(
                         icon: const Icon(Icons.more_horiz, size: 18),
                         visualDensity: VisualDensity.compact,
-                        tooltip: '폴더 메뉴',
+                        tooltip: tr('폴더 메뉴'),
                         onPressed: () => setState(
                           () => controller.isOpen
                               ? controller.close()
@@ -1752,7 +1763,7 @@ class _FolderNameDialogState extends State<_FolderNameDialog> {
           controller: _controller,
           autofocus: true,
           maxLength: 30,
-          decoration: const InputDecoration(hintText: '폴더 이름'),
+          decoration: InputDecoration(hintText: tr('폴더 이름')),
           onChanged: (_) => setState(() {}),
           onSubmitted: (_) => _submit(),
         ),
@@ -1760,7 +1771,7 @@ class _FolderNameDialogState extends State<_FolderNameDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: _name.isEmpty ? null : _submit,

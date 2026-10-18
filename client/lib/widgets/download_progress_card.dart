@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../services/download_progress.dart';
 import 'attachment_widgets.dart' show formatFileSize;
+import '../l10n/tr.dart';
 
 /// 내려받는 동안 화면 구석에 뜨는 진행 카드 — 파일 이름(여러 개면 "파일 N개"), 진행 막대, "3.2 MB / 10.5 MB · 31%"
 /// (여러 개면 "2/5개 · 받은 양"), 멈추는 X. 다 받으면 사라지고, 끝난 알림은 지금처럼 알약(토스트)으로 뜬다.
@@ -156,7 +157,7 @@ class _TaskRow extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          '다운로드 중 · $detail',
+          tr('다운로드 중 · {detail}', {'detail': detail}),
           key: const ValueKey('download-progress-detail'),
           style: theme.textTheme.bodySmall?.copyWith(color: hint),
         ),
@@ -171,7 +172,10 @@ String downloadDetailText(DownloadTask task) {
   final total = task.total;
   return [
     if (task.fileCount > 1)
-      '${(task.filesDone + 1).clamp(1, task.fileCount)}/${task.fileCount}개',
+      tr('{p0}/{task.fileCount}개', {
+        'p0': (task.filesDone + 1).clamp(1, task.fileCount),
+        'task.fileCount': task.fileCount,
+      }),
     if (task.fileCount <= 1 && total != null)
       '${formatFileSize(task.received)} / ${formatFileSize(total)}'
     else
@@ -189,7 +193,7 @@ class _CancelButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       key: const ValueKey('download-cancel'),
-      tooltip: '다운로드 취소',
+      tooltip: tr('다운로드 취소'),
       onPressed: task.cancelled ? null : task.cancel,
       icon: const Icon(Icons.close, size: 16),
       visualDensity: VisualDensity.compact,
@@ -234,13 +238,16 @@ class DownloadProgressPill extends StatelessWidget {
         final fraction = task.fraction;
         final short = [
           if (task.fileCount > 1)
-            '${(task.filesDone + 1).clamp(1, task.fileCount)}/${task.fileCount}개',
+            tr('{p0}/{task.fileCount}개', {
+              'p0': (task.filesDone + 1).clamp(1, task.fileCount),
+              'task.fileCount': task.fileCount,
+            }),
           fraction != null
               ? '${(fraction * 100).floor()}%'
               : formatFileSize(task.receivedBytes),
         ].join(' · ');
         return Tooltip(
-          message: '다운로드 중 · ${downloadDetailText(task)}',
+          message: tr('다운로드 중 · {p0}', {'p0': downloadDetailText(task)}),
           child: Material(
             key: const ValueKey('download-pill'),
             elevation: 3,

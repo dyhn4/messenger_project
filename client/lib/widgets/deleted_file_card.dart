@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
 /// 파일 삭제(업로드한 본인·팀 관리자)로 지워진 첨부 자리에 그리는 흐린 카드 — "삭제된 파일입니다".
 /// 메시지와 그 댓글은 그대로 남고 파일만 사라진 것이라, 말풍선은 이 카드로 그 자리를 보여 준다
@@ -34,7 +35,7 @@ class DeletedFileCard extends StatelessWidget {
       color: hint.withValues(alpha: 0.7),
     );
     final label = Text(
-      '삭제된 파일입니다',
+      tr('삭제된 파일입니다'),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.bodySmall?.copyWith(

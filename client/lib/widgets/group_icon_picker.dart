@@ -7,6 +7,7 @@ import '../services/session.dart';
 import 'avatar_utils.dart';
 import 'icon_edit_dialog.dart';
 import 'user_avatar.dart';
+import '../l10n/tr.dart';
 
 /// 그룹 아이콘 선택지 — team_settings_dialog.dart의 팀 이모지(🏢💼🚀💡🛠️📊🎨🧪📣🤝🌱⭐,
 /// 업무 느낌)와 안 겹치게 사람/취향 느낌으로 골랐다. 팀은 사각(둥근모서리) 아이콘이라, 원형인
@@ -182,7 +183,7 @@ Future<IconChoice?> showGroupIconEditor(
   );
   return showIconEditDialog(
     context,
-    title: '그룹 아이콘 편집',
+    title: tr('그룹 아이콘 편집'),
     session: session,
     initial: initial,
     preview: (choice, size) => icon(choice, size / 2),
@@ -253,7 +254,7 @@ class _GroupIconPickerDialogState extends State<GroupIconPickerDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '그룹 아이콘 선택하기',
+                tr('그룹 아이콘 선택하기'),
                 style: Theme.of(
                   context,
                 ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
@@ -264,7 +265,7 @@ class _GroupIconPickerDialogState extends State<GroupIconPickerDialog> {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '아이콘',
+                  tr('아이콘'),
                   style: Theme.of(context).textTheme.labelMedium,
                 ),
               ),
@@ -285,7 +286,7 @@ class _GroupIconPickerDialogState extends State<GroupIconPickerDialog> {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '배경색',
+                  tr('배경색'),
                   style: Theme.of(context).textTheme.labelMedium,
                 ),
               ),
@@ -308,7 +309,7 @@ class _GroupIconPickerDialogState extends State<GroupIconPickerDialog> {
                   Expanded(
                     child: OutlinedButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('취소'),
+                      child: Text(tr('취소')),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -316,7 +317,7 @@ class _GroupIconPickerDialogState extends State<GroupIconPickerDialog> {
                     child: FilledButton(
                       onPressed: () =>
                           Navigator.of(context).pop((_emoji, _color)),
-                      child: const Text('확인'),
+                      child: Text(tr('확인')),
                     ),
                   ),
                 ],

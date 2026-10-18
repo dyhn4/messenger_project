@@ -6,15 +6,29 @@ import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/my_avatar.dart';
 import 'project_forms.dart';
 import 'project_widgets.dart';
+import '../../l10n/tr.dart';
 
 // intl의 DateFormat(..., 'ko')는 initializeDateFormatting()을 먼저 부르지 않으면
 // LocaleDataException을 던진다(이 앱은 그 초기화를 어디서도 안 한다 — time_format.dart도
 // 같은 이유로 전부 직접 문자열을 조립한다). 요일 이름 하나 때문에 앱 전체에 로케일 초기화를
 // 추가하는 대신, 여기도 같은 관례를 따른다.
-const _weekdayNames = ['월', '화', '수', '목', '금', '토', '일'];
+final _weekdayNames = [
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+  tr('일'),
+];
 
 String _formatGreetingDate(DateTime dt) {
-  return '${dt.year}년 ${dt.month}월 ${dt.day}일 ${_weekdayNames[dt.weekday - 1]}요일';
+  return tr('{dt.year}년 {dt.month}월 {dt.day}일 {p0}요일', {
+    'dt.year': dt.year,
+    'dt.month': dt.month,
+    'dt.day': dt.day,
+    'p0': _weekdayNames[dt.weekday - 1],
+  });
 }
 
 /// 프로젝트 "홈" 대시보드 — 인사말/통계, 내가 참여한 프로젝트, 내가 담당한 업무,
@@ -144,15 +158,15 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
             builder: (context, constraints) {
               final left = [
                 ProjectCard(
-                  title: '내가 참여한 프로젝트',
+                  title: tr('내가 참여한 프로젝트'),
                   icon: Icons.assignment_outlined,
-                  subtitle: '내가 참여 중인 프로젝트별 진행률을 확인할 수 있습니다.',
+                  subtitle: tr('내가 참여 중인 프로젝트별 진행률을 확인할 수 있습니다.'),
                   actionLabel: home.projects.length > 4
-                      ? (_allProjects ? '접기' : '모두 보기')
+                      ? (_allProjects ? tr('접기') : tr('모두 보기'))
                       : null,
                   onAction: () => setState(() => _allProjects = !_allProjects),
                   child: projects.isEmpty
-                      ? const EmptyHint('참여 중인 프로젝트가 없습니다')
+                      ? EmptyHint(tr('참여 중인 프로젝트가 없습니다'))
                       : Column(
                           children: [
                             for (final project in projects)
@@ -165,12 +179,12 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
                 ),
                 const SizedBox(height: 20),
                 ProjectCard(
-                  title: '내가 담당한 업무',
+                  title: tr('내가 담당한 업무'),
                   icon: Icons.assignment_turned_in_outlined,
                   count: myTasks.length,
-                  subtitle: '내가 담당자로 지정된 업무를 진행 상황별로 확인할 수 있습니다.',
+                  subtitle: tr('내가 담당자로 지정된 업무를 진행 상황별로 확인할 수 있습니다.'),
                   child: myTasks.isEmpty
-                      ? const EmptyHint('담당한 업무가 없습니다')
+                      ? EmptyHint(tr('담당한 업무가 없습니다'))
                       : Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -191,7 +205,7 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
                                     ).hintColor,
                                     textStyle: const TextStyle(fontSize: 12),
                                   ),
-                                  child: const Text('더보기'),
+                                  child: Text(tr('더보기')),
                                 ),
                               ),
                           ],
@@ -200,10 +214,10 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
               ];
               final right = [
                 ProjectCard(
-                  title: '이번 주 나의 업무',
+                  title: tr('이번 주 나의 업무'),
                   icon: Icons.calendar_today_outlined,
-                  subtitle: '이번 주 내가 담당한 업무를 날짜별로 확인할 수 있습니다.',
-                  actionLabel: widget.onOpenCalendar == null ? null : '캘린더',
+                  subtitle: tr('이번 주 내가 담당한 업무를 날짜별로 확인할 수 있습니다.'),
+                  actionLabel: widget.onOpenCalendar == null ? null : tr('캘린더'),
                   onAction: widget.onOpenCalendar,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -219,7 +233,7 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
                       ),
                       const SizedBox(height: 8),
                       if (dayTasks.isEmpty)
-                        const EmptyHint('이 날짜에 진행 중인 업무가 없습니다')
+                        EmptyHint(tr('이 날짜에 진행 중인 업무가 없습니다'))
                       else
                         // 다섯 줄쯤 보이고 나머지는 이 안에서 스크롤.
                         ConstrainedBox(
@@ -244,12 +258,12 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
                 ),
                 const SizedBox(height: 20),
                 ProjectCard(
-                  title: '최근 댓글',
+                  title: tr('최근 댓글'),
                   icon: Icons.chat_bubble_outline,
                   child: home.recentComments.isEmpty
-                      ? const Padding(
+                      ? Padding(
                           padding: EdgeInsets.symmetric(vertical: 24),
-                          child: EmptyHint('최근 댓글이 없습니다'),
+                          child: EmptyHint(tr('최근 댓글이 없습니다')),
                         )
                       : TaskRow.list([
                           for (final comment in home.recentComments.take(5))
@@ -309,14 +323,16 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '안녕하세요, ${widget.session.name ?? ''} 님',
+                tr('안녕하세요, {p0} 님', {'p0': widget.session.name ?? ''}),
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
-                '오늘은 ${_formatGreetingDate(DateTime.now())}이에요. 오늘도 화이팅!',
+                tr('오늘은 {p0}이에요. 오늘도 화이팅!', {
+                  'p0': _formatGreetingDate(DateTime.now()),
+                }),
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: hint),
@@ -327,7 +343,7 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
         FilledButton.icon(
           onPressed: home.projects.isEmpty ? null : () => _createTask(home),
           icon: const Icon(Icons.add, size: 18),
-          label: const Text('새 업무'),
+          label: Text(tr('새 업무')),
         ),
       ],
     );
@@ -365,7 +381,9 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '완료율 ${home.donePercent}%',
+                  tr('완료율 {home.donePercent}%', {
+                    'home.donePercent': home.donePercent,
+                  }),
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: hint),
@@ -373,12 +391,12 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
               ],
             ),
           ),
-          _Stat(value: home.total, label: '전체'),
-          _Stat(value: home.done, label: '완료', color: Colors.blue),
-          _Stat(value: home.doing, label: '진행'),
+          _Stat(value: home.total, label: tr('전체')),
+          _Stat(value: home.done, label: tr('완료'), color: Colors.blue),
+          _Stat(value: home.doing, label: tr('진행')),
           _Stat(
             value: home.overdue,
-            label: '지연',
+            label: tr('지연'),
             color: home.overdue > 0 ? Colors.redAccent : null,
           ),
         ],
@@ -499,7 +517,15 @@ class _WeekStrip extends StatelessWidget {
     required this.onSelect,
   });
 
-  static const _weekdayNames = ['월', '화', '수', '목', '금', '토', '일'];
+  static final _weekdayNames = [
+    tr('월'),
+    tr('화'),
+    tr('수'),
+    tr('목'),
+    tr('금'),
+    tr('토'),
+    tr('일'),
+  ];
   static const _selectedColor = Color(0xFF7FB2F0);
 
   @override

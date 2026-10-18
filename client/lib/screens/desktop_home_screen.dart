@@ -35,6 +35,7 @@ import 'org_chart_screen.dart' show showOrgChartScreen;
 import 'start_chat_dialog.dart';
 import 'topic_browse_screen.dart';
 import '../widgets/user_status_dialogs.dart';
+import '../l10n/tr.dart';
 
 /// 이 폭 이하로 창이 좁아지면 왼쪽 사이드바(고정 280px)를 항상 펼쳐두는 대신 얇은 화살표
 /// 스트립으로 접는다 — HomeScreen이 데스크톱/모바일 레이아웃을 가르는 wideBreakpoint(700)와는
@@ -445,7 +446,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       final room = await session.openSelfChat();
       if (mounted) _selectRoom(room);
     } catch (e) {
-      if (mounted) showAppToast(context, '나와의 대화를 열지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('나와의 대화를 열지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -627,7 +628,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       // 방을 아직 안 골랐을 땐(팀을 막 전환한 직후 포함) 지금 보고 있는 팀을 알려준다.
       final team = widget.session.currentTeam;
       if (team == null) {
-        return const Center(child: Text('왼쪽에서 대화방을 선택하세요.'));
+        return Center(child: Text(tr('왼쪽에서 대화방을 선택하세요.')));
       }
       return Center(
         child: Column(
@@ -640,12 +641,12 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              '${team.name}입니다',
+              tr('{team.name}입니다', {'team.name': team.name}),
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
             Text(
-              '왼쪽에서 대화방을 선택하세요.',
+              tr('왼쪽에서 대화방을 선택하세요.'),
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Theme.of(context).hintColor,
               ),
@@ -833,7 +834,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
           if (isSplit)
             IconButton(
               icon: const Icon(Icons.close),
-              tooltip: '분할 닫기',
+              tooltip: tr('분할 닫기'),
               onPressed: onClose,
             ),
           RoomOptionsMenu(
@@ -932,7 +933,7 @@ class _TopBar extends StatelessWidget {
                       // 이름은 글자 대신 마우스를 올렸을 때의 안내(툴팁)로만 보인다.
                       IconButton(
                         key: const ValueKey('topbar-org-chart'),
-                        tooltip: '조직도',
+                        tooltip: tr('조직도'),
                         icon: const Icon(Icons.account_tree_outlined),
                         onPressed: () => showOrgChartScreen(context, session),
                       ),
@@ -947,12 +948,12 @@ class _TopBar extends StatelessWidget {
                     ),
                     IconButton(
                       icon: const Icon(Icons.people_outline),
-                      tooltip: '팀 멤버',
+                      tooltip: tr('팀 멤버'),
                       onPressed: onShowMembers,
                     ),
                     IconButton(
                       icon: const Icon(Icons.search),
-                      tooltip: '검색',
+                      tooltip: tr('검색'),
                       onPressed: onToggleSearch,
                     ),
                     // 파일·즐겨찾기·링크·캘린더·프로젝트·문의함 …은 이 메뉴 안에 있다(menu_entries.dart).
@@ -1069,11 +1070,7 @@ class _Sidebar extends StatelessWidget {
           // 다른 줄의 즐겨찾기 별 자리만큼 비워서 아바타 줄을 맞춘다.
           children: [const SizedBox(width: 28), avatar],
         ),
-        title: const Text(
-          selfRoomName,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: Text(selfRoomName, maxLines: 1, overflow: TextOverflow.ellipsis),
         onTap: onOpenSelfChat,
       );
     }
@@ -1117,7 +1114,7 @@ class _Sidebar extends StatelessWidget {
     if (groups.archived.isNotEmpty) ...[
       TopicFolderHeader(
         key: const ValueKey('topic-folder-archived'),
-        name: '보관된 토픽',
+        name: tr('보관된 토픽'),
         count: groups.archived.length,
         unreadCount: groups.archivedUnread,
         collapsed: !archivedExpanded,
@@ -1193,11 +1190,13 @@ class _Sidebar extends StatelessWidget {
             builder: (context, candidates, _) => TopicDropHighlight(
               active: candidates.isNotEmpty,
               child: _SectionHeader(
-                title: '토픽 ${topics.length}',
+                title: tr('토픽 {topics.length}', {
+                  'topics.length': topics.length,
+                }),
                 badgeCount: topicsUnread,
                 action: PopupMenuButton<void>(
                   icon: const Icon(Icons.add, size: 20),
-                  tooltip: '토픽 추가',
+                  tooltip: tr('토픽 추가'),
                   // 채팅 목록 우클릭 메뉴와 같은 간결한 모양.
                   color: CompactMenu.color(context),
                   shape: CompactMenu.shape,
@@ -1212,21 +1211,21 @@ class _Sidebar extends StatelessWidget {
                       _plusItem(
                         context,
                         Icons.add_comment_outlined,
-                        '새로운 토픽 생성하기',
+                        tr('새로운 토픽 생성하기'),
                         onCreateTopic,
                       ),
                     if (session.canCreateRooms) ...[
                       _plusItem(
                         context,
                         Icons.explore_outlined,
-                        '참여 가능한 토픽 보기',
+                        tr('참여 가능한 토픽 보기'),
                         onBrowseTopics,
                       ),
                       // 멤버 여러 명을 내가 참여 중인 토픽·그룹채팅 여러 곳에 한 번에 초대한다(PC 전용 — 이 사이드바는 PC뿐).
                       _plusItem(
                         context,
                         Icons.group_add_outlined,
-                        '여러 토픽/그룹채팅에 초대',
+                        tr('여러 토픽/그룹채팅에 초대'),
                         () => showInviteToMultipleRooms(hostContext, session),
                       ),
                       CompactMenu.divider,
@@ -1234,7 +1233,7 @@ class _Sidebar extends StatelessWidget {
                     _plusItem(
                       context,
                       Icons.create_new_folder_outlined,
-                      '폴더 생성',
+                      tr('폴더 생성'),
                       () => createTopicFolderFlow(hostContext, session),
                     ),
                   ],
@@ -1244,13 +1243,13 @@ class _Sidebar extends StatelessWidget {
           ),
           topicsChildren: _topicChildren(topicGroups),
           groupsHeader: _SectionHeader(
-            title: '그룹채팅 ${groups.length}',
+            title: tr('그룹채팅 {groups.length}', {'groups.length': groups.length}),
             badgeCount: groupsUnread,
             action: !session.canCreateRooms
                 ? null
                 : IconButton(
                     icon: const Icon(Icons.add, size: 20),
-                    tooltip: '새 그룹채팅',
+                    tooltip: tr('새 그룹채팅'),
                     onPressed: onNewGroupChat,
                   ),
           ),
@@ -1279,13 +1278,13 @@ class _Sidebar extends StatelessWidget {
               ),
           ],
           dmsHeader: _SectionHeader(
-            title: '채팅 ${dms.length}',
+            title: tr('채팅 {dms.length}', {'dms.length': dms.length}),
             badgeCount: dmsUnread,
             action: !session.canCreateRooms
                 ? null
                 : IconButton(
                     icon: const Icon(Icons.add, size: 20),
-                    tooltip: '채팅 시작하기',
+                    tooltip: tr('채팅 시작하기'),
                     onPressed: onStartChat,
                   ),
           ),
@@ -1730,7 +1729,11 @@ class _RoomTileState extends State<_RoomTile> {
             enabled: f.id != menu.currentFolderId,
           ),
         if (menu.folders.isNotEmpty) const PopupMenuDivider(height: 9),
-        entry(kNewTopicFolderChoice, Icons.create_new_folder_outlined, '새 폴더…'),
+        entry(
+          kNewTopicFolderChoice,
+          Icons.create_new_folder_outlined,
+          tr('새 폴더…'),
+        ),
       ],
     );
   }
@@ -1769,15 +1772,15 @@ class _RoomTileState extends State<_RoomTile> {
       menuPadding: const EdgeInsets.symmetric(vertical: 6),
       constraints: const BoxConstraints(minWidth: 180, maxWidth: 280),
       items: [
-        item(_RoomContextAction.split, '대화창 분할하기'),
+        item(_RoomContextAction.split, tr('대화창 분할하기')),
         // 이미 비밀 대화인 방에서 "또" 비밀대화를 시작하는 건 의미가 없고, 그룹/토픽은
         // 애초에 1:1이 아니라 비밀 대화 개념이 없다(나와의 대화는 상대가 없다).
         if (_isDm && !room.isSecret && !pinnedSelf)
-          item(_RoomContextAction.startSecret, '비밀대화 시작하기'),
+          item(_RoomContextAction.startSecret, tr('비밀대화 시작하기')),
         divider,
         item(
           _RoomContextAction.toggleMute,
-          room.muted ? '대화방 알림 켜기' : '대화방 알림 끄기',
+          room.muted ? tr('대화방 알림 켜기') : tr('대화방 알림 끄기'),
         ),
         // 그룹채팅방만 — 나에게만 다른 이름으로 부르기(다른 멤버에겐 그대로).
         if (room.type == RoomType.group)
@@ -1785,7 +1788,7 @@ class _RoomTileState extends State<_RoomTile> {
             _RoomContextAction.rename,
             renameRoomMenuLabel(room, session.userId ?? ''),
           ),
-        item(_RoomContextAction.markAllRead, '모두 읽음 처리'),
+        item(_RoomContextAction.markAllRead, tr('모두 읽음 처리')),
         // 토픽만 — 내 토픽 폴더로 옮기거나 폴더에서 뺀다(끌어다 놓기와 같다).
         if (folderMenu != null) ...[
           divider,
@@ -1803,8 +1806,8 @@ class _RoomTileState extends State<_RoomTile> {
             },
             child: Row(
               children: [
-                const Expanded(
-                  child: Text('폴더로 이동', style: TextStyle(fontSize: 13)),
+                Expanded(
+                  child: Text(tr('폴더로 이동'), style: TextStyle(fontSize: 13)),
                 ),
                 Icon(
                   Icons.chevron_right,
@@ -1815,12 +1818,12 @@ class _RoomTileState extends State<_RoomTile> {
             ),
           ),
           if (folderMenu.currentFolderId != null)
-            item(_RoomContextAction.removeFromFolder, '폴더에서 빼기'),
+            item(_RoomContextAction.removeFromFolder, tr('폴더에서 빼기')),
         ],
         if (!pinnedSelf) ...[
           divider,
-          if (_isDm) item(_RoomContextAction.hide, '숨기기'),
-          item(_RoomContextAction.leave, '나가기'),
+          if (_isDm) item(_RoomContextAction.hide, tr('숨기기')),
+          item(_RoomContextAction.leave, tr('나가기')),
         ],
       ],
     );
@@ -1853,7 +1856,7 @@ class _RoomTileState extends State<_RoomTile> {
           await session.startSecretChatInTeam(room.teamId, other.id);
         } catch (e) {
           if (mounted) {
-            showAppToast(context, '비밀대화를 시작하지 못했습니다: $e');
+            showAppToast(context, tr('비밀대화를 시작하지 못했습니다: {e}', {'e': e}));
           }
         }
       case _RoomContextAction.toggleMute:
@@ -2015,10 +2018,10 @@ class _RoomTileState extends State<_RoomTile> {
                       iconSize: 16,
                       // ⋮ 메뉴의 문구(room_options_menu.dart)와 맞춘다 — 토픽은 "토픽 나가기".
                       tooltip: _isDm
-                          ? '채팅방 숨기기'
+                          ? tr('채팅방 숨기기')
                           : (widget.room.type == RoomType.topic
-                                ? '토픽 나가기'
-                                : '채팅방 나가기'),
+                                ? tr('토픽 나가기')
+                                : tr('채팅방 나가기')),
                       icon: const Icon(Icons.close),
                       onPressed: showHover ? _onCloseX : null,
                     ),

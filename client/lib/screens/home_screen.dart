@@ -11,6 +11,7 @@ import 'chat_screen.dart';
 import 'desktop_home_screen.dart';
 import 'room_list_screen.dart';
 import 'team_select_screen.dart';
+import '../l10n/tr.dart';
 
 /// 창 너비로 레이아웃을 고른다. 넓으면(PC) 사이드바+채팅패널 분할 화면,
 /// 좁으면(폰) 기존 목록 → 채팅화면 전환 방식을 쓴다.
@@ -140,32 +141,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) => AlertDialog(
-          title: const Row(
+          title: Row(
             children: [
               Icon(Icons.videocam, color: Colors.green),
               SizedBox(width: 8),
-              Text('화상회의 요청'),
+              Text(tr('화상회의 요청')),
             ],
           ),
           content: Text(
-            '${room.displayName(widget.session.userId ?? '')}에서 화상회의가 시작됐습니다.',
+            tr('{p0}에서 화상회의가 시작됐습니다.', {
+              'p0': room.displayName(widget.session.userId ?? ''),
+            }),
           ),
           actions: [
             TextButton(
               key: const ValueKey('incoming-call-decline'),
               onPressed: () => Navigator.of(dialogContext).pop('decline'),
-              child: const Text('거절'),
+              child: Text(tr('거절')),
             ),
             OutlinedButton.icon(
               key: const ValueKey('incoming-call-voice'),
               onPressed: () => Navigator.of(dialogContext).pop('voice'),
               icon: const Icon(Icons.mic_none, size: 18),
-              label: const Text('음성으로 참여'),
+              label: Text(tr('음성으로 참여')),
             ),
             FilledButton(
               key: const ValueKey('incoming-call-accept'),
               onPressed: () => Navigator.of(dialogContext).pop('video'),
-              child: const Text('참여'),
+              child: Text(tr('참여')),
             ),
           ],
         ),
@@ -177,7 +180,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           await widget.session.joinCall(room.id, camera: answer == 'video');
           if (mounted) await showCallScreen(context, widget.session, room);
         } catch (e) {
-          if (mounted) showAppToast(context, '통화에 참여하지 못했습니다: $e');
+          if (mounted) {
+            showAppToast(context, tr('통화에 참여하지 못했습니다: {e}', {'e': e}));
+          }
         }
       } else {
         widget.session.declineIncomingCall();
@@ -218,11 +223,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         builder: (dialogContext) => AlertDialog(
           // "상대 기기가 바뀜" 안내가 붙으면 길어진다 — 낮은 화면에서도 넘치지 않게.
           scrollable: true,
-          title: const Row(
+          title: Row(
             children: [
               Icon(Icons.lock_outline, color: Colors.green),
               SizedBox(width: 8),
-              Text('비밀 대화 요청'),
+              Text(tr('비밀 대화 요청')),
             ],
           ),
           content: Column(
@@ -230,15 +235,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (outdated)
-                const Text(
-                  '상대가 예전 버전의 앱으로 보낸 비밀 대화 요청이라 이 기기에서는 수락할 수 없습니다. 거절한 뒤 상대에게 앱을 최신 '
-                  '버전으로 업데이트하고 다시 요청해 달라고 해 주세요(내 다른 기기에서 받으려면 닫기).\n\n두 사람 모두 최신 앱인데 이 '
-                  '안내가 뜨면 서버가 예전 버전이거나 요청을 바꿨을 수 있습니다 — 관리자에게 알려 주세요.',
+                Text(
+                  tr(
+                    '상대가 예전 버전의 앱으로 보낸 비밀 대화 요청이라 이 기기에서는 수락할 수 없습니다. 거절한 뒤 상대에게 앱을 최신 버전으로 업데이트하고 다시 요청해 달라고 해 주세요(내 다른 기기에서 받으려면 닫기).\n\n두 사람 모두 최신 앱인데 이 안내가 뜨면 서버가 예전 버전이거나 요청을 바꿨을 수 있습니다 — 관리자에게 알려 주세요.',
+                  ),
                   key: ValueKey('secret-invite-outdated'),
                 )
               else
-                const Text(
-                  '상대방이 비밀 대화(종단간 암호화)를 시작하려고 합니다. 이 대화는 이 기기에서만 열람할 수 있고, 다른 기기와 동기화되지 않습니다.',
+                Text(
+                  tr(
+                    '상대방이 비밀 대화(종단간 암호화)를 시작하려고 합니다. 이 대화는 이 기기에서만 열람할 수 있고, 다른 기기와 동기화되지 않습니다.',
+                  ),
                 ),
               if (changedDevice) ...[
                 const SizedBox(height: 12),
@@ -252,10 +259,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       color: Colors.amber.shade800,
                     ),
                     const SizedBox(width: 6),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        '상대의 기기가 바뀌었습니다 — 예전에 보안 코드를 확인한 기기가 아닌 다른 기기에서 보낸 요청입니다. '
-                        '수락한 뒤 더보기의 "보안 코드 확인"에서 상대와 보안 코드를 다시 비교해 주세요.',
+                        tr(
+                          '상대의 기기가 바뀌었습니다 — 예전에 보안 코드를 확인한 기기가 아닌 다른 기기에서 보낸 요청입니다. 수락한 뒤 더보기의 "보안 코드 확인"에서 상대와 보안 코드를 다시 비교해 주세요.',
+                        ),
                       ),
                     ),
                   ],
@@ -268,16 +276,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (outdated)
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(null),
-                child: const Text('닫기'),
+                child: Text(tr('닫기')),
               ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('거절'),
+              child: Text(tr('거절')),
             ),
             if (!outdated)
               FilledButton(
                 onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: const Text('수락'),
+                child: Text(tr('수락')),
               ),
           ],
         ),
@@ -307,7 +315,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           await widget.session.rejectSecretInvite(invite);
         } catch (e) {
           // 그 사이 다른 기기에서 응답했거나 방이 없어졌다 — 다음 요청은 그대로 띄운다.
-          if (mounted) showAppToast(context, '비밀 대화 요청을 거절하지 못했습니다: $e');
+          if (mounted) {
+            showAppToast(context, tr('비밀 대화 요청을 거절하지 못했습니다: {e}', {'e': e}));
+          }
         }
       } else {
         widget.session.dismissSecretInvite(invite);

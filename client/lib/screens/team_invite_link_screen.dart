@@ -13,6 +13,7 @@ import '../widgets/floating_dialog.dart';
 import '../widgets/invite_link_detail.dart';
 import '../widgets/invite_mail_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
+import '../l10n/tr.dart';
 
 /// "팀 초대 링크" 관리 화면. 위의 InviteLinkScreen(설치→가입)과 달리, 이 링크로 가입하면
 /// 가입과 동시에 지정한 팀에 자동 합류하고 계정 등급도 자동으로 부여된다.
@@ -84,7 +85,7 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
   Future<void> _create() async {
     final teams = widget.session.teams;
     if (teams.isEmpty) {
-      _toast('먼저 팀을 만들거나 팀에 들어가 있어야 합니다.');
+      _toast(tr('먼저 팀을 만들거나 팀에 들어가 있어야 합니다.'));
       return;
     }
     final result = await showDialog<_CreateTeamInviteLinkResult>(
@@ -108,9 +109,9 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
       );
       if (mounted) setState(() => _links = [link, ...?_links]);
       // 만들기만 하고 클립보드에는 넣지 않는다 — 보낼 때는 목록 줄의 복사 단추로.
-      _toast('초대링크를 생성했습니다.');
+      _toast(tr('초대링크를 생성했습니다.'));
     } catch (e) {
-      _toast('팀 초대 링크 생성 실패: $e');
+      _toast(tr('팀 초대 링크 생성 실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _creating = false);
     }
@@ -128,28 +129,30 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
       ),
     );
     if (!mounted) return;
-    showAppToast(context, '링크를 복사했습니다. 원하는 곳에 붙여넣어 보내세요.');
+    showAppToast(context, tr('링크를 복사했습니다. 원하는 곳에 붙여넣어 보내세요.'));
   }
 
   Future<void> _revoke(TeamInviteLink link) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('팀 초대 링크 취소'),
+        title: Text(tr('팀 초대 링크 취소')),
         content: SizedBox(
           width: 320,
           child: Text(
-            '${link.label ?? '이'} 링크를 취소할까요? 이미 보낸 링크로는 더 이상 가입하거나 설치·연결할 수 없게 됩니다.',
+            tr('{p0} 링크를 취소할까요? 이미 보낸 링크로는 더 이상 가입하거나 설치·연결할 수 없게 됩니다.', {
+              'p0': link.label ?? tr('이'),
+            }),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('링크 취소하기'),
+            child: Text(tr('링크 취소하기')),
           ),
         ],
       ),
@@ -166,14 +169,14 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
         _links = list;
       });
     } catch (e) {
-      _toast('실패: $e');
+      _toast(tr('실패: {e}', {'e': e}));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return FloatingDialog(
-      title: '팀 초대 링크',
+      title: tr('팀 초대 링크'),
       maxWidth: 480,
       maxHeight: 640,
       child: Column(
@@ -181,7 +184,7 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '링크로 가입하면 지정한 팀에 자동으로 합류하고, 지정한 등급이 바로 부여됩니다.',
+            tr('링크로 가입하면 지정한 팀에 자동으로 합류하고, 지정한 등급이 바로 부여됩니다.'),
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
@@ -198,7 +201,7 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.group_add_outlined),
-              label: const Text('팀 초대 링크 만들기'),
+              label: Text(tr('팀 초대 링크 만들기')),
             ),
           ),
           const SizedBox(height: 16),
@@ -220,8 +223,11 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
         '${link.teamName} · ${link.assignedRole.label}'
             '${link.assignedPosition != null ? ' · ${link.assignedPosition}' : ''}',
         '${link.statusLabel} · ${link.usageLabel}',
-        '${link.createdByName} · ${formatDateTime(link.createdAt)} 생성',
-        '${formatDateTime(link.expiresAt)} 만료',
+        tr('{link.createdByName} · {p0} 생성', {
+          'link.createdByName': link.createdByName,
+          'p0': formatDateTime(link.createdAt),
+        }),
+        tr('{p0} 만료', {'p0': formatDateTime(link.expiresAt)}),
       ],
       url: link.url,
       externalUrl: link.externalUrl,
@@ -250,7 +256,7 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
         padding: const EdgeInsets.symmetric(vertical: 20),
         child: Center(
           child: Text(
-            '아직 만든 팀 초대 링크가 없습니다.',
+            tr('아직 만든 팀 초대 링크가 없습니다.'),
             style: TextStyle(color: Theme.of(context).hintColor),
           ),
         ),
@@ -271,7 +277,7 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
                   context,
                   linkTitle: links[i].label?.isNotEmpty == true
                       ? links[i].label!
-                      : '${links[i].teamName} 팀 초대 링크',
+                      : tr('{p0} 팀 초대 링크', {'p0': links[i].teamName}),
                   send: (emails) => widget.session.api!
                       .sendTeamInviteLinkEmails(links[i].id, emails),
                 )
@@ -313,10 +319,19 @@ class _TeamInviteLinkRow extends StatelessWidget {
         style: TextStyle(color: inactive ? hint : null),
       ),
       subtitle: Text(
-        '${link.teamName} · ${link.assignedRole.label}'
-        '${link.assignedPosition != null ? ' · ${link.assignedPosition}' : ''}'
-        ' · ${link.statusLabel} · '
-        '${link.usageLabel} · ${formatDateTime(link.createdAt)} 생성',
+        tr(
+          '{link.teamName} · {link.assignedRole.label}{p0} · {link.statusLabel} · {link.usageLabel} · {p1} 생성',
+          {
+            'link.teamName': link.teamName,
+            'link.assignedRole.label': link.assignedRole.label,
+            'p0': link.assignedPosition != null
+                ? ' · ${link.assignedPosition}'
+                : '',
+            'link.statusLabel': link.statusLabel,
+            'link.usageLabel': link.usageLabel,
+            'p1': formatDateTime(link.createdAt),
+          },
+        ),
         style: TextStyle(color: hint),
       ),
       trailing: Row(
@@ -325,21 +340,21 @@ class _TeamInviteLinkRow extends StatelessWidget {
           // 복사는 새로 가입시킬 수 있을 때만 — 인원이 다 찬 링크로는 새 사람이 팀에 들어오지 못한다.
           if (link.valid)
             IconButton(
-              tooltip: '링크 복사',
+              tooltip: tr('링크 복사'),
               icon: const Icon(Icons.copy_outlined, size: 20),
               onPressed: onCopy,
             ),
           if (link.valid && onMail != null)
             IconButton(
               key: ValueKey('team-invite-mail-${link.id}'),
-              tooltip: '메일로 보내기',
+              tooltip: tr('메일로 보내기'),
               icon: const Icon(Icons.forward_to_inbox_outlined, size: 20),
               onPressed: onMail,
             ),
           // 취소는 만료 전이면 인원이 다 찼어도 둔다 — 그 링크로 아직 연결·설치가 되기 때문이다.
           if (link.isOpen)
             IconButton(
-              tooltip: '링크 취소',
+              tooltip: tr('링크 취소'),
               icon: const Icon(Icons.link_off, size: 20),
               onPressed: onRevoke,
             ),
@@ -435,7 +450,7 @@ class _CreateTeamInviteLinkDialogState
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('팀 초대 링크 만들기'),
+      title: Text(tr('팀 초대 링크 만들기')),
       content: SizedBox(
         width: 360,
         child: Column(
@@ -443,11 +458,11 @@ class _CreateTeamInviteLinkDialogState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '발급하면 7일간 유효합니다.',
+              tr('발급하면 7일간 유효합니다.'),
               style: TextStyle(color: Theme.of(context).hintColor),
             ),
             const SizedBox(height: 16),
-            Text('팀', style: Theme.of(context).textTheme.labelMedium),
+            Text(tr('팀'), style: Theme.of(context).textTheme.labelMedium),
             const SizedBox(height: 4),
             DropdownButtonFormField<String>(
               initialValue: _teamId,
@@ -460,7 +475,7 @@ class _CreateTeamInviteLinkDialogState
               onChanged: (v) => setState(() => _teamId = v ?? _teamId),
             ),
             const SizedBox(height: 16),
-            Text('부여할 등급', style: Theme.of(context).textTheme.labelMedium),
+            Text(tr('부여할 등급'), style: Theme.of(context).textTheme.labelMedium),
             const SizedBox(height: 4),
             SegmentedButton<AccountRole>(
               segments: [
@@ -476,7 +491,7 @@ class _CreateTeamInviteLinkDialogState
                   setState(() => _assignedRole = s.first),
             ),
             const SizedBox(height: 16),
-            Text('가입 인원', style: Theme.of(context).textTheme.labelMedium),
+            Text(tr('가입 인원'), style: Theme.of(context).textTheme.labelMedium),
             const SizedBox(height: 4),
             // 링크가 다른 데로 새도 정한 인원만 가입할 수 있다. 관리자 등급을 주는 링크는 늘 1명(서버도 같다).
             Wrap(
@@ -485,7 +500,7 @@ class _CreateTeamInviteLinkDialogState
               children: [
                 for (final n in inviteMaxUsesOptions)
                   ChoiceChip(
-                    label: Text('$n명'),
+                    label: Text(tr('{n}명', {'n': n})),
                     selected: _effectiveMaxUses == n,
                     onSelected: _assignedRole == AccountRole.admin && n != 1
                         ? null
@@ -497,7 +512,7 @@ class _CreateTeamInviteLinkDialogState
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  '관리자 등급을 주는 링크는 1명만 가입할 수 있습니다.',
+                  tr('관리자 등급을 주는 링크는 1명만 가입할 수 있습니다.'),
                   style: TextStyle(
                     fontSize: 12,
                     color: Theme.of(context).hintColor,
@@ -507,7 +522,7 @@ class _CreateTeamInviteLinkDialogState
             if (_availablePositions.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text(
-                '부여할 직책 (선택)',
+                tr('부여할 직책 (선택)'),
                 style: Theme.of(context).textTheme.labelMedium,
               ),
               const SizedBox(height: 4),
@@ -516,7 +531,7 @@ class _CreateTeamInviteLinkDialogState
                 runSpacing: 8,
                 children: [
                   ChoiceChip(
-                    label: const Text('지정 안 함'),
+                    label: Text(tr('지정 안 함')),
                     selected: _assignedPosition == null,
                     onSelected: (_) => setState(() => _assignedPosition = null),
                   ),
@@ -534,9 +549,9 @@ class _CreateTeamInviteLinkDialogState
             TextField(
               controller: _label,
               maxLength: 30,
-              decoration: const InputDecoration(
-                labelText: '메모 (선택)',
-                hintText: '예: 9월 신입',
+              decoration: InputDecoration(
+                labelText: tr('메모 (선택)'),
+                hintText: tr('예: 9월 신입'),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -546,7 +561,7 @@ class _CreateTeamInviteLinkDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(
@@ -558,7 +573,7 @@ class _CreateTeamInviteLinkDialogState
               maxUses: _effectiveMaxUses,
             ),
           ),
-          child: const Text('만들기'),
+          child: Text(tr('만들기')),
         ),
       ],
     );

@@ -7,6 +7,7 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/date_drop_calendar.dart';
 import 'groupware_screen.dart' show GroupwareChanges, GroupwareSectionHeader;
+import '../../l10n/tr.dart';
 
 /// 그룹웨어 "설문" 탭 — 여러 문항(하나 고르기·여러 개 고르기·글·별점) 설문을 만들어 범위 모두나 고른 사람에게 묻고, 응답하고, 결과를
 /// 모아 본다(서버 groupwareSurveys.js). 응답할 설문이 위에 오고, 만든 사람은 결과·안 한 사람을 보고 마감·독촉·삭제한다.
@@ -97,19 +98,21 @@ class _SurveyTabState extends State<SurveyTab> {
         key: const ValueKey('survey-list'),
         children: [
           GroupwareSectionHeader(
-            _pending > 0 ? '설문 · 응답할 설문 $_pending' : '설문',
+            _pending > 0
+                ? tr('설문 · 응답할 설문 {_pending}', {'_pending': _pending})
+                : tr('설문'),
             trailing: FilledButton.icon(
               key: const ValueKey('survey-new'),
               onPressed: _create,
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('새 설문'),
+              label: Text(tr('새 설문')),
             ),
           ),
           if (items.isEmpty)
             Padding(
               padding: const EdgeInsets.all(32),
               child: Text(
-                '아직 설문이 없습니다.',
+                tr('아직 설문이 없습니다.'),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: theme.hintColor),
               ),
@@ -137,10 +140,13 @@ class _SurveyTabState extends State<SurveyTab> {
               subtitle: Text(
                 [
                   s.creatorName,
-                  '응답 ${s.responseCount}/${s.targetCount}',
+                  tr('응답 {s.responseCount}/{s.targetCount}', {
+                    's.responseCount': s.responseCount,
+                    's.targetCount': s.targetCount,
+                  }),
                   if (s.closesAt != null && !s.closed)
-                    '${_mdhm(s.closesAt!)} 마감',
-                  if (s.anonymous) '익명',
+                    tr('{p0} 마감', {'p0': _mdhm(s.closesAt!)}),
+                  if (s.anonymous) tr('익명'),
                 ].join(' · '),
               ),
               trailing: _SurveyStateChip(s),
@@ -159,12 +165,12 @@ class _SurveyStateChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final (text, color) = s.closed
-        ? ('마감', Colors.grey)
+        ? (tr('마감'), Colors.grey)
         : s.pending
-        ? ('응답하기', scheme.primary)
+        ? (tr('응답하기'), scheme.primary)
         : s.responded
-        ? ('응답함', Colors.green.shade700)
-        : ('진행 중', scheme.secondary);
+        ? (tr('응답함'), Colors.green.shade700)
+        : (tr('진행 중'), scheme.secondary);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -280,7 +286,7 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
         closesAt: _closesAt,
       );
       if (!mounted) return;
-      showAppToast(context, '설문을 보냈습니다.');
+      showAppToast(context, tr('설문을 보냈습니다.'));
       Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) showAppToast(context, '$e');
@@ -317,13 +323,13 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
                   onChanged: (k) => setState(() => q.kind = k ?? q.kind),
                 ),
                 const Spacer(),
-                const Text('필수', style: TextStyle(fontSize: 13)),
+                Text(tr('필수'), style: TextStyle(fontSize: 13)),
                 Switch(
                   value: q.required,
                   onChanged: (v) => setState(() => q.required = v),
                 ),
                 IconButton(
-                  tooltip: '문항 삭제',
+                  tooltip: tr('문항 삭제'),
                   onPressed: _questions.length <= 1
                       ? null
                       : () => setState(() {
@@ -338,8 +344,8 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
               key: ValueKey('survey-q$index-title'),
               controller: q.title,
               maxLength: 200,
-              decoration: const InputDecoration(
-                hintText: '질문',
+              decoration: InputDecoration(
+                hintText: tr('질문'),
                 isDense: true,
                 counterText: '',
               ),
@@ -363,14 +369,14 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
                         controller: q.options[i],
                         maxLength: 100,
                         decoration: InputDecoration(
-                          hintText: '보기 ${i + 1}',
+                          hintText: tr('보기 {p0}', {'p0': i + 1}),
                           isDense: true,
                           counterText: '',
                         ),
                       ),
                     ),
                     IconButton(
-                      tooltip: '보기 삭제',
+                      tooltip: tr('보기 삭제'),
                       visualDensity: VisualDensity.compact,
                       onPressed: q.options.length <= 2
                           ? null
@@ -390,7 +396,7 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
                           () => q.options.add(TextEditingController()),
                         ),
                   icon: const Icon(Icons.add, size: 16),
-                  label: const Text('보기 추가'),
+                  label: Text(tr('보기 추가')),
                 ),
               ),
             ],
@@ -398,7 +404,7 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
-                  '1~5점으로 답합니다.',
+                  tr('1~5점으로 답합니다.'),
                   style: TextStyle(fontSize: 12, color: theme.hintColor),
                 ),
               ),
@@ -413,14 +419,14 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
     final hint = Theme.of(context).hintColor;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('새 설문'),
+        title: Text(tr('새 설문')),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: FilledButton(
               key: const ValueKey('survey-send'),
               onPressed: _saving ? null : _save,
-              child: const Text('보내기'),
+              child: Text(tr('보내기')),
             ),
           ),
         ],
@@ -432,8 +438,8 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
             key: const ValueKey('survey-title'),
             controller: _title,
             maxLength: 100,
-            decoration: const InputDecoration(
-              labelText: '제목',
+            decoration: InputDecoration(
+              labelText: tr('제목'),
               border: OutlineInputBorder(),
             ),
           ),
@@ -444,8 +450,8 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
             maxLength: 2000,
             minLines: 2,
             maxLines: 5,
-            decoration: const InputDecoration(
-              labelText: '설명(선택)',
+            decoration: InputDecoration(
+              labelText: tr('설명(선택)'),
               border: OutlineInputBorder(),
             ),
           ),
@@ -462,34 +468,36 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
                     ),
                   ),
             icon: const Icon(Icons.add),
-            label: const Text('문항 추가'),
+            label: Text(tr('문항 추가')),
           ),
           const Divider(height: 32),
           ListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('받는 사람'),
+            title: Text(tr('받는 사람')),
             subtitle: Text(
-              _targets == null ? '모두' : _targets!.map((t) => t.name).join(', '),
+              _targets == null
+                  ? tr('모두')
+                  : _targets!.map((t) => t.name).join(', '),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
             trailing: TextButton(
               key: const ValueKey('survey-targets'),
               onPressed: _pickTargets,
-              child: const Text('고르기'),
+              child: Text(tr('고르기')),
             ),
           ),
           SwitchListTile(
             key: const ValueKey('survey-anonymous'),
             contentPadding: EdgeInsets.zero,
-            title: const Text('익명'),
-            subtitle: const Text('결과에 누가 답했는지 나오지 않습니다.'),
+            title: Text(tr('익명')),
+            subtitle: Text(tr('결과에 누가 답했는지 나오지 않습니다.')),
             value: _anonymous,
             onChanged: (v) => setState(() => _anonymous = v),
           ),
           ListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('결과 공개'),
+            title: Text(tr('결과 공개')),
             trailing: DropdownButton<SurveyResultVisibility>(
               key: const ValueKey('survey-visibility'),
               value: _visibility,
@@ -502,7 +510,7 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
           ),
           ListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('마감'),
+            title: Text(tr('마감')),
             trailing: DateDropButton(
               value: _closesAt,
               onPicked: (d) => setState(
@@ -514,7 +522,9 @@ class _SurveyEditorScreenState extends State<SurveyEditorScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(8),
                 child: Text(
-                  _closesAt == null ? '없음' : '${_mdhm(_closesAt!)}까지',
+                  _closesAt == null
+                      ? tr('없음')
+                      : tr('{p0}까지', {'p0': _mdhm(_closesAt!)}),
                   style: TextStyle(color: _closesAt == null ? hint : null),
                 ),
               ),
@@ -547,16 +557,16 @@ class _PeoplePickerDialogState extends State<_PeoplePickerDialog> {
         if (_q.isEmpty || c.name.contains(_q) || c.username.contains(_q)) c,
     ];
     return AlertDialog(
-      title: const Text('받는 사람'),
+      title: Text(tr('받는 사람')),
       content: SizedBox(
         width: 360,
         height: 420,
         child: Column(
           children: [
             TextField(
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 prefixIcon: Icon(Icons.search),
-                hintText: '이름으로 찾기',
+                hintText: tr('이름으로 찾기'),
                 isDense: true,
               ),
               onChanged: (v) => setState(() => _q = v.trim()),
@@ -585,7 +595,7 @@ class _PeoplePickerDialogState extends State<_PeoplePickerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(<ApprovalCandidate>[]),
-          child: const Text('모두에게'),
+          child: Text(tr('모두에게')),
         ),
         FilledButton(
           key: const ValueKey('survey-targets-done'),
@@ -593,7 +603,9 @@ class _PeoplePickerDialogState extends State<_PeoplePickerDialog> {
             for (final c in widget.candidates)
               if (_picked.contains(c.id)) c,
           ]),
-          child: Text('${_picked.length}명 고르기'),
+          child: Text(
+            tr('{_picked.length}명 고르기', {'_picked.length': _picked.length}),
+          ),
         ),
       ],
     );
@@ -666,7 +678,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
     try {
       final first = await widget.api.respondSurvey(s.summary.id, _answers);
       if (!mounted) return;
-      showAppToast(context, first ? '응답을 보냈습니다.' : '응답을 고쳤습니다.');
+      showAppToast(context, first ? tr('응답을 보냈습니다.') : tr('응답을 고쳤습니다.'));
       await _load();
     } catch (e) {
       if (mounted) showAppToast(context, '$e');
@@ -682,25 +694,27 @@ class _SurveyScreenState extends State<SurveyScreen> {
       switch (action) {
         case 'close':
           await api.closeSurvey(id);
-          if (mounted) showAppToast(context, '설문을 마감했습니다.');
+          if (mounted) showAppToast(context, tr('설문을 마감했습니다.'));
           await _load();
         case 'remind':
           final n = await api.remindSurvey(id);
-          if (mounted) showAppToast(context, '$n명에게 응답을 요청했습니다.');
+          if (mounted) {
+            showAppToast(context, tr('{n}명에게 응답을 요청했습니다.', {'n': n}));
+          }
         case 'delete':
           final ok = await showDialog<bool>(
             context: context,
             builder: (c) => AlertDialog(
-              title: const Text('설문 삭제'),
-              content: const Text('설문과 모든 응답을 지울까요?'),
+              title: Text(tr('설문 삭제')),
+              content: Text(tr('설문과 모든 응답을 지울까요?')),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(c).pop(false),
-                  child: const Text('취소'),
+                  child: Text(tr('취소')),
                 ),
                 TextButton(
                   onPressed: () => Navigator.of(c).pop(true),
-                  child: const Text('삭제'),
+                  child: Text(tr('삭제')),
                 ),
               ],
             ),
@@ -771,7 +785,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
           for (var v = 1; v <= 5; v++)
             IconButton(
               key: ValueKey('answer-$id-$v'),
-              tooltip: '$v점',
+              tooltip: tr('{v}점', {'v': v}),
               onPressed: enabled
                   ? () => setState(() => _answers[id] = v)
                   : null,
@@ -807,7 +821,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
           ),
           if (q.kind == SurveyQuestionKind.multiple)
             Text(
-              '여러 개 고를 수 있습니다.',
+              tr('여러 개 고를 수 있습니다.'),
               style: TextStyle(fontSize: 12, color: theme.hintColor),
             ),
           const SizedBox(height: 4),
@@ -822,7 +836,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
     final s = _s;
     if (s == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('설문')),
+        appBar: AppBar(title: Text(tr('설문'))),
         body: Center(
           child: _error != null
               ? Text(_error!)
@@ -845,7 +859,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
                       SurveyResultsScreen(api: widget.api, survey: s),
                 ),
               ),
-              child: const Text('결과 보기'),
+              child: Text(tr('결과 보기')),
             ),
           if (s.canManage)
             PopupMenuButton<String>(
@@ -853,13 +867,13 @@ class _SurveyScreenState extends State<SurveyScreen> {
               onSelected: _manage,
               itemBuilder: (_) => [
                 if (!sum.closed) ...[
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'remind',
-                    child: Text('안 한 사람에게 요청'),
+                    child: Text(tr('안 한 사람에게 요청')),
                   ),
-                  const PopupMenuItem(value: 'close', child: Text('마감')),
+                  PopupMenuItem(value: 'close', child: Text(tr('마감'))),
                 ],
-                const PopupMenuItem(value: 'delete', child: Text('삭제')),
+                PopupMenuItem(value: 'delete', child: Text(tr('삭제'))),
               ],
             ),
         ],
@@ -871,12 +885,15 @@ class _SurveyScreenState extends State<SurveyScreen> {
             [
               sum.creatorName,
               _md(sum.createdAt),
-              '응답 ${sum.responseCount}/${sum.targetCount}',
+              tr('응답 {sum.responseCount}/{sum.targetCount}', {
+                'sum.responseCount': sum.responseCount,
+                'sum.targetCount': sum.targetCount,
+              }),
               if (sum.closed)
-                '마감됨'
+                tr('마감됨')
               else if (sum.closesAt != null)
-                '${_mdhm(sum.closesAt!)} 마감',
-              if (sum.anonymous) '익명',
+                tr('{p0} 마감', {'p0': _mdhm(sum.closesAt!)}),
+              if (sum.anonymous) tr('익명'),
             ].join(' · '),
             style: TextStyle(color: hint, fontSize: 13),
           ),
@@ -889,7 +906,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(
-                sum.closed ? '마감된 설문입니다.' : '이 설문의 대상이 아닙니다.',
+                sum.closed ? tr('마감된 설문입니다.') : tr('이 설문의 대상이 아닙니다.'),
                 style: TextStyle(color: hint),
               ),
             ),
@@ -899,7 +916,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
             FilledButton(
               key: const ValueKey('survey-submit'),
               onPressed: _saving ? null : _submit,
-              child: Text(sum.responded ? '응답 고치기' : '응답 보내기'),
+              child: Text(sum.responded ? tr('응답 고치기') : tr('응답 보내기')),
             ),
         ],
       ),
@@ -959,7 +976,10 @@ class _SurveyResultsScreenState extends State<SurveyResultsScreen> {
           SizedBox(
             width: 80,
             child: Text(
-              '$count명 (${(ratio * 100).round()}%)',
+              tr('{count}명 ({p0}%)', {
+                'count': count,
+                'p0': (ratio * 100).round(),
+              }),
               textAlign: TextAlign.right,
               style: const TextStyle(fontSize: 12),
             ),
@@ -974,7 +994,13 @@ class _SurveyResultsScreenState extends State<SurveyResultsScreen> {
     final r = _r;
     final hint = Theme.of(context).hintColor;
     return Scaffold(
-      appBar: AppBar(title: Text('결과 — ${widget.survey.summary.title}')),
+      appBar: AppBar(
+        title: Text(
+          tr('결과 — {widget.survey.summary.title}', {
+            'widget.survey.summary.title': widget.survey.summary.title,
+          }),
+        ),
+      ),
       body: r == null
           ? Center(
               child: _error != null
@@ -985,7 +1011,10 @@ class _SurveyResultsScreenState extends State<SurveyResultsScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 Text(
-                  '응답 ${r.responseCount}명 / 대상 ${r.targetCount}명',
+                  tr('응답 {r.responseCount}명 / 대상 {r.targetCount}명', {
+                    'r.responseCount': r.responseCount,
+                    'r.targetCount': r.targetCount,
+                  }),
                   key: const ValueKey('survey-result-count'),
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
@@ -996,7 +1025,7 @@ class _SurveyResultsScreenState extends State<SurveyResultsScreen> {
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                   Text(
-                    '${r.questions[i].answered}명 응답',
+                    tr('{p0}명 응답', {'p0': r.questions[i].answered}),
                     style: TextStyle(fontSize: 12, color: hint),
                   ),
                   const SizedBox(height: 6),
@@ -1014,21 +1043,25 @@ class _SurveyResultsScreenState extends State<SurveyResultsScreen> {
                     SurveyQuestionKind.rating => [
                       Text(
                         r.questions[i].average == null
-                            ? '평균 —'
-                            : '평균 ${r.questions[i].average!.toStringAsFixed(1)}점',
+                            ? tr('평균 —')
+                            : tr('평균 {p0}점', {
+                                'p0': r.questions[i].average!.toStringAsFixed(
+                                  1,
+                                ),
+                              }),
                         key: ValueKey('result-avg-${r.questions[i].id}'),
                       ),
                       for (var v = 5; v >= 1; v--)
                         if (r.questions[i].distribution.length == 5)
                           _bar(
-                            '$v점',
+                            tr('{v}점', {'v': v}),
                             r.questions[i].distribution[v - 1],
                             r.questions[i].answered,
                           ),
                     ],
                     SurveyQuestionKind.text => [
                       if (r.questions[i].texts.isEmpty)
-                        Text('응답 없음', style: TextStyle(color: hint)),
+                        Text(tr('응답 없음'), style: TextStyle(color: hint)),
                       for (final t in r.questions[i].texts)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 3),
@@ -1043,18 +1076,21 @@ class _SurveyResultsScreenState extends State<SurveyResultsScreen> {
                   const Divider(height: 28),
                 ],
                 if (r.respondents != null) ...[
-                  Text('응답한 사람', style: TextStyle(color: hint, fontSize: 12)),
+                  Text(
+                    tr('응답한 사람'),
+                    style: TextStyle(color: hint, fontSize: 12),
+                  ),
                   Text(r.respondents!.map((p) => p.name).join(', ')),
                   const SizedBox(height: 12),
                 ],
                 if (r.nonRespondents != null) ...[
                   Text(
-                    '아직 안 한 사람',
+                    tr('아직 안 한 사람'),
                     style: TextStyle(color: hint, fontSize: 12),
                   ),
                   Text(
                     r.nonRespondents!.isEmpty
-                        ? '모두 응답했습니다.'
+                        ? tr('모두 응답했습니다.')
                         : r.nonRespondents!.map((p) => p.name).join(', '),
                     key: const ValueKey('survey-non-respondents'),
                   ),

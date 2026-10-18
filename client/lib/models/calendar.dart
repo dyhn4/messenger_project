@@ -4,6 +4,8 @@
 // 본 epoch ms"(끝은 마지막 날 다음 날 자정, 배타)라서, 기기 시간대로 바꿔 읽으면 하루씩 어긋난다.
 // 그래서 종일 일정은 항상 allDayFromMs로 UTC의 y/m/d만 읽고, 보낼 때는 allDayToMs로 만든다.
 
+import '../l10n/tr.dart';
+
 /// 내장 구독 캘린더의 id — DB 행이 없어서 서버가 이 고정 문자열을 calendarId로 내려 준다.
 const kHolidaysCalendarId = 'holidays';
 const kBirthdaysCalendarId = 'birthdays';
@@ -49,7 +51,15 @@ DateTime allDayFromMs(int ms) {
 bool sameDay(DateTime a, DateTime b) =>
     a.year == b.year && a.month == b.month && a.day == b.day;
 
-const _weekdayShort = ['일', '월', '화', '수', '목', '금', '토'];
+final _weekdayShort = [
+  tr('일'),
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+];
 
 /// 0=일 … 6=토 (서버 recurrence.byWeekday와 같은 번호).
 String weekdayShortKo(int index) => _weekdayShort[index % 7];
@@ -168,7 +178,7 @@ class CalendarInfo {
   factory CalendarInfo.holidays({bool hidden = false}) => CalendarInfo(
     id: kHolidaysCalendarId,
     kind: kHolidaysCalendarId,
-    name: '국가 공휴일',
+    name: tr('국가 공휴일'),
     color: kHolidayColor,
     role: 'subscriber',
     hidden: hidden,
@@ -177,7 +187,7 @@ class CalendarInfo {
   factory CalendarInfo.birthdays({bool hidden = false}) => CalendarInfo(
     id: kBirthdaysCalendarId,
     kind: kBirthdaysCalendarId,
-    name: '멤버 생일',
+    name: tr('멤버 생일'),
     color: kBirthdayColor,
     role: 'subscriber',
     hidden: hidden,
@@ -186,7 +196,7 @@ class CalendarInfo {
   factory CalendarInfo.leaves({bool hidden = false}) => CalendarInfo(
     id: kLeavesCalendarId,
     kind: kLeavesCalendarId,
-    name: '팀 휴가',
+    name: tr('팀 휴가'),
     color: kLeaveColor,
     role: 'subscriber',
     hidden: hidden,
@@ -195,7 +205,7 @@ class CalendarInfo {
   factory CalendarInfo.bookings({bool hidden = false}) => CalendarInfo(
     id: kBookingsCalendarId,
     kind: kBookingsCalendarId,
-    name: '회의실 예약',
+    name: tr('회의실 예약'),
     color: kBookingColor,
     role: 'subscriber',
     hidden: hidden,
@@ -399,23 +409,49 @@ class Recurrence {
             : [if (startDay != null) weekdayIndex(startDay)];
         final dayText = days.isEmpty
             ? ''
-            : ' ${days.map(weekdayShortKo).join('·')}요일';
-        base = every ? '매주$dayText 반복' : '$interval주마다$dayText 반복';
+            : tr(' {p0}요일', {'p0': days.map(weekdayShortKo).join('·')});
+        base = every
+            ? tr('매주{dayText} 반복', {'dayText': dayText})
+            : tr('{interval}주마다{dayText} 반복', {
+                'interval': interval,
+                'dayText': dayText,
+              });
       case 'monthly':
-        final dayText = startDay == null ? '' : ' ${startDay.day}일';
-        base = every ? '매월$dayText 반복' : '$interval개월마다$dayText 반복';
+        final dayText = startDay == null
+            ? ''
+            : tr(' {startDay.day}일', {'startDay.day': startDay.day});
+        base = every
+            ? tr('매월{dayText} 반복', {'dayText': dayText})
+            : tr('{interval}개월마다{dayText} 반복', {
+                'interval': interval,
+                'dayText': dayText,
+              });
       case 'yearly':
         final dayText = startDay == null
             ? ''
-            : ' ${startDay.month}월 ${startDay.day}일';
-        base = every ? '매년$dayText 반복' : '$interval년마다$dayText 반복';
+            : tr(' {startDay.month}월 {startDay.day}일', {
+                'startDay.month': startDay.month,
+                'startDay.day': startDay.day,
+              });
+        base = every
+            ? tr('매년{dayText} 반복', {'dayText': dayText})
+            : tr('{interval}년마다{dayText} 반복', {
+                'interval': interval,
+                'dayText': dayText,
+              });
       default:
-        base = every ? '매일 반복' : '$interval일마다 반복';
+        base = every
+            ? tr('매일 반복')
+            : tr('{interval}일마다 반복', {'interval': interval});
     }
     if (until != null) {
-      base += ' (${until!.year}년 ${until!.month}월 ${until!.day}일까지)';
+      base += tr(' ({p0}년 {p1}월 {p2}일까지)', {
+        'p0': until!.year,
+        'p1': until!.month,
+        'p2': until!.day,
+      });
     } else if (count != null) {
-      base += ' ($count회)';
+      base += tr(' ({count}회)', {'count': count});
     }
     return base;
   }

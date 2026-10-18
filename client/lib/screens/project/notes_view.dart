@@ -18,19 +18,24 @@ import 'note_markdown.dart';
 import 'note_task_links.dart';
 import 'task_comments_section.dart';
 import 'project_widgets.dart' show EmptyHint;
+import '../../l10n/tr.dart';
 
 /// 목록 정렬.
 enum _NoteSort { created, updated, title }
 
 String _sortLabel(_NoteSort s) => switch (s) {
-  _NoteSort.created => '생성순',
-  _NoteSort.updated => '수정순',
-  _NoteSort.title => '제목순',
+  _NoteSort.created => tr('생성순'),
+  _NoteSort.updated => tr('수정순'),
+  _NoteSort.title => tr('제목순'),
 };
 
 String _ymdKo(DateTime t) {
   final l = t.toLocal();
-  return '${l.year}년 ${l.month}월 ${l.day}일';
+  return tr('{l.year}년 {l.month}월 {l.day}일', {
+    'l.year': l.year,
+    'l.month': l.month,
+    'l.day': l.day,
+  });
 }
 
 /// 프로젝트 노트 — 회의록·가이드 같은 문서를 프로젝트 구성원이 같이 쓰고 고친다.
@@ -237,7 +242,7 @@ class _NotesViewState extends State<NotesView> {
       }
     } catch (e) {
       if (mounted && _selectedId == id) {
-        setState(() => _detailError = '노트를 불러오지 못했습니다: $e');
+        setState(() => _detailError = tr('노트를 불러오지 못했습니다: {e}', {'e': e}));
       }
     } finally {
       if (mounted) setState(() => _loadingDetail = false);
@@ -262,16 +267,16 @@ class _NotesViewState extends State<NotesView> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('작성 중인 내용이 있습니다'),
-        content: const Text('저장하지 않고 나가면 고친 내용이 사라집니다.'),
+        title: Text(tr('작성 중인 내용이 있습니다')),
+        content: Text(tr('저장하지 않고 나가면 고친 내용이 사라집니다.')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('계속 작성'),
+            child: Text(tr('계속 작성')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('버리기'),
+            child: Text(tr('버리기')),
           ),
         ],
       ),
@@ -314,7 +319,7 @@ class _NotesViewState extends State<NotesView> {
 
   Future<void> _newNote() async {
     if (_projects.isEmpty) {
-      showAppToast(context, '참여 중인 프로젝트가 없습니다.');
+      showAppToast(context, tr('참여 중인 프로젝트가 없습니다.'));
       return;
     }
     if (!await _confirmDiscard()) return;
@@ -361,7 +366,7 @@ class _NotesViewState extends State<NotesView> {
   Future<void> _save() async {
     final title = _title.text.trim();
     if (title.isEmpty) {
-      showAppToast(context, '노트 제목을 입력하세요.');
+      showAppToast(context, tr('노트 제목을 입력하세요.'));
       return;
     }
     final body = _currentMarkdown();
@@ -394,7 +399,7 @@ class _NotesViewState extends State<NotesView> {
       await _loadDetail(saved.id);
     } catch (e) {
       if (!mounted) return;
-      showAppToast(context, '저장하지 못했습니다: $e');
+      showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
       final id = _selectedId;
       if (!_creating && id != null) _recheckEditPermission(id);
     } finally {
@@ -424,7 +429,7 @@ class _NotesViewState extends State<NotesView> {
 
   /// 표 넣기 — 2칸짜리 머리글 + 빈 줄 하나.
   void _insertTable() {
-    _body.insertBlock('| 항목 | 내용 |\n| --- | --- |\n|  |  |');
+    _body.insertBlock(tr('| 항목 | 내용 |\n| --- | --- |\n|  |  |'));
     _bodyFocus.requestFocus();
   }
 
@@ -446,7 +451,7 @@ class _NotesViewState extends State<NotesView> {
       );
       _bodyFocus.requestFocus();
     } catch (e) {
-      if (mounted) showAppToast(context, '그림을 올리지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('그림을 올리지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -459,7 +464,7 @@ class _NotesViewState extends State<NotesView> {
           note.body ?? (await widget.session.api!.fetchNote(note.id)).body;
       final copy = await widget.session.api!.createNote(
         note.projectId,
-        title: '${note.title} (복사본)',
+        title: tr('{note.title} (복사본)', {'note.title': note.title}),
         body: body ?? '',
       );
       if (!mounted) return;
@@ -471,9 +476,9 @@ class _NotesViewState extends State<NotesView> {
         _editing = false;
       });
       await _loadDetail(copy.id);
-      if (mounted) showAppToast(context, '노트를 복제했습니다.');
+      if (mounted) showAppToast(context, tr('노트를 복제했습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, '복제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('복제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -493,7 +498,7 @@ class _NotesViewState extends State<NotesView> {
       await run();
       await _reloadComments(noteId);
     } catch (e) {
-      if (mounted) showAppToast(context, '댓글을 저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('댓글을 저장하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -514,7 +519,7 @@ class _NotesViewState extends State<NotesView> {
     );
     if (restored != null && mounted) {
       setState(() => _detail = restored);
-      showAppToast(context, '이전 버전으로 되돌렸습니다.');
+      showAppToast(context, tr('이전 버전으로 되돌렸습니다.'));
       await _loadList();
     }
   }
@@ -523,17 +528,21 @@ class _NotesViewState extends State<NotesView> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('노트 삭제'),
-        content: Text("'${note.title}' 노트를 삭제할까요? 되돌릴 수 없습니다."),
+        title: Text(tr('노트 삭제')),
+        content: Text(
+          tr('\'{note.title}\' 노트를 삭제할까요? 되돌릴 수 없습니다.', {
+            'note.title': note.title,
+          }),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       ),
@@ -552,7 +561,7 @@ class _NotesViewState extends State<NotesView> {
       await _loadList();
     } catch (e) {
       if (!mounted) return;
-      showAppToast(context, '삭제하지 못했습니다: $e');
+      showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
       // 삭제 권한이 바뀌었을 수 있다 — 목록과 보고 있는 노트를 새로 읽어 ✕·삭제 메뉴를 맞춘다.
       await _loadList();
       if (mounted && _selectedId == note.id && !_editing) {
@@ -602,13 +611,13 @@ class _NotesViewState extends State<NotesView> {
                   : Icons.open_in_full,
               size: 18,
             ),
-            tooltip: widget.panelExpanded ? '작게 보기' : '크게 보기',
+            tooltip: widget.panelExpanded ? tr('작게 보기') : tr('크게 보기'),
             visualDensity: VisualDensity.compact,
             onPressed: widget.onToggleExpand,
           ),
           IconButton(
             icon: const Icon(Icons.close, size: 20),
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             visualDensity: VisualDensity.compact,
             onPressed: widget.onClose,
           ),
@@ -644,7 +653,7 @@ class _NotesViewState extends State<NotesView> {
       controller: _searchCtrl,
       style: TextStyle(fontSize: dense ? 13 : 14),
       decoration: InputDecoration(
-        hintText: '검색어를 입력하세요.',
+        hintText: tr('검색어를 입력하세요.'),
         prefixIcon: const Icon(Icons.search, size: 18),
         prefixIconConstraints: const BoxConstraints(minWidth: 40),
         isDense: true,
@@ -667,7 +676,7 @@ class _NotesViewState extends State<NotesView> {
   Widget _projectDropdown() => _Dropdown<String?>(
     value: _projectFilter,
     items: [
-      (null, '전체 프로젝트', null),
+      (null, tr('전체 프로젝트'), null),
       for (final p in _projects) (p.id, p.name, parseTypeColor(p.color)),
     ],
     onChanged: (v) => setState(() => _projectFilter = v),
@@ -692,14 +701,14 @@ class _NotesViewState extends State<NotesView> {
               Padding(
                 padding: const EdgeInsets.only(left: 8),
                 child: Text(
-                  '노트',
+                  tr('노트'),
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
               const Spacer(),
-              DashedAddButton(label: '+ 새 노트', onTap: _newNote),
+              DashedAddButton(label: tr('+ 새 노트'), onTap: _newNote),
               if (widget.panelMode) const SizedBox(width: 4),
               ..._panelButtons(),
             ],
@@ -721,8 +730,8 @@ class _NotesViewState extends State<NotesView> {
             child: notes.isEmpty
                 ? EmptyHint(
                     _notes!.isEmpty
-                        ? '아직 노트가 없습니다. "새 노트"로 시작해보세요.'
-                        : '조건에 맞는 노트가 없습니다.',
+                        ? tr('아직 노트가 없습니다. "새 노트"로 시작해보세요.')
+                        : tr('조건에 맞는 노트가 없습니다.'),
                   )
                 : MutedScrollbar(
                     controller: _listScroll,
@@ -795,7 +804,7 @@ class _NotesViewState extends State<NotesView> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    p?.name ?? list.first.projectName ?? '프로젝트',
+                    p?.name ?? list.first.projectName ?? tr('프로젝트'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -836,14 +845,14 @@ class _NotesViewState extends State<NotesView> {
             children: [
               // 누르면 노트를 닫고 목록 화면으로.
               Tooltip(
-                message: '노트 목록',
+                message: tr('노트 목록'),
                 child: InkWell(
                   onTap: _closeNote,
                   borderRadius: BorderRadius.circular(6),
-                  child: const Padding(
+                  child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 2, vertical: 4),
                     child: Text(
-                      '노트',
+                      tr('노트'),
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.bold,
@@ -853,14 +862,14 @@ class _NotesViewState extends State<NotesView> {
                 ),
               ),
               const Spacer(),
-              DashedAddButton(label: '+ 새 노트', onTap: _newNote),
+              DashedAddButton(label: tr('+ 새 노트'), onTap: _newNote),
               IconButton(
                 // 왼쪽 패널 접기 모양(오른쪽 패널 아이콘을 좌우로 뒤집어 쓴다).
                 icon: Transform.flip(
                   flipX: true,
                   child: const Icon(Icons.view_sidebar_outlined, size: 18),
                 ),
-                tooltip: '목록 접기',
+                tooltip: tr('목록 접기'),
                 visualDensity: VisualDensity.compact,
                 onPressed: () => setState(() => _listCollapsed = true),
               ),
@@ -892,7 +901,7 @@ class _NotesViewState extends State<NotesView> {
                             : theme.hintColor,
                       ),
                       const SizedBox(width: 4),
-                      const Text('계층형', style: TextStyle(fontSize: 12)),
+                      Text(tr('계층형'), style: TextStyle(fontSize: 12)),
                     ],
                   ),
                 ),
@@ -912,7 +921,7 @@ class _NotesViewState extends State<NotesView> {
           const SizedBox(height: 8),
           Expanded(
             child: children.isEmpty
-                ? const EmptyHint('노트가 없습니다.')
+                ? EmptyHint(tr('노트가 없습니다.'))
                 : MutedScrollbar(
                     controller: _listScroll,
                     child: ListView(
@@ -932,13 +941,13 @@ class _NotesViewState extends State<NotesView> {
     final lead = showBack
         ? IconButton(
             icon: const Icon(Icons.arrow_back),
-            tooltip: '목록',
+            tooltip: tr('목록'),
             onPressed: _closeNote,
           )
         : _listCollapsed
         ? IconButton(
             icon: const Icon(Icons.keyboard_double_arrow_right, size: 18),
-            tooltip: '목록 펼치기',
+            tooltip: tr('목록 펼치기'),
             onPressed: () => setState(() => _listCollapsed = false),
           )
         : null;
@@ -959,7 +968,7 @@ class _NotesViewState extends State<NotesView> {
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.close),
-                tooltip: '닫기',
+                tooltip: tr('닫기'),
                 onPressed: _closeNote,
               ),
             ],
@@ -975,7 +984,7 @@ class _NotesViewState extends State<NotesView> {
                         const SizedBox(height: 8),
                         OutlinedButton(
                           onPressed: () => _loadDetail(_selectedId!),
-                          child: const Text('다시 시도'),
+                          child: Text(tr('다시 시도')),
                         ),
                       ],
                     ),
@@ -1001,7 +1010,7 @@ class _NotesViewState extends State<NotesView> {
               ?lead,
               if (note.key != null)
                 Tooltip(
-                  message: '링크 복사',
+                  message: tr('링크 복사'),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(999),
                     // 채팅·댓글에 붙여넣으면 "[MKT-N10] 제목" 링크가 된다(AppLinks).
@@ -1018,7 +1027,7 @@ class _NotesViewState extends State<NotesView> {
                           ),
                         ),
                       );
-                      if (mounted) showAppToast(context, '링크를 복사했습니다.');
+                      if (mounted) showAppToast(context, tr('링크를 복사했습니다.'));
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -1061,7 +1070,7 @@ class _NotesViewState extends State<NotesView> {
                 ),
               IconButton(
                 icon: const Icon(Icons.history, size: 20),
-                tooltip: '수정 이력',
+                tooltip: tr('수정 이력'),
                 visualDensity: VisualDensity.compact,
                 onPressed: () => _openHistory(note),
               ),
@@ -1072,25 +1081,25 @@ class _NotesViewState extends State<NotesView> {
                   if (note.canEdit)
                     hoverMenuItem(
                       icon: Icons.edit_outlined,
-                      label: '수정',
+                      label: tr('수정'),
                       onPressed: _startEdit,
                     ),
                   hoverMenuItem(
                     icon: Icons.copy_outlined,
-                    label: '노트 복제',
+                    label: tr('노트 복제'),
                     onPressed: () => _duplicate(note),
                   ),
                   if (note.canDelete)
                     hoverMenuItem(
                       icon: Icons.delete_outline,
-                      label: '삭제',
+                      label: tr('삭제'),
                       color: Colors.redAccent,
                       onPressed: () => _delete(note),
                     ),
                 ],
                 builder: (context, menu, _) => IconButton(
                   icon: const Icon(Icons.more_horiz, size: 20),
-                  tooltip: '더보기',
+                  tooltip: tr('더보기'),
                   visualDensity: VisualDensity.compact,
                   onPressed: () => menu.isOpen ? menu.close() : menu.open(),
                 ),
@@ -1128,7 +1137,7 @@ class _NotesViewState extends State<NotesView> {
                 Text('  ·  ', style: TextStyle(color: hint, fontSize: 12)),
               ],
               Text(
-                '최종 수정 $updated',
+                tr('최종 수정 {updated}', {'updated': updated}),
                 style: TextStyle(color: hint, fontSize: 12),
               ),
               const Spacer(),
@@ -1279,7 +1288,7 @@ class _NotesViewState extends State<NotesView> {
                     fontWeight: FontWeight.w800,
                   ),
                   decoration: InputDecoration(
-                    hintText: '제목을 입력하세요',
+                    hintText: tr('제목을 입력하세요'),
                     hintStyle: TextStyle(
                       fontSize: 30,
                       fontWeight: FontWeight.w800,
@@ -1311,10 +1320,11 @@ class _NotesViewState extends State<NotesView> {
                   color: Colors.deepOrange,
                 ),
                 const SizedBox(width: 8),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    '이 노트를 수정할 권한이 없습니다(노트 작성자와 관리자만 수정할 수 있습니다). '
-                    '쓰던 내용은 복사해 둘 수 있습니다.',
+                    tr(
+                      '이 노트를 수정할 권한이 없습니다(노트 작성자와 관리자만 수정할 수 있습니다). 쓰던 내용은 복사해 둘 수 있습니다.',
+                    ),
                     style: TextStyle(fontSize: 13),
                   ),
                 ),
@@ -1334,7 +1344,7 @@ class _NotesViewState extends State<NotesView> {
               showHeadings: true,
               showRule: true,
               trailing: [
-                toolButton(Icons.table_chart_outlined, '표', _insertTable),
+                toolButton(Icons.table_chart_outlined, tr('표'), _insertTable),
                 _uploading
                     ? const Padding(
                         padding: EdgeInsets.all(7),
@@ -1344,7 +1354,7 @@ class _NotesViewState extends State<NotesView> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       )
-                    : toolButton(Icons.image_outlined, '그림', _insertImage),
+                    : toolButton(Icons.image_outlined, tr('그림'), _insertImage),
               ],
             ),
           ),
@@ -1374,7 +1384,7 @@ class _NotesViewState extends State<NotesView> {
                   textAlignVertical: TextAlignVertical.top,
                   style: const TextStyle(fontSize: 15, height: 1.5),
                   decoration: InputDecoration(
-                    hintText: '내용을 입력하세요',
+                    hintText: tr('내용을 입력하세요'),
                     hintStyle: TextStyle(
                       fontSize: 17,
                       color: hint.withValues(alpha: 0.7),
@@ -1395,7 +1405,7 @@ class _NotesViewState extends State<NotesView> {
               TextButton.icon(
                 onPressed: _saving ? null : _cancelEdit,
                 icon: const Icon(Icons.chevron_left, size: 18),
-                label: const Text('취소'),
+                label: Text(tr('취소')),
                 style: TextButton.styleFrom(foregroundColor: theme.hintColor),
               ),
               const Spacer(),
@@ -1421,7 +1431,7 @@ class _NotesViewState extends State<NotesView> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                child: const Text('저장'),
+                child: Text(tr('저장')),
               ),
             ],
           ),
@@ -1546,7 +1556,7 @@ class _BrowseItemState extends State<_BrowseItem> {
                   maintainState: true,
                   child: IconButton(
                     icon: Icon(Icons.close, size: 18, color: theme.hintColor),
-                    tooltip: '삭제',
+                    tooltip: tr('삭제'),
                     onPressed: widget.onDelete,
                   ),
                 ),
@@ -1725,8 +1735,11 @@ class _NoteHistoryListState extends State<_NoteHistoryList> {
     final note = widget.note;
     // 지금 모습(마지막으로 고친 사람) + 이력의 버전들(그 버전을 쓴 사람·시각).
     final entries = <(String, DateTime)>[
-      (note.updatedByName ?? note.createdByName ?? '알 수 없음', note.updatedAt),
-      for (final v in versions) (v.editedByName ?? '알 수 없음', v.editedAt),
+      (
+        note.updatedByName ?? note.createdByName ?? tr('알 수 없음'),
+        note.updatedAt,
+      ),
+      for (final v in versions) (v.editedByName ?? tr('알 수 없음'), v.editedAt),
     ]..sort((a, b) => b.$2.compareTo(a.$2));
     bool isCreation(DateTime t) =>
         t.difference(note.createdAt).inSeconds.abs() <= 1;
@@ -1756,8 +1769,8 @@ class _NoteHistoryListState extends State<_NoteHistoryList> {
                           ),
                           TextSpan(
                             text: isCreation(at)
-                                ? '님이 노트를 작성했습니다.'
-                                : '님이 노트를 수정했습니다.',
+                                ? tr('님이 노트를 작성했습니다.')
+                                : tr('님이 노트를 수정했습니다.'),
                           ),
                         ],
                       ),
@@ -1924,7 +1937,7 @@ class _NoteHistoryDialogState extends State<_NoteHistoryDialog> {
       final full = await widget.session.api!.fetchNoteVersion(v.id);
       if (mounted) setState(() => _selected = full);
     } catch (e) {
-      if (mounted) showAppToast(context, '이력을 불러오지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('이력을 불러오지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -1941,7 +1954,7 @@ class _NoteHistoryDialogState extends State<_NoteHistoryDialog> {
     } catch (e) {
       if (mounted) {
         setState(() => _restoring = false);
-        showAppToast(context, '되돌리지 못했습니다: $e');
+        showAppToast(context, tr('되돌리지 못했습니다: {e}', {'e': e}));
       }
     }
   }
@@ -1951,7 +1964,9 @@ class _NoteHistoryDialogState extends State<_NoteHistoryDialog> {
     final hint = Theme.of(context).hintColor;
     final versions = _versions;
     return FloatingDialog(
-      title: '수정 이력 · ${widget.note.title}',
+      title: tr('수정 이력 · {widget.note.title}', {
+        'widget.note.title': widget.note.title,
+      }),
       maxWidth: 820,
       maxHeight: 620,
       child: _error != null
@@ -1960,7 +1975,7 @@ class _NoteHistoryDialogState extends State<_NoteHistoryDialog> {
           ? const Center(child: CircularProgressIndicator())
           : versions.isEmpty
           ? Center(
-              child: Text('아직 수정 이력이 없습니다.', style: TextStyle(color: hint)),
+              child: Text(tr('아직 수정 이력이 없습니다.'), style: TextStyle(color: hint)),
             )
           : Row(
               children: [
@@ -1977,7 +1992,7 @@ class _NoteHistoryDialogState extends State<_NoteHistoryDialog> {
                             style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
                           subtitle: Text(
-                            '${v.editedByName ?? '알 수 없음'} · ${v.title}',
+                            '${v.editedByName ?? tr('알 수 없음')} · ${v.title}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1991,7 +2006,7 @@ class _NoteHistoryDialogState extends State<_NoteHistoryDialog> {
                   child: _selected == null
                       ? Center(
                           child: Text(
-                            '왼쪽에서 버전을 고르면 그때의 내용이 보입니다.',
+                            tr('왼쪽에서 버전을 고르면 그때의 내용이 보입니다.'),
                             style: TextStyle(color: hint),
                           ),
                         )
@@ -2016,7 +2031,7 @@ class _NoteHistoryDialogState extends State<_NoteHistoryDialog> {
                                   if (widget.canRestore)
                                     FilledButton(
                                       onPressed: _restoring ? null : _restore,
-                                      child: const Text('이 버전으로 되돌리기'),
+                                      child: Text(tr('이 버전으로 되돌리기')),
                                     ),
                                 ],
                               ),

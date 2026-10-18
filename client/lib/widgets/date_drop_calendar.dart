@@ -1,8 +1,17 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
-const _weekdayHeaders = ['일', '월', '화', '수', '목', '금', '토'];
+final _weekdayHeaders = [
+  tr('일'),
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+];
 
 /// 달력 팝업의 폭 — 띄우는 쪽이 화면 밖으로 안 나가게 미리 계산할 때 쓴다.
 const kDateDropCalendarWidth = 290.0;
@@ -82,7 +91,10 @@ class _DateDropCalendarState extends State<DateDropCalendar> {
               ),
               Expanded(
                 child: Text(
-                  '${_month.year}년 ${_month.month}월',
+                  tr('{_month.year}년 {_month.month}월', {
+                    '_month.year': _month.year,
+                    '_month.month': _month.month,
+                  }),
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
@@ -144,7 +156,7 @@ class _DateDropCalendarState extends State<DateDropCalendar> {
                       ),
                     ),
                     onPressed: () => widget.onPicked(today),
-                    child: const Text('오늘'),
+                    child: Text(tr('오늘')),
                   ),
                 ),
               ),
@@ -160,7 +172,7 @@ class _DateDropCalendarState extends State<DateDropCalendar> {
                       padding: EdgeInsets.zero,
                     ),
                     onPressed: () => widget.onPicked(null),
-                    child: const Text('지우기', style: TextStyle(fontSize: 12)),
+                    child: Text(tr('지우기'), style: TextStyle(fontSize: 12)),
                   ),
                 ),
             ],

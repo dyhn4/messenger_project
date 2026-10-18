@@ -1,6 +1,8 @@
 // 상태 메시지("🗓️ 회의 중")와 방해 금지 — 서버 server/src/statusRules.js와 같은 규칙. 특히 [DndState.isActiveAt]은 서버의
 // isDndActive와 같아야 "방해 금지 중" 표시와 실제로 알림이 안 가는 것이 맞는다.
 
+import '../l10n/tr.dart';
+
 /// 상태 메시지에 고를 수 있는 이모지 — 서버 STATUS_EMOJIS와 같이 맞춘다.
 const statusEmojis = [
   '🗓️',
@@ -29,8 +31,11 @@ enum StatusClearAfter {
   today('오늘까지'),
   thisWeek('이번 주까지');
 
-  final String label;
-  const StatusClearAfter(this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const StatusClearAfter(this._labelKo);
 
   /// [now] 기준으로 지울 시각 — 지우지 않으면 null. "오늘"은 오늘 자정, "이번 주"는 이번 일요일 자정(다음 월요일 0시).
   DateTime? untilFrom(DateTime now) => switch (this) {
@@ -44,13 +49,13 @@ enum StatusClearAfter {
 }
 
 /// 자주 쓰는 상태 — 고르면 이모지·글·지울 시점이 함께 채워진다.
-const statusPresets = <({String emoji, String text, StatusClearAfter clear})>[
-  (emoji: '🗓️', text: '회의 중', clear: StatusClearAfter.hour1),
-  (emoji: '🚗', text: '외근 중', clear: StatusClearAfter.today),
-  (emoji: '🍽️', text: '식사 중', clear: StatusClearAfter.hour1),
-  (emoji: '🏠', text: '재택 근무', clear: StatusClearAfter.today),
-  (emoji: '🏖️', text: '휴가 중', clear: StatusClearAfter.never),
-  (emoji: '🤒', text: '병가', clear: StatusClearAfter.today),
+final statusPresets = <({String emoji, String text, StatusClearAfter clear})>[
+  (emoji: '🗓️', text: tr('회의 중'), clear: StatusClearAfter.hour1),
+  (emoji: '🚗', text: tr('외근 중'), clear: StatusClearAfter.today),
+  (emoji: '🍽️', text: tr('식사 중'), clear: StatusClearAfter.hour1),
+  (emoji: '🏠', text: tr('재택 근무'), clear: StatusClearAfter.today),
+  (emoji: '🏖️', text: tr('휴가 중'), clear: StatusClearAfter.never),
+  (emoji: '🤒', text: tr('병가'), clear: StatusClearAfter.today),
 ];
 
 /// 상태 메시지 — 서버 statusDto 모양.
@@ -179,4 +184,12 @@ String formatDayMinute(int minute) =>
     '${(minute ~/ 60).toString().padLeft(2, '0')}:${(minute % 60).toString().padLeft(2, '0')}';
 
 /// 요일 이름(0=일 … 6=토).
-const weekdayNames = ['일', '월', '화', '수', '목', '금', '토'];
+final weekdayNames = [
+  tr('일'),
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+];

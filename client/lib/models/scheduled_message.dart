@@ -2,6 +2,7 @@ import 'mention.dart';
 import 'message.dart';
 import 'text_format.dart';
 import 'uploaded_attachment.dart';
+import '../l10n/tr.dart';
 
 /// 메시지 예약 발송의 한도 — 서버 /scheduled-messages가 같은 값으로 다시 검사한다.
 const scheduledMessageMaxCount = 30; // 한 사람이 한 팀에 둘 수 있는 예약(예약됨 + 발송 실패)
@@ -222,21 +223,31 @@ class ScheduledMessageEvent {
 
   String get _roomLabel {
     final name = roomName?.trim();
-    return name == null || name.isEmpty ? '대화방' : name;
+    return name == null || name.isEmpty ? tr('대화방') : name;
   }
 
   /// 토스트에 그대로 쓰는 안내 문구.
   String get toastText => isSent
-      ? '예약 메시지를 보냈습니다 · $_roomLabel'
-      : '예약 메시지를 보내지 못했습니다 ($_roomLabel): ${reason ?? '알 수 없는 오류'}';
+      ? tr('예약 메시지를 보냈습니다 · {_roomLabel}', {'_roomLabel': _roomLabel})
+      : tr('예약 메시지를 보내지 못했습니다 ({_roomLabel}): {p0}', {
+          '_roomLabel': _roomLabel,
+          'p0': reason ?? tr('알 수 없는 오류'),
+        });
 
   /// 같은 결과(같은 방·같은 사유)가 [count]건 한꺼번에 왔을 때의 문구 — 토픽 보관·방 삭제면 그 방
   /// 예약이 모두 한 번에 실패한다. 1건이면 [toastText].
   String toastTextFor(int count) {
     if (count <= 1) return toastText;
     return isSent
-        ? '예약 메시지 $count건을 보냈습니다 · $_roomLabel'
-        : '예약 메시지 $count건을 보내지 못했습니다 ($_roomLabel): ${reason ?? '알 수 없는 오류'}';
+        ? tr('예약 메시지 {count}건을 보냈습니다 · {_roomLabel}', {
+            'count': count,
+            '_roomLabel': _roomLabel,
+          })
+        : tr('예약 메시지 {count}건을 보내지 못했습니다 ({_roomLabel}): {p0}', {
+            'count': count,
+            '_roomLabel': _roomLabel,
+            'p0': reason ?? tr('알 수 없는 오류'),
+          });
   }
 
   ScheduledMessageEvent withRoomName(String? name) => ScheduledMessageEvent(
@@ -286,10 +297,12 @@ DateTime latestScheduleTime([DateTime? now]) =>
 /// 발송 시각 검사 — 괜찮으면 null, 아니면 서버와 같은 안내 문구.
 String? validateScheduledSendAt(DateTime sendAt, {DateTime? now}) {
   final current = now ?? DateTime.now();
-  if (!isScheduleSlot(sendAt)) return '발송 시간은 15분 단위로 선택하세요.';
-  if (!sendAt.isAfter(current)) return '발송 시간은 지금 이후로 선택하세요.';
+  if (!isScheduleSlot(sendAt)) return tr('발송 시간은 15분 단위로 선택하세요.');
+  if (!sendAt.isAfter(current)) return tr('발송 시간은 지금 이후로 선택하세요.');
   if (sendAt.isAfter(latestScheduleTime(current))) {
-    return '최대 $scheduledMaxDaysAhead일 뒤까지만 예약할 수 있습니다.';
+    return tr('최대 {scheduledMaxDaysAhead}일 뒤까지만 예약할 수 있습니다.', {
+      'scheduledMaxDaysAhead': scheduledMaxDaysAhead,
+    });
   }
   return null;
 }
@@ -297,9 +310,11 @@ String? validateScheduledSendAt(DateTime sendAt, {DateTime? now}) {
 /// 메시지(게시글이면 본문) 검사 — 앞뒤 공백을 뺀 값을 글자(이모지 한 덩어리 = 1자) 단위로 센다.
 String? validateScheduledText(String text) {
   final trimmed = text.trim();
-  if (trimmed.isEmpty) return '메시지를 입력하세요.';
+  if (trimmed.isEmpty) return tr('메시지를 입력하세요.');
   if (postTextLength(trimmed) > scheduledTextMaxLength) {
-    return '메시지는 $scheduledTextMaxLength자 이내로 입력하세요.';
+    return tr('메시지는 {scheduledTextMaxLength}자 이내로 입력하세요.', {
+      'scheduledTextMaxLength': scheduledTextMaxLength,
+    });
   }
   return null;
 }
@@ -308,16 +323,20 @@ String? validateScheduledText(String text) {
 String? validateScheduledTitle(String? title, {required bool isBoard}) {
   if (!isBoard) return null;
   final trimmed = title?.trim() ?? '';
-  if (trimmed.isEmpty) return '제목을 입력하세요.';
+  if (trimmed.isEmpty) return tr('제목을 입력하세요.');
   if (postTextLength(trimmed) > scheduledTitleMaxLength) {
-    return '제목은 $scheduledTitleMaxLength자 이내로 입력하세요.';
+    return tr('제목은 {scheduledTitleMaxLength}자 이내로 입력하세요.', {
+      'scheduledTitleMaxLength': scheduledTitleMaxLength,
+    });
   }
   return null;
 }
 
 /// 첨부가 10개를 넘을 때의 안내 — 서버와 같은 문구(편집기가 넘는 만큼 빼고 알릴 때도 쓴다).
-const scheduledAttachmentLimitMessage =
-    '첨부 파일은 $scheduledAttachmentMaxCount개까지 올릴 수 있습니다.';
+final scheduledAttachmentLimitMessage = tr(
+  '첨부 파일은 {scheduledAttachmentMaxCount}개까지 올릴 수 있습니다.',
+  {'scheduledAttachmentMaxCount': scheduledAttachmentMaxCount},
+);
 
 /// 첨부 개수 검사.
 String? validateScheduledAttachmentCount(int count) =>

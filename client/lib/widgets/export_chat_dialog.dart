@@ -4,6 +4,7 @@ import '../models/room.dart';
 import '../services/download_storage.dart';
 import '../services/session.dart';
 import 'date_range_calendar_panel.dart';
+import '../l10n/tr.dart';
 
 /// "대화 내보내기" — 방의 대화 내용을 엑셀(.xlsx)로 받는다. 기간을 안 고르면 전체 대화.
 /// 비밀 대화는 서버가 평문을 몰라서 지원하지 않으므로, 호출부(room_options_menu.dart)가
@@ -44,9 +45,12 @@ class _ExportChatDialogState extends State<_ExportChatDialog> {
     String fmt(DateTime d) =>
         '${d.year}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}';
     final rangePart = (_start == null || _end == null)
-        ? '전체'
+        ? tr('전체')
         : '${fmt(_start!)}-${fmt(_end!)}';
-    return '${safeName}_대화내역_$rangePart.xlsx';
+    return tr('{safeName}_대화내역_{rangePart}.xlsx', {
+      'safeName': safeName,
+      'rangePart': rangePart,
+    });
   }
 
   Future<void> _export() async {
@@ -81,7 +85,7 @@ class _ExportChatDialogState extends State<_ExportChatDialog> {
     // 종료일을 마저 고르려던 사용자 의도와 어긋난다.
     final picking = _start != null && _end == null;
     return AlertDialog(
-      title: const Text('대화 내보내기'),
+      title: Text(tr('대화 내보내기')),
       content: SizedBox(
         width: 320,
         child: Column(
@@ -101,7 +105,7 @@ class _ExportChatDialogState extends State<_ExportChatDialog> {
             const SizedBox(height: 10),
             if (picking)
               Text(
-                '종료일을 선택하세요.',
+                tr('종료일을 선택하세요.'),
                 style: TextStyle(color: Theme.of(context).hintColor),
               )
             else if (_start != null && _end != null)
@@ -109,7 +113,10 @@ class _ExportChatDialogState extends State<_ExportChatDialog> {
                 children: [
                   Expanded(
                     child: Text(
-                      '선택한 기간: ${_fmt(_start!)} ~ ${_fmt(_end!)}',
+                      tr('선택한 기간: {p0} ~ {p1}', {
+                        'p0': _fmt(_start!),
+                        'p1': _fmt(_end!),
+                      }),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
@@ -120,13 +127,13 @@ class _ExportChatDialogState extends State<_ExportChatDialog> {
                             _start = null;
                             _end = null;
                           }),
-                    child: const Text('전체 기간으로'),
+                    child: Text(tr('전체 기간으로')),
                   ),
                 ],
               )
             else
               Text(
-                '기간을 안 고르면 전체 대화를 내보냅니다.',
+                tr('기간을 안 고르면 전체 대화를 내보냅니다.'),
                 style: TextStyle(color: Theme.of(context).hintColor),
               ),
             if (_error != null) ...[
@@ -139,7 +146,7 @@ class _ExportChatDialogState extends State<_ExportChatDialog> {
       actions: [
         TextButton(
           onPressed: _exporting ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: (_exporting || picking) ? null : _export,
@@ -149,7 +156,7 @@ class _ExportChatDialogState extends State<_ExportChatDialog> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('내보내기'),
+              : Text(tr('내보내기')),
         ),
       ],
     );

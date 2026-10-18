@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../services/pinned_tls.dart';
 import '../services/session.dart';
+import '../l10n/tr.dart';
+import '../widgets/language_picker.dart';
 
 class ServerSetupScreen extends StatefulWidget {
   final Session session;
@@ -74,9 +76,9 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
       } catch (e) {
         if (!mounted) return;
         setState(() => _loading = false);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('인증서를 받지 못했습니다: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(tr('인증서를 받지 못했습니다: {e}', {'e': e}))),
+        );
         return;
       }
       widget.session.rememberInviteCode(code);
@@ -85,9 +87,9 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
     if (!mounted) return;
     setState(() => _loading = false);
     if (!ok) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(widget.session.error ?? '연결 실패')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(widget.session.error ?? tr('연결 실패'))),
+      );
     }
   }
 
@@ -101,19 +103,23 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('서버 연결')),
+      // 화면 언어 — 서버에 연결하기 전에도 고를 수 있게(language_picker.dart).
+      appBar: AppBar(
+        title: Text(tr('서버 연결')),
+        actions: const [LanguagePicker(compact: true)],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text('PC에서 서버(npm start)를 먼저 실행한 뒤, 콘솔에 출력된 주소를 그대로 입력하세요.'),
+            Text(tr('PC에서 서버(npm start)를 먼저 실행한 뒤, 콘솔에 출력된 주소를 그대로 입력하세요.')),
             const SizedBox(height: 16),
             TextField(
               controller: _controller,
-              decoration: const InputDecoration(
-                labelText: '서버 주소',
+              decoration: InputDecoration(
+                labelText: tr('서버 주소'),
                 hintText: 'https://192.168.0.62:3000',
                 border: OutlineInputBorder(),
               ),
@@ -123,9 +129,9 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
               controller: _code,
               // 4자리 페어링 코드뿐 아니라 초대 링크의 긴 코드도 그대로 붙여넣을 수 있어야
               // 해서 숫자 키패드/길이 제한을 두지 않는다(서버가 길이로 둘을 구분해서 처리).
-              decoration: const InputDecoration(
-                labelText: '페어링 코드 또는 초대 링크의 코드 (새 서버일 때만)',
-                hintText: '서버 콘솔의 4자리 코드, 또는 초대 페이지에 적힌 코드',
+              decoration: InputDecoration(
+                labelText: tr('페어링 코드 또는 초대 링크의 코드 (새 서버일 때만)'),
+                hintText: tr('서버 콘솔의 4자리 코드, 또는 초대 페이지에 적힌 코드'),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -138,7 +144,7 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('연결'),
+                  : Text(tr('연결')),
             ),
           ],
         ),

@@ -5,6 +5,7 @@ import '../../services/session.dart';
 import 'project_forms.dart';
 import 'gantt_chart_view.dart';
 import 'task_views.dart';
+import '../../l10n/tr.dart';
 
 /// 사이드바 "캘린더" / "간트차트" — 내가 참여 중인 모든 프로젝트의 업무를 한 화면에서 본다
 /// (프로젝트 하나 안에서 보는 같은 이름의 보기와 같은 위젯을 쓴다).
@@ -90,7 +91,7 @@ class _TeamTasksViewState extends State<TeamTasksView> {
             children: [
               // "내 업무" 화면과 같은 크기의 제목.
               Text(
-                widget.gantt ? '간트차트' : '캘린더',
+                widget.gantt ? tr('간트차트') : tr('캘린더'),
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
@@ -98,8 +99,8 @@ class _TeamTasksViewState extends State<TeamTasksView> {
               const SizedBox(height: 4),
               Text(
                 widget.gantt
-                    ? '프로젝트별 업무 일정을 확인합니다. 막대를 드래그하면 일정을 수정할 수 있습니다.'
-                    : '참여 중인 모든 프로젝트의 업무 일정을 날짜별로 봅니다.',
+                    ? tr('프로젝트별 업무 일정을 확인합니다. 막대를 드래그하면 일정을 수정할 수 있습니다.')
+                    : tr('참여 중인 모든 프로젝트의 업무 일정을 날짜별로 봅니다.'),
                 style: TextStyle(color: hint),
               ),
             ],

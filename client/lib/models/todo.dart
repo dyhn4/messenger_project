@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart' show StringCharacters;
 
 import 'app_user.dart';
 import 'message.dart' show MessageAttachment;
+import '../l10n/tr.dart';
 
 /// 할 일 입력 한도 — 서버 todos 라우트(server/src/todoRules.js)가 같은 값으로 다시 검사한다.
 const todoTitleMaxLength = 100;
@@ -49,8 +50,11 @@ enum TodoStatus {
   doing('진행'),
   done('완료');
 
-  final String label;
-  const TodoStatus(this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const TodoStatus(this._labelKo);
 
   static TodoStatus of(int progress) => progress >= 100
       ? TodoStatus.done
@@ -62,17 +66,17 @@ enum TodoStatus {
 /// 진척률 상태 문구 — 대기 / 진행 N% / 완료(0 / 1~99 / 100). 화면의 진척률 표시는 % 문구([todoPercentText])와 고르는
 /// 메뉴 문구([todoProgressMenuLabel])를 쓴다.
 String todoProgressText(int progress) => switch (TodoStatus.of(progress)) {
-  TodoStatus.todo => '대기',
-  TodoStatus.doing => '진행 $progress%',
-  TodoStatus.done => '완료',
+  TodoStatus.todo => tr('대기'),
+  TodoStatus.doing => tr('진행 {progress}%', {'progress': progress}),
+  TodoStatus.done => tr('완료'),
 };
 
 /// 진척률을 고르는 메뉴와 상세 담당자 줄의 문구(잔디 문구) — 대기(0%) / 진행(25%)·진행(50%)·진행(75%) / 완료(100%).
 /// 단계 밖의 값(집계 등)은 `진행(N%)`.
 String todoProgressMenuLabel(int progress) => switch (TodoStatus.of(progress)) {
-  TodoStatus.todo => '대기(0%)',
-  TodoStatus.doing => '진행($progress%)',
-  TodoStatus.done => '완료(100%)',
+  TodoStatus.todo => tr('대기(0%)'),
+  TodoStatus.doing => tr('진행({progress}%)', {'progress': progress}),
+  TodoStatus.done => tr('완료(100%)'),
 };
 
 /// 진척률 % 문구 — `75%`. 목록 카드의 `진행률 : 75%`, 상세의 `진행률 75%`에서 색을 입히는 숫자 부분이다(잔디는 담당자가
@@ -88,8 +92,11 @@ enum TodoScope {
   assignedByMe('assigned_by_me', '부여한 할 일');
 
   final String wire;
-  final String label;
-  const TodoScope(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const TodoScope(this.wire, this._labelKo);
 
   /// 보기 드롭다운 항목 순서 — 모든 할 일 / 나의 할 일 / 부여한 할 일(잔디와 같다).
   static const menuOrder = [team, mine, assignedByMe];
@@ -103,8 +110,11 @@ enum TodoSort {
   due('due', '기한 순');
 
   final String wire;
-  final String label;
-  const TodoSort(this.wire, this.label);
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const TodoSort(this.wire, this._labelKo);
 
   /// 정렬 메뉴 항목 순서 — 생성 순 / 기한 순.
   static const menuOrder = [created, due];
@@ -138,7 +148,7 @@ String formatTodoDateTime(DateTime t) =>
 String formatTodoClock(int minutes) {
   final hour = minutes ~/ 60 % 24;
   final hour12 = hour % 12 == 0 ? 12 : hour % 12;
-  final ampm = hour < 12 ? '오전' : '오후';
+  final ampm = hour < 12 ? tr('오전') : tr('오후');
   return '$ampm $hour12:${(minutes % 60).toString().padLeft(2, '0')}';
 }
 
@@ -625,8 +635,8 @@ String? todoPeriodError({
         start.month,
         start.day,
       ).isAfter(DateTime(due.year, due.month, due.day))
-      ? '시작일은 종료일보다 늦을 수 없습니다.'
-      : '시작 시간은 종료 시간보다 늦을 수 없습니다.';
+      ? tr('시작일은 종료일보다 늦을 수 없습니다.')
+      : tr('시작 시간은 종료 시간보다 늦을 수 없습니다.');
 }
 
 /// 서버가 받아 줄 입력인지 미리 본다(서버도 같은 값으로 다시 검사한다). 제목은 공백만이면 비어 있는 것으로 본다.
@@ -644,13 +654,17 @@ TodoDraftCheck checkTodoDraft({
   final t = title.trim();
   return TodoDraftCheck(
     titleError: t.isEmpty
-        ? '제목을 입력하세요.'
+        ? tr('제목을 입력하세요.')
         : t.characters.length > todoTitleMaxLength
-        ? '제목은 $todoTitleMaxLength자 이내로 입력하세요.'
+        ? tr('제목은 {todoTitleMaxLength}자 이내로 입력하세요.', {
+            'todoTitleMaxLength': todoTitleMaxLength,
+          })
         : null,
     descriptionError:
         description.trim().characters.length > todoDescriptionMaxLength
-        ? '설명은 $todoDescriptionMaxLength자 이내로 입력하세요.'
+        ? tr('설명은 {todoDescriptionMaxLength}자 이내로 입력하세요.', {
+            'todoDescriptionMaxLength': todoDescriptionMaxLength,
+          })
         : null,
     periodError: todoPeriodError(
       start: start,
@@ -659,13 +673,19 @@ TodoDraftCheck checkTodoDraft({
       dueMinutes: dueMinutes,
     ),
     attachmentsError: attachmentCount > todoAttachmentsMaxCount
-        ? '첨부 파일은 $todoAttachmentsMaxCount개까지 올릴 수 있습니다.'
+        ? tr('첨부 파일은 {todoAttachmentsMaxCount}개까지 올릴 수 있습니다.', {
+            'todoAttachmentsMaxCount': todoAttachmentsMaxCount,
+          })
         : null,
     assigneesError: assigneeCount > todoAssigneesMaxCount
-        ? '담당자는 $todoAssigneesMaxCount명까지 지정할 수 있습니다.'
+        ? tr('담당자는 {todoAssigneesMaxCount}명까지 지정할 수 있습니다.', {
+            'todoAssigneesMaxCount': todoAssigneesMaxCount,
+          })
         : null,
     remindersError: reminderCount > todoRemindersMaxCount
-        ? '알림은 $todoRemindersMaxCount개까지 추가할 수 있습니다.'
+        ? tr('알림은 {todoRemindersMaxCount}개까지 추가할 수 있습니다.', {
+            'todoRemindersMaxCount': todoRemindersMaxCount,
+          })
         : null,
   );
 }

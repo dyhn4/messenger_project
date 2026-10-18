@@ -1,4 +1,5 @@
 import 'team.dart';
+import '../l10n/tr.dart';
 
 /// "팀 초대 링크" — 서버 src/teamInvites.js의 응답과 1:1로 대응한다.
 ///
@@ -95,17 +96,23 @@ class TeamInviteLink {
   /// "만료됨" / "취소됨" / "인원 마감" / "만료까지 3일" 처럼 상태를 한 줄로. 인원이 다 찬 링크도
   /// 만료되면 "만료됨"이다 — 그때부터는 연결·설치에도 못 쓴다.
   String get statusLabel {
-    if (revoked) return '취소됨';
-    if (!isOpen) return '만료됨';
-    if (isFull) return '인원 마감';
-    if (!valid) return '만료됨';
+    if (revoked) return tr('취소됨');
+    if (!isOpen) return tr('만료됨');
+    if (isFull) return tr('인원 마감');
+    if (!valid) return tr('만료됨');
     final remaining = expiresAt.difference(DateTime.now());
-    if (remaining.inHours < 1) return '곧 만료';
-    if (remaining.inDays < 1) return '오늘 만료';
-    return '만료까지 ${remaining.inDays}일';
+    if (remaining.inHours < 1) return tr('곧 만료');
+    if (remaining.inDays < 1) return tr('오늘 만료');
+    return tr('만료까지 {remaining.inDays}일', {
+      'remaining.inDays': remaining.inDays,
+    });
   }
 
   /// "가입 2/5명"처럼 — 인원 제한이 없는 예전 링크는 "가입 2명".
-  String get usageLabel =>
-      maxUses == null ? '가입 $usedCount명' : '가입 $usedCount/$maxUses명';
+  String get usageLabel => maxUses == null
+      ? tr('가입 {usedCount}명', {'usedCount': usedCount})
+      : tr('가입 {usedCount}/{maxUses}명', {
+          'usedCount': usedCount,
+          'maxUses': maxUses,
+        });
 }

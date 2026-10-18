@@ -20,6 +20,7 @@ import 'attachment_widgets.dart';
 import 'mention_autocomplete.dart';
 import 'muted_scrollbar.dart';
 import 'rich_text_format.dart';
+import '../l10n/tr.dart';
 
 /// ChatInputBar의 _PendingAttachment와 동일한 목적 — 첨부한 즉시 업로드가 시작되고,
 /// [result]가 채워지면 업로드가 끝난 것.
@@ -240,7 +241,7 @@ class CommentInputBarState extends State<CommentInputBar> {
       setState(() => _attachments.remove(attachment));
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('업로드 실패: $e')));
+      ).showSnackBar(SnackBar(content: Text(tr('업로드 실패: {e}', {'e': e}))));
     }
   }
 
@@ -305,7 +306,7 @@ class CommentInputBarState extends State<CommentInputBar> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('댓글 전송 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('댓글 전송 실패: {e}', {'e': e}))));
       }
     } finally {
       if (mounted) {
@@ -386,7 +387,7 @@ class CommentInputBarState extends State<CommentInputBar> {
                         decoration: InputDecoration(
                           // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
                           // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
-                          hintText: _focusNode.hasFocus ? null : '댓글 입력',
+                          hintText: _focusNode.hasFocus ? null : tr('댓글 입력'),
                           border: _formatOpen
                               ? InputBorder.none
                               : const OutlineInputBorder(),
@@ -435,7 +436,7 @@ class CommentInputBarState extends State<CommentInputBar> {
                           onPressed: _sending
                               ? null
                               : widget.onToggleStickerPicker,
-                          tooltip: '이모티콘',
+                          tooltip: tr('이모티콘'),
                         ),
                       ),
                       if (roomAllowsMention(widget.controller.room))
@@ -447,7 +448,7 @@ class CommentInputBarState extends State<CommentInputBar> {
                       IconButton(
                         icon: const Icon(Icons.attach_file),
                         onPressed: _sending ? null : _pickFile,
-                        tooltip: '파일 첨부',
+                        tooltip: tr('파일 첨부'),
                       ),
                       if (!widget.controller.room.isSecret)
                         RichFormatToggleButton(
@@ -461,8 +462,8 @@ class CommentInputBarState extends State<CommentInputBar> {
                       if (showHint) ...[
                         Text(
                           widget.controller.session.settings.sendWithShiftEnter
-                              ? 'Shift + Enter 로 전송'
-                              : 'Shift + Enter 로 줄바꿈',
+                              ? tr('Shift + Enter 로 전송')
+                              : tr('Shift + Enter 로 줄바꿈'),
                           style: TextStyle(
                             fontSize: 11,
                             color: Theme.of(context).hintColor,
@@ -483,7 +484,9 @@ class CommentInputBarState extends State<CommentInputBar> {
                         IconButton(
                           icon: const Icon(Icons.send),
                           onPressed: uploading ? null : _send,
-                          tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '댓글 보내기',
+                          tooltip: uploading
+                              ? tr('업로드가 끝나면 보낼 수 있어요')
+                              : tr('댓글 보내기'),
                         ),
                     ],
                   );

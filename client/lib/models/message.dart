@@ -10,6 +10,7 @@ import 'message_reminder.dart' show ReminderCard;
 import 'poll.dart';
 import 'text_format.dart';
 import 'todo.dart' show SharedTodo;
+import '../l10n/tr.dart';
 
 /// 이 서버가 내려준 그림 경로(서명된 /files/… 상대 경로)일 때만 그 값, 바깥 사이트 주소(http(s)://…)나 빈 값은 null.
 /// 링크 미리보기 그림은 서버가 한 번 받아 둔 파일만 그린다 — 바깥 주소를 그리면 보는 사람마다 앱이 그 사이트에 직접 접속해
@@ -58,7 +59,7 @@ class LinkPreview {
 enum MessageType { text, image, file, sticker, system, comment }
 
 /// 프로젝트 자동화의 "채팅방 알림"이 보내는 메시지의 보낸 사람 이름(server/src/projectAutomation.js).
-const automationSenderName = '자동화';
+final automationSenderName = tr('자동화');
 
 /// 보드 뷰 게시글(type 'post') 제목·본문 최대 길이와 첨부 개수 — 서버 message:send가 같은
 /// 값으로 다시 검사한다.

@@ -1,4 +1,5 @@
 import 'project.dart' show TaskStatus, taskStatusFromWire;
+import '../l10n/tr.dart';
 
 /// 업무 기능 보강(서버 taskExtras.js·taskExtrasRules.js) — 반복 업무 규칙, 선후행 업무 한 줄, 소요 시간 기록·타이머·보고.
 
@@ -41,20 +42,36 @@ class TaskRecurrence {
     'until': ?until,
   };
 
-  static const weekdayNames = ['일', '월', '화', '수', '목', '금', '토'];
+  static final weekdayNames = [
+    tr('일'),
+    tr('월'),
+    tr('화'),
+    tr('수'),
+    tr('목'),
+    tr('금'),
+    tr('토'),
+  ];
 
   /// "매주 월·수", "2주마다", "매월 (~2026-12-31)" — 서버 recurrenceLabel과 같은 문구.
   String get label {
-    const unit = {'daily': '일', 'weekly': '주', 'monthly': '개월', 'yearly': '년'};
-    const every = {
-      'daily': '매일',
-      'weekly': '매주',
-      'monthly': '매월',
-      'yearly': '매년',
+    final unit = {
+      'daily': tr('일'),
+      'weekly': tr('주'),
+      'monthly': tr('개월'),
+      'yearly': tr('년'),
+    };
+    final every = {
+      'daily': tr('매일'),
+      'weekly': tr('매주'),
+      'monthly': tr('매월'),
+      'yearly': tr('매년'),
     };
     var text = interval == 1
         ? (every[freq] ?? freq)
-        : '$interval${unit[freq] ?? ''}마다';
+        : tr('{interval}{p0}마다', {
+            'interval': interval,
+            'p0': unit[freq] ?? '',
+          });
     if (freq == 'weekly' && byWeekday.isNotEmpty) {
       text += ' ${byWeekday.map((d) => weekdayNames[d % 7]).join('·')}';
     }
@@ -209,7 +226,7 @@ class ProjectTimeReport {
             if (m is Map)
               (
                 userId: m['userId'] as String? ?? '',
-                name: m['name'] as String? ?? '(알 수 없음)',
+                name: m['name'] as String? ?? tr('(알 수 없음)'),
                 minutes: (m['minutes'] as num?)?.toInt() ?? 0,
               ),
         ],
@@ -231,8 +248,8 @@ class ProjectTimeReport {
 String formatMinutes(int minutes) {
   final h = minutes ~/ 60;
   final m = minutes % 60;
-  if (h == 0) return '$m분';
-  return m == 0 ? '$h시간' : '$h시간 $m분';
+  if (h == 0) return tr('{m}분', {'m': m});
+  return m == 0 ? tr('{h}시간', {'h': h}) : tr('{h}시간 {m}분', {'h': h, 'm': m});
 }
 
 /// 타이머 경과 "1:05:09"·"12:03".

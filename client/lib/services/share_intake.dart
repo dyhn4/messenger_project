@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 
 import 'app_platform.dart';
+import '../l10n/tr.dart';
 
 /// 다른 앱에서 공유받은 파일 하나 — 안드로이드가 이 앱의 캐시 폴더에 복사해 둔 경로(MainActivity.kt / ShareIntake.kt).
 class SharedFile {
@@ -43,7 +44,7 @@ class SharedPayload {
         if (f is Map && f['path'] is String)
           SharedFile(
             path: f['path'] as String,
-            name: f['name'] as String? ?? '파일',
+            name: f['name'] as String? ?? tr('파일'),
             mimeType: f['mimeType'] as String?,
             size: (f['size'] as num?)?.toInt(),
           ),

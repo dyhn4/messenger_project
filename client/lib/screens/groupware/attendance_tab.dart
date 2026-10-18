@@ -6,8 +6,17 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import 'approval_forms.dart';
 import 'groupware_screen.dart';
+import '../../l10n/tr.dart';
 
-const _weekdays = ['월', '화', '수', '목', '금', '토', '일'];
+final _weekdays = [
+  tr('월'),
+  tr('화'),
+  tr('수'),
+  tr('목'),
+  tr('금'),
+  tr('토'),
+  tr('일'),
+];
 
 /// 출퇴근 탭 — 오늘 출근·퇴근 단추(사내 와이파이에서 눌렀는지 함께 남는다 — 위치 정보는 받지 않는다), 한 달 기록과 요약,
 /// 날마다 "수정 요청"(근태 수정 결재).
@@ -72,7 +81,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
   Future<void> _clock(bool clockIn) async {
     if (clockIn && _mode == 'field' && _place.text.trim().isEmpty) {
-      showAppToast(context, '외근 장소(어디서 일하는지)를 적으세요.');
+      showAppToast(context, tr('외근 장소(어디서 일하는지)를 적으세요.'));
       return;
     }
     setState(() => _busy = true);
@@ -87,12 +96,22 @@ class _AttendanceTabState extends State<AttendanceTab> {
       showAppToast(
         context,
         clockIn
-            ? '${clockText(record.clockInAt)} 출근했습니다.${record.late ? ' (지각)' : ''}'
-            : '${clockText(record.clockOutAt)} 퇴근했습니다.${record.workedMinutes != null ? ' 오늘 ${(record.workedMinutes! / 60).toStringAsFixed(1)}시간' : ''}',
+            ? tr('{p0} 출근했습니다.{p1}', {
+                'p0': clockText(record.clockInAt),
+                'p1': record.late ? tr(' (지각)') : '',
+              })
+            : tr('{p0} 퇴근했습니다.{p1}', {
+                'p0': clockText(record.clockOutAt),
+                'p1': record.workedMinutes != null
+                    ? tr(' 오늘 {p0}시간', {
+                        'p0': (record.workedMinutes! / 60).toStringAsFixed(1),
+                      })
+                    : '',
+              }),
       );
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -153,16 +172,19 @@ class _AttendanceTabState extends State<AttendanceTab> {
             child: Row(
               children: [
                 IconButton(
-                  tooltip: '이전 달',
+                  tooltip: tr('이전 달'),
                   onPressed: () => _shiftMonth(-1),
                   icon: const Icon(Icons.chevron_left),
                 ),
                 Text(
-                  '${_monthKey.substring(0, 4)}년 ${int.parse(_monthKey.substring(5))}월',
+                  tr('{p0}년 {p1}월', {
+                    'p0': _monthKey.substring(0, 4),
+                    'p1': int.parse(_monthKey.substring(5)),
+                  }),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 IconButton(
-                  tooltip: '다음 달',
+                  tooltip: tr('다음 달'),
                   onPressed: () => _shiftMonth(1),
                   icon: const Icon(Icons.chevron_right),
                 ),
@@ -230,7 +252,7 @@ class _TodayCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    '오늘 ${shortDateText(today.today)}',
+                    tr('오늘 {p0}', {'p0': shortDateText(today.today)}),
                     style: theme.textTheme.titleMedium,
                   ),
                 ),
@@ -241,21 +263,29 @@ class _TodayCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  today.inLan ? '사내 와이파이' : '사내 와이파이 아님',
+                  today.inLan ? tr('사내 와이파이') : tr('사내 와이파이 아님'),
                   style: TextStyle(fontSize: 12, color: hint),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              '근무 시간 ${minutesText(today.workStart)} ~ ${minutesText(today.workEnd)}'
-              '${record == null ? '' : ' · 출근 ${clockText(record.clockInAt)} · 퇴근 ${clockText(record.clockOutAt)}'}'
-              '${today.openRecord != null ? ' (어제 출근)' : ''}',
+              tr('근무 시간 {p0} ~ {p1}{p2}{p3}', {
+                'p0': minutesText(today.workStart),
+                'p1': minutesText(today.workEnd),
+                'p2': record == null
+                    ? ''
+                    : tr(' · 출근 {p0} · 퇴근 {p1}', {
+                        'p0': clockText(record.clockInAt),
+                        'p1': clockText(record.clockOutAt),
+                      }),
+                'p3': today.openRecord != null ? tr(' (어제 출근)') : '',
+              }),
               style: TextStyle(color: hint),
             ),
             if (ctx.schedule != null)
               Text(
-                '근무 형태: ${ctx.schedule!.description}',
+                tr('근무 형태: {p0}', {'p0': ctx.schedule!.description}),
                 key: const ValueKey('attendance-schedule'),
                 style: TextStyle(fontSize: 12, color: hint),
               ),
@@ -286,9 +316,9 @@ class _TodayCard extends StatelessWidget {
                     key: const ValueKey('attendance-place'),
                     controller: place,
                     maxLength: 200,
-                    decoration: const InputDecoration(
-                      labelText: '외근 장소',
-                      hintText: '예: 고객사(판교)',
+                    decoration: InputDecoration(
+                      labelText: tr('외근 장소'),
+                      hintText: tr('예: 고객사(판교)'),
                       isDense: true,
                       border: OutlineInputBorder(),
                     ),
@@ -303,7 +333,7 @@ class _TodayCard extends StatelessWidget {
                     key: const ValueKey('attendance-clock-in'),
                     onPressed: busy || !today.canClockIn ? null : onClockIn,
                     icon: const Icon(Icons.login),
-                    label: const Text('출근'),
+                    label: Text(tr('출근')),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -312,7 +342,7 @@ class _TodayCard extends StatelessWidget {
                     key: const ValueKey('attendance-clock-out'),
                     onPressed: busy || !today.canClockOut ? null : onClockOut,
                     icon: const Icon(Icons.logout),
-                    label: const Text('퇴근'),
+                    label: Text(tr('퇴근')),
                   ),
                 ),
               ],
@@ -331,22 +361,38 @@ class _SummaryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = [
-      '출근 ${summary.daysWorked}일',
-      '근무 ${summary.hoursText}',
-      if (summary.late > 0) '지각 ${summary.late}',
-      if (summary.earlyLeave > 0) '조퇴 ${summary.earlyLeave}',
-      if (summary.missingClockOut > 0) '퇴근 누락 ${summary.missingClockOut}',
-      if (summary.absent > 0) '결근 ${summary.absent}',
+      tr('출근 {summary.daysWorked}일', {
+        'summary.daysWorked': summary.daysWorked,
+      }),
+      tr('근무 {summary.hoursText}', {'summary.hoursText': summary.hoursText}),
+      if (summary.late > 0)
+        tr('지각 {summary.late}', {'summary.late': summary.late}),
+      if (summary.earlyLeave > 0)
+        tr('조퇴 {summary.earlyLeave}', {
+          'summary.earlyLeave': summary.earlyLeave,
+        }),
+      if (summary.missingClockOut > 0)
+        tr('퇴근 누락 {summary.missingClockOut}', {
+          'summary.missingClockOut': summary.missingClockOut,
+        }),
+      if (summary.absent > 0)
+        tr('결근 {summary.absent}', {'summary.absent': summary.absent}),
       if (summary.leaveHalfDays > 0)
-        '휴가 ${halfDaysText(summary.leaveHalfDays)}',
-      if (summary.tripDays > 0) '출장 ${summary.tripDays}일',
-      if (summary.overtimeMinutes > 0) '연장근무 신청 ${summary.overtimeText}',
-      if (summary.netMinutes > 0) '실근로 ${durationText(summary.netMinutes)}',
+        tr('휴가 {p0}', {'p0': halfDaysText(summary.leaveHalfDays)}),
+      if (summary.tripDays > 0)
+        tr('출장 {summary.tripDays}일', {'summary.tripDays': summary.tripDays}),
+      if (summary.overtimeMinutes > 0)
+        tr('연장근무 신청 {summary.overtimeText}', {
+          'summary.overtimeText': summary.overtimeText,
+        }),
+      if (summary.netMinutes > 0)
+        tr('실근로 {p0}', {'p0': durationText(summary.netMinutes)}),
       if (summary.actualOvertimeMinutes > 0)
-        '연장 ${durationText(summary.actualOvertimeMinutes)}',
-      if (summary.nightMinutes > 0) '야간 ${durationText(summary.nightMinutes)}',
+        tr('연장 {p0}', {'p0': durationText(summary.actualOvertimeMinutes)}),
+      if (summary.nightMinutes > 0)
+        tr('야간 {p0}', {'p0': durationText(summary.nightMinutes)}),
       if (summary.holidayWorkMinutes > 0)
-        '휴일 ${durationText(summary.holidayWorkMinutes)}',
+        tr('휴일 {p0}', {'p0': durationText(summary.holidayWorkMinutes)}),
     ];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -377,23 +423,28 @@ class _DayTile extends StatelessWidget {
     final off = day.weekend || day.holiday != null;
     final marks = [
       if (day.holiday != null) day.holiday!,
-      if (day.leaveType != null) ctx.leaveType(day.leaveType)?.label ?? '휴가',
-      if (day.trip) '출장',
+      if (day.leaveType != null)
+        ctx.leaveType(day.leaveType)?.label ?? tr('휴가'),
+      if (day.trip) tr('출장'),
       if (record != null && record.clockInMode != 'office')
         '${clockInModeLabels[record.clockInMode] ?? ''}${record.note == null ? '' : '(${record.note})'}',
       if (record != null && record.breakdown.overtimeMinutes > 0)
-        '연장 ${durationText(record.breakdown.overtimeMinutes)}',
+        tr('연장 {p0}', {'p0': durationText(record.breakdown.overtimeMinutes)}),
       if (record != null && record.breakdown.nightMinutes > 0)
-        '야간 ${durationText(record.breakdown.nightMinutes)}',
+        tr('야간 {p0}', {'p0': durationText(record.breakdown.nightMinutes)}),
       if (record != null && record.breakdown.holidayMinutes > 0)
-        '휴일 ${durationText(record.breakdown.holidayMinutes)}',
+        tr('휴일 {p0}', {'p0': durationText(record.breakdown.holidayMinutes)}),
       if (day.overtimeMinutes > 0)
-        '연장근무 ${AttendanceSummary(overtimeMinutes: day.overtimeMinutes).overtimeText}',
-      if (record?.late ?? false) '지각',
-      if (record?.earlyLeave ?? false) '조퇴',
-      if (record?.missingClockOut ?? false) '퇴근 누락',
-      if (record?.corrected ?? false) '결재로 고침',
-      if (record?.clockInLan == false) '밖에서 출근',
+        tr('연장근무 {p0}', {
+          'p0': AttendanceSummary(
+            overtimeMinutes: day.overtimeMinutes,
+          ).overtimeText,
+        }),
+      if (record?.late ?? false) tr('지각'),
+      if (record?.earlyLeave ?? false) tr('조퇴'),
+      if (record?.missingClockOut ?? false) tr('퇴근 누락'),
+      if (record?.corrected ?? false) tr('결재로 고침'),
+      if (record?.clockInLan == false) tr('밖에서 출근'),
     ];
     return ListTile(
       key: ValueKey('attendance-day-${day.date}'),
@@ -401,7 +452,10 @@ class _DayTile extends StatelessWidget {
       leading: SizedBox(
         width: 44,
         child: Text(
-          '${date.day}일 ${_weekdays[date.weekday - 1]}',
+          tr('{date.day}일 {p0}', {
+            'date.day': date.day,
+            'p0': _weekdays[date.weekday - 1],
+          }),
           style: TextStyle(
             color: off ? theme.colorScheme.error : null,
             fontWeight: FontWeight.w600,
@@ -410,7 +464,7 @@ class _DayTile extends StatelessWidget {
       ),
       title: Text(
         record == null
-            ? (off || day.leaveType != null || day.trip ? '' : '기록 없음')
+            ? (off || day.leaveType != null || day.trip ? '' : tr('기록 없음'))
             : '${clockText(record.clockInAt)} ~ ${clockText(record.clockOutAt)}',
       ),
       subtitle: marks.isEmpty
@@ -418,7 +472,7 @@ class _DayTile extends StatelessWidget {
           : Text(marks.join(' · '), style: TextStyle(color: hint)),
       trailing: onFix == null
           ? null
-          : TextButton(onPressed: onFix, child: const Text('수정 요청')),
+          : TextButton(onPressed: onFix, child: Text(tr('수정 요청'))),
     );
   }
 }
@@ -446,13 +500,16 @@ class _WeekBar extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                '이번 주 ${durationText(week.netMinutes)} / ${ctx.weeklyLimitMinutes ~/ 60}시간',
+                tr('이번 주 {p0} / {p1}시간', {
+                  'p0': durationText(week.netMinutes),
+                  'p1': ctx.weeklyLimitMinutes ~/ 60,
+                }),
                 style: TextStyle(fontSize: 12, color: color),
               ),
             ),
             if (week.status != 'ok')
               Text(
-                week.status == 'over' ? '주 52시간 넘음' : '52시간에 가까움',
+                week.status == 'over' ? tr('주 52시간 넘음') : tr('52시간에 가까움'),
                 style: TextStyle(
                   fontSize: 12,
                   color: color,
@@ -487,7 +544,7 @@ class _WeeksCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('주마다(주 52시간)', style: TextStyle(fontSize: 12, color: hint)),
+          Text(tr('주마다(주 52시간)'), style: TextStyle(fontSize: 12, color: hint)),
           for (final w in weeks)
             Padding(
               key: ValueKey('attendance-week-${w.weekStart}'),
@@ -506,9 +563,11 @@ class _WeeksCard extends StatelessWidget {
                       [
                         durationText(w.netMinutes),
                         if (w.overtimeMinutes > 0)
-                          '연장 ${durationText(w.overtimeMinutes)}',
+                          tr('연장 {p0}', {
+                            'p0': durationText(w.overtimeMinutes),
+                          }),
                         if (w.holidayMinutes > 0)
-                          '휴일 ${durationText(w.holidayMinutes)}',
+                          tr('휴일 {p0}', {'p0': durationText(w.holidayMinutes)}),
                       ].join(' · '),
                       style: TextStyle(
                         fontSize: 13,

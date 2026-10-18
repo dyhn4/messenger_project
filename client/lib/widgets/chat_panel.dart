@@ -33,6 +33,7 @@ import 'sticker_picker.dart';
 import 'sticker_preview_card.dart';
 import 'outbox_strip.dart';
 import 'system_message_row.dart';
+import '../l10n/tr.dart';
 
 /// 목록 맨 아래(가장 최근 메시지 밑) 여백 — 호버 툴바(FloatingHoverToolbar)가 입력창을
 /// 덮지 않도록 그 높이만큼 기본 여백(8)에 더해뒀다가, 너무 넓다는 피드백에 따라 10px 줄였다.
@@ -390,7 +391,7 @@ class _ChatPanelState extends State<ChatPanel> {
     if (target == null) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('해당 날짜에 메시지가 없습니다.')));
+      ).showSnackBar(SnackBar(content: Text(tr('해당 날짜에 메시지가 없습니다.'))));
       return;
     }
 
@@ -677,7 +678,7 @@ class _ChatPanelState extends State<ChatPanel> {
                   // 메시지가 없어도 이모티콘 패널·미리보기는 떠야 한다(첫 메시지를 이모티콘으로 보낼 수 있게).
                   return Stack(
                     children: [
-                      const Center(child: Text('아직 메시지가 없습니다.')),
+                      Center(child: Text(tr('아직 메시지가 없습니다.'))),
                       ..._stickerOverlay(),
                     ],
                   );
@@ -1007,7 +1008,7 @@ class _ChatPanelState extends State<ChatPanel> {
                                               ),
                                               const SizedBox(width: 6),
                                               Text(
-                                                '새로운 메시지가 있습니다',
+                                                tr('새로운 메시지가 있습니다'),
                                                 style: TextStyle(
                                                   color: Theme.of(context)
                                                       .colorScheme

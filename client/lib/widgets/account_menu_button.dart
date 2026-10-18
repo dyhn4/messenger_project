@@ -11,6 +11,7 @@ import 'app_toast.dart';
 import 'compact_menu.dart';
 import 'my_avatar.dart';
 import 'user_status_dialogs.dart';
+import '../l10n/tr.dart';
 
 const _appVersion = '1.0.0';
 
@@ -77,7 +78,7 @@ class AccountMenuButton extends StatelessWidget {
         : Uri.parse(base).replace(path: '/guide/');
     final ok = await openExternal(target);
     if (!ok && context.mounted) {
-      showAppToast(context, '도움말을 열 수 없습니다.');
+      showAppToast(context, tr('도움말을 열 수 없습니다.'));
     }
   }
 
@@ -90,7 +91,7 @@ class AccountMenuButton extends StatelessWidget {
     // 설정·관리 / 도움말·안내 / 로그아웃) 사이에 구분선.
     return PopupMenuButton<void>(
       icon: const Icon(Icons.menu),
-      tooltip: '설정',
+      tooltip: tr('설정'),
       position: PopupMenuPosition.under,
       offset: const Offset(0, 10),
       color: CompactMenu.color(context),
@@ -143,7 +144,7 @@ class AccountMenuButton extends StatelessWidget {
         CompactMenu.item<void>(
           context,
           icon: Icons.settings_outlined,
-          label: '환경설정',
+          label: tr('환경설정'),
           onTap: () => showDialog(
             context: context,
             builder: (_) => SettingsScreen(session: session),
@@ -156,7 +157,7 @@ class AccountMenuButton extends StatelessWidget {
           CompactMenu.item<void>(
             context,
             icon: Icons.add_link,
-            label: '초대 링크 생성',
+            label: tr('초대 링크 생성'),
             onTap: () => showInviteLinkScreen(context, session),
           ),
         // 팀 초대 링크 생성은 팀 설정(팀 정보 탭)으로 옮겼다 — 이미 어느 팀인지 정해진
@@ -166,7 +167,7 @@ class AccountMenuButton extends StatelessWidget {
           CompactMenu.item<void>(
             context,
             icon: Icons.admin_panel_settings_outlined,
-            label: '서버 관리',
+            label: tr('서버 관리'),
             onTap: () => showAdminConsole(context, session),
           ),
         CompactMenu.divider,
@@ -174,13 +175,13 @@ class AccountMenuButton extends StatelessWidget {
         CompactMenu.item<void>(
           context,
           icon: Icons.help_outline,
-          label: '도움말',
+          label: tr('도움말'),
           onTap: () => _openGuide(buttonContext),
         ),
         CompactMenu.item<void>(
           context,
           icon: Icons.description_outlined,
-          label: '오픈소스 라이선스',
+          label: tr('오픈소스 라이선스'),
           onTap: () => showLicensePage(
             context: context,
             applicationName: 'TangoTalk',
@@ -191,7 +192,7 @@ class AccountMenuButton extends StatelessWidget {
         CompactMenu.item<void>(
           context,
           icon: Icons.logout,
-          label: '로그아웃',
+          label: tr('로그아웃'),
           color: Colors.redAccent,
           onTap: () => _logout(context),
         ),

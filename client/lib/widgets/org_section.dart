@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/tr.dart';
 
 /// 프로필 카드의 "팀"/"직책" 칸 — 다른 멤버의 프로필(member_profile_dialog.dart)과 내
 /// 프로필(my_profile_dialog.dart) 둘 다 같은 모양을 쓴다. [onEdit]이 있으면 우측에 직책
@@ -18,8 +19,8 @@ class OrgSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
     final teamText = teamNames == null
-        ? '불러오는 중…'
-        : (teamNames!.isEmpty ? '없음' : teamNames!.join(', '));
+        ? tr('불러오는 중…')
+        : (teamNames!.isEmpty ? tr('없음') : teamNames!.join(', '));
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -39,7 +40,7 @@ class OrgSection extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '팀',
+                    tr('팀'),
                     style: Theme.of(
                       context,
                     ).textTheme.labelSmall?.copyWith(color: hint),
@@ -52,13 +53,15 @@ class OrgSection extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '직책',
+                    tr('직책'),
                     style: Theme.of(
                       context,
                     ).textTheme.labelSmall?.copyWith(color: hint),
                   ),
                   Text(
-                    position?.isNotEmpty == true ? position! : '아직 등록되지 않았습니다',
+                    position?.isNotEmpty == true
+                        ? position!
+                        : tr('아직 등록되지 않았습니다'),
                     style: position?.isNotEmpty == true
                         ? const TextStyle(fontWeight: FontWeight.w500)
                         : TextStyle(color: hint),
@@ -68,7 +71,7 @@ class OrgSection extends StatelessWidget {
             ),
             if (onEdit != null)
               IconButton(
-                tooltip: '직책 수정',
+                tooltip: tr('직책 수정'),
                 icon: const Icon(Icons.edit_outlined, size: 18),
                 onPressed: onEdit,
               ),

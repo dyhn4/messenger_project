@@ -15,6 +15,7 @@ import 'convert_to_topic_dialog.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'new_group_dialog.dart'
     show GroupFormLabel, GroupFormNotice, GroupIconField;
+import '../l10n/tr.dart';
 
 /// 채팅 정보 변경(그룹채팅 아이콘·이름·설명) — 그룹채팅 ⋮ 메뉴의 "정보 변경"이 연다. 넓은 화면(PC)은
 /// 떠 있는 창, 좁은 화면(모바일)은 전체 화면.
@@ -162,7 +163,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
   Future<void> _convertToTopic() async {
     final converted = await showConvertToTopicDialog(context, _session, _room);
     if (!converted || !mounted) return;
-    showAppToast(context, '토픽으로 전환했습니다.');
+    showAppToast(context, tr('토픽으로 전환했습니다.'));
     Navigator.of(context).pop();
   }
 
@@ -271,7 +272,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
         iconUrl: iconChanged && type == 'photo' ? icon.photoUrl : null,
       );
       if (!mounted) return;
-      showAppToast(context, '채팅 정보를 변경했습니다.');
+      showAppToast(context, tr('채팅 정보를 변경했습니다.'));
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
@@ -279,7 +280,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
         _saving = false;
         _error = e is ApiException
             ? e.message
-            : '채팅 정보를 저장하지 못했습니다. 잠시 후 다시 시도하세요.';
+            : tr('채팅 정보를 저장하지 못했습니다. 잠시 후 다시 시도하세요.');
       });
     }
   }
@@ -298,7 +299,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
       children: [
         TextButton(
           onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: Text(canEdit ? '취소' : '닫기'),
+          child: Text(canEdit ? tr('취소') : tr('닫기')),
         ),
         const SizedBox(width: 8),
         FilledButton(
@@ -310,13 +311,13 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('저장'),
+              : Text(tr('저장')),
         ),
       ],
     );
     if (widget.asDialog) {
       return FloatingDialog(
-        title: '채팅 정보 변경',
+        title: tr('채팅 정보 변경'),
         maxWidth: 600,
         maxHeight: 720,
         child: Column(
@@ -341,7 +342,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('채팅 정보 변경')),
+      appBar: AppBar(title: Text(tr('채팅 정보 변경'))),
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -374,14 +375,14 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (!canEdit) ...[
-          const GroupFormNotice(
+          GroupFormNotice(
             key: ValueKey('group-settings-guest-notice'),
             icon: Icons.lock_outline,
             text: groupInfoGuestNotice,
           ),
           const SizedBox(height: 16),
         ],
-        const GroupFormLabel('그룹 아이콘'),
+        GroupFormLabel(tr('그룹 아이콘')),
         GroupIconField(
           editKey: const ValueKey('group-settings-icon-edit'),
           preview: GroupIcon(
@@ -396,12 +397,12 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
             radius: 32,
           ),
           hint: canEdit
-              ? '이모지나 사진으로 바꾸거나, 초기화해서 이름 앞 두 글자(이름이 없으면 멤버 사진)로 되돌릴 수 있어요.'
-              : '그룹 멤버 모두에게 이 아이콘으로 보여요.',
+              ? tr('이모지나 사진으로 바꾸거나, 초기화해서 이름 앞 두 글자(이름이 없으면 멤버 사진)로 되돌릴 수 있어요.')
+              : tr('그룹 멤버 모두에게 이 아이콘으로 보여요.'),
           onEdit: canEdit && !_saving ? _editIcon : null,
         ),
         const SizedBox(height: 18),
-        const GroupFormLabel('그룹 채팅 이름', optional: true),
+        GroupFormLabel(tr('그룹 채팅 이름'), optional: true),
         TextField(
           key: const ValueKey('group-settings-name'),
           controller: _name,
@@ -411,7 +412,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
           decoration: InputDecoration(
             // 비워 두면 어떻게 보이는지 — 나를 뺀 멤버 이름(목록의 기본 이름).
             hintText: defaultName,
-            helperText: '비워 두면 멤버 이름으로 표시돼요',
+            helperText: tr('비워 두면 멤버 이름으로 표시돼요'),
             border: const OutlineInputBorder(),
             isDense: true,
           ),
@@ -424,11 +425,14 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
           GroupFormNotice(
             key: const ValueKey('group-settings-alias-note'),
             icon: Icons.info_outline,
-            text: "내 목록에서는 '$alias'(으)로 보여요 — ⋮ › 나에게만 이름 변경에서 바꿀 수 있어요",
+            text: tr(
+              '내 목록에서는 \'{alias}\'(으)로 보여요 — ⋮ › 나에게만 이름 변경에서 바꿀 수 있어요',
+              {'alias': alias},
+            ),
           ),
         ],
         const SizedBox(height: 12),
-        const GroupFormLabel('설명', optional: true),
+        GroupFormLabel(tr('설명'), optional: true),
         TextField(
           key: const ValueKey('group-settings-description'),
           controller: _description,
@@ -436,8 +440,8 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
           maxLength: groupDescriptionMaxLength,
           minLines: 2,
           maxLines: 4,
-          decoration: const InputDecoration(
-            hintText: '어떤 이야기를 나누는 그룹인지 적어 주세요',
+          decoration: InputDecoration(
+            hintText: tr('어떤 이야기를 나누는 그룹인지 적어 주세요'),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -447,9 +451,9 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
           const SizedBox(height: 20),
           const Divider(height: 1),
           const SizedBox(height: 16),
-          const GroupFormLabel('토픽으로 전환'),
+          GroupFormLabel(tr('토픽으로 전환')),
           Text(
-            '더 많은 멤버와 이야기하고 싶다면 이 그룹채팅을 토픽으로 바꿀 수 있어요. 대화 내용은 그대로 유지돼요.',
+            tr('더 많은 멤버와 이야기하고 싶다면 이 그룹채팅을 토픽으로 바꿀 수 있어요. 대화 내용은 그대로 유지돼요.'),
             style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
           ),
           const SizedBox(height: 10),
@@ -459,7 +463,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
               key: const ValueKey('group-settings-convert'),
               onPressed: _saving ? null : _convertToTopic,
               icon: const Icon(Icons.tag, size: 18),
-              label: const Text('토픽으로 전환'),
+              label: Text(tr('토픽으로 전환')),
             ),
           ),
         ],

@@ -9,6 +9,7 @@ import '../models/todo.dart';
 import '../widgets/app_toast.dart';
 import 'app_platform.dart';
 import 'session.dart';
+import '../l10n/tr.dart';
 
 /// 한 메시지에 담는 첨부 수 — 더 많으면 나눠 보낸다(채팅 입력칸과 같다).
 const todoUploadFilesPerMessage = 10;
@@ -29,7 +30,7 @@ Future<void> uploadTodoFiles(
   final folder = todo.uploadPath;
   if (folder != null) {
     if (!AppPlatform.isWindows) {
-      toast('지정된 업로드 경로로는 PC(Windows)에서만 올릴 수 있습니다.');
+      toast(tr('지정된 업로드 경로로는 PC(Windows)에서만 올릴 수 있습니다.'));
       return;
     }
     // 폴더를 건드리기(존재 확인·복사) 전에 — 열면 안 되는 서버(공인 IP·숫자로 꾸민 IP·WebDAV·장치 경로)면 거절하고,
@@ -41,14 +42,14 @@ Future<void> uploadTodoFiles(
     }
     if (!await confirmRemoteFolderAccess(context, folder)) return;
     if (!await Directory(folder).exists()) {
-      toast('업로드 경로를 찾을 수 없습니다: $folder');
+      toast(tr('업로드 경로를 찾을 수 없습니다: {folder}', {'folder': folder}));
       return;
     }
   }
 
   final picked = await FilePicker.pickFiles(
     allowMultiple: true,
-    dialogTitle: folder == null ? '보낼 파일 선택' : '업로드할 파일 선택',
+    dialogTitle: folder == null ? tr('보낼 파일 선택') : tr('업로드할 파일 선택'),
   );
   final files = <XFile>[
     for (final f in picked?.files ?? const <PlatformFile>[])
@@ -66,15 +67,22 @@ Future<void> uploadTodoFiles(
     );
     toast(
       result.failed == 0
-          ? '파일 ${result.copied}개를 업로드 경로에 올렸습니다.'
-          : '파일 ${result.copied}개를 올렸고 ${result.failed}개는 올리지 못했습니다.',
+          ? tr('파일 {result.copied}개를 업로드 경로에 올렸습니다.', {
+              'result.copied': result.copied,
+            })
+          : tr('파일 {result.copied}개를 올렸고 {result.failed}개는 올리지 못했습니다.', {
+              'result.copied': result.copied,
+              'result.failed': result.failed,
+            }),
     );
     return;
   }
 
   try {
     final room = await _uploadTargetRoom(session, todo);
-    toast('파일 ${files.length}개를 보내는 중입니다...');
+    toast(
+      tr('파일 {files.length}개를 보내는 중입니다...', {'files.length': files.length}),
+    );
     final uploaded = await session.uploadAttachments(files);
     final controller = session.controllerFor(room);
     for (var i = 0; i < uploaded.length; i += todoUploadFilesPerMessage) {
@@ -87,11 +95,16 @@ Future<void> uploadTodoFiles(
     final creatorName = todo.creator?.name;
     toast(
       room.isSelf || creatorName == null
-          ? '나와의 대화로 파일 ${files.length}개를 보냈습니다.'
-          : '$creatorName님에게 파일 ${files.length}개를 메시지로 보냈습니다.',
+          ? tr('나와의 대화로 파일 {files.length}개를 보냈습니다.', {
+              'files.length': files.length,
+            })
+          : tr('{creatorName}님에게 파일 {files.length}개를 메시지로 보냈습니다.', {
+              'creatorName': creatorName,
+              'files.length': files.length,
+            }),
     );
   } catch (e) {
-    toast('파일을 보내지 못했습니다: $e');
+    toast(tr('파일을 보내지 못했습니다: {e}', {'e': e}));
   }
 }
 
@@ -105,7 +118,8 @@ Future<Room> _uploadTargetRoom(Session session, Todo todo) {
 }
 
 /// 메시지로 보낼 때 첫 메시지에 붙는 글.
-String todoUploadCaption(Todo todo) => '[할 일] ${todo.title} — 파일을 올렸습니다.';
+String todoUploadCaption(Todo todo) =>
+    tr('[할 일] {todo.title} — 파일을 올렸습니다.', {'todo.title': todo.title});
 
 /// [files]를 [folder]에 복사한다 — 같은 이름이 있으면 보낸 사람 이름을 붙인다([uniqueTargetPath]). 복사한 수와 실패한 수.
 Future<({int copied, int failed})> copyFilesToFolder(
@@ -193,7 +207,9 @@ final _netbiosNameRe = RegExp(r'^[a-z0-9_-]{1,63}$', caseSensitive: false);
 final _uncPrefixRe = RegExp(r'^[\\/]{2}');
 final _devicePathRe = RegExp(r'^[?.][\\/]');
 const _ipv6LiteralSuffix = '.ipv6-literal.net';
-const _folderFormError = '이 PC 드라이브(C:\\…)나 사내망 공유 폴더(\\\\서버\\…)만 열 수 있습니다.';
+final _folderFormError = tr(
+  '이 PC 드라이브(C:\\…)나 사내망 공유 폴더(\\\\서버\\…)만 열 수 있습니다.',
+);
 
 /// UNC 경로(\\서버\… · //서버/… — 구분자를 섞어 써도)면 서버 이름(host), 아니면 null(로컬 드라이브·상대 경로). 장치
 /// 경로(\\?\·\\.\)도 호스트가 없다고 보고 null.
@@ -294,7 +310,9 @@ String? remoteFolderError(String path) {
       return _folderFormError;
     }
     if (folderHostKind(host) == FolderHostKind.blocked) {
-      return '이 경로의 서버 "$host"은(는) 사내망 주소가 아니어서 안전을 위해 열지 않았습니다.';
+      return tr('이 경로의 서버 "{host}"은(는) 사내망 주소가 아니어서 안전을 위해 열지 않았습니다.', {
+        'host': host,
+      });
     }
     return null;
   }
@@ -317,7 +335,10 @@ final _trustedFolderHosts = <String>{};
 /// UNC 공유 폴더를 건드리기 전 확인 — 로컬 경로면 묻지 않고 true. 서버 이름을 보여 주고, "계속"이면 그 세션 동안 같은 서버는
 /// 다시 묻지 않는다. 취소면 false. 사내 컴퓨터 이름·사설 IP가 아닌 이름(named)이면 경고를 더한다. 호출하는 쪽이 먼저
 /// [remoteFolderError]로 까닭을 알리지만, 빠뜨려도 열면 안 되는 경로는 묻지 않고 false다.
-Future<bool> confirmRemoteFolderAccess(BuildContext context, String path) async {
+Future<bool> confirmRemoteFolderAccess(
+  BuildContext context,
+  String path,
+) async {
   if (remoteFolderError(path) != null) return false;
   final host = folderUncHost(path);
   if (host == null) return true; // 로컬 드라이브 경로는 묻지 않는다.
@@ -325,26 +346,30 @@ Future<bool> confirmRemoteFolderAccess(BuildContext context, String path) async 
   if (_trustedFolderHosts.contains(key)) return true;
   // 점 있는 도메인·한글 이름은 서버의 허용 목록을 거쳐 왔겠지만, 사내 이름 모양이 아니라는 것을 분명히 알린다.
   final caution = folderHostKind(host) == FolderHostKind.named
-      ? '"$host"은(는) 사내 컴퓨터 이름(영문·숫자)이나 사설 IP 주소가 아닙니다. '
-            '서버 관리자가 허용한 회사 서버가 맞을 때만 계속하세요.'
-      : '믿을 수 있는 사내 서버일 때만 계속하세요.';
+      ? tr(
+          '"{host}"은(는) 사내 컴퓨터 이름(영문·숫자)이나 사설 IP 주소가 아닙니다. 서버 관리자가 허용한 회사 서버가 맞을 때만 계속하세요.',
+          {'host': host},
+        )
+      : tr('믿을 수 있는 사내 서버일 때만 계속하세요.');
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('공유 폴더에 연결할까요?'),
+      title: Text(tr('공유 폴더에 연결할까요?')),
       content: Text(
-        '이 PC가 공유 서버 "$host"에 연결합니다.\n\n$path\n\n'
-        '$caution 모르는 서버면 Windows 로그인 정보가 새어 나갈 수 있습니다.',
+        tr(
+          '이 PC가 공유 서버 "{host}"에 연결합니다.\n\n{path}\n\n{caution} 모르는 서버면 Windows 로그인 정보가 새어 나갈 수 있습니다.',
+          {'host': host, 'path': path, 'caution': caution},
+        ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('folder-host-confirm'),
           onPressed: () => Navigator.of(ctx).pop(true),
-          child: const Text('계속'),
+          child: Text(tr('계속')),
         ),
       ],
     ),

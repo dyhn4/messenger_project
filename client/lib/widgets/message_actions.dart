@@ -18,6 +18,7 @@ import 'message_announce.dart';
 import 'message_reactions.dart';
 import 'message_reminders.dart';
 import 'todo_from_message.dart';
+import '../l10n/tr.dart';
 
 /// message_bubble.dart(실제 메시지)와 message_comments_card.dart(댓글)가 공용으로 쓰는
 /// 액션들 — 롱프레스 액션 시트(모바일)와 "더보기" 메뉴(PC) 양쪽에서 호출한다. 댓글은
@@ -65,7 +66,7 @@ void showEditWindowExpiredDialog(BuildContext context, String message) {
                     backgroundColor: Colors.redAccent,
                   ),
                   onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('확인'),
+                  child: Text(tr('확인')),
                 ),
               ),
             ],
@@ -90,14 +91,14 @@ Future<void> copyMessageText(BuildContext context, Message message) async {
   if (text == null) {
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('복사할 내용이 없습니다.')));
+    ).showSnackBar(SnackBar(content: Text(tr('복사할 내용이 없습니다.'))));
     return;
   }
   await Clipboard.setData(ClipboardData(text: text));
   if (context.mounted) {
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('복사했습니다.')));
+    ).showSnackBar(SnackBar(content: Text(tr('복사했습니다.'))));
   }
 }
 
@@ -106,7 +107,7 @@ void showSelectCopyDialog(BuildContext context, Message message) {
   if (text == null) {
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('복사할 내용이 없습니다.')));
+    ).showSnackBar(SnackBar(content: Text(tr('복사할 내용이 없습니다.'))));
     return;
   }
   showDialog(
@@ -200,8 +201,12 @@ Future<void> registerMessageAsTask(
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
   final description = [
     if (body.isNotEmpty) body,
-    if (fileName != null) '첨부: $fileName',
-    '— $senderDisplayName${roomName == null ? '' : ' · $roomName'} · $when 메시지에서 등록',
+    if (fileName != null) tr('첨부: {fileName}', {'fileName': fileName}),
+    tr('— {senderDisplayName}{p0} · {when} 메시지에서 등록', {
+      'senderDisplayName': senderDisplayName,
+      'p0': roomName == null ? '' : ' · $roomName',
+      'when': when,
+    }),
   ].join('\n\n');
 
   await openNewTaskFromChat(context, session, initialDescription: description);
@@ -221,12 +226,14 @@ Future<void> openNewTaskFromChat(
   try {
     projects = await session.api!.fetchProjects(teamId);
   } catch (e) {
-    if (context.mounted) showAppToast(context, '프로젝트를 불러오지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('프로젝트를 불러오지 못했습니다: {e}', {'e': e}));
+    }
     return;
   }
   if (!context.mounted) return;
   if (projects.isEmpty) {
-    showAppToast(context, '참여 중인 프로젝트가 없습니다. 프로젝트를 먼저 만들거나 참여하세요.');
+    showAppToast(context, tr('참여 중인 프로젝트가 없습니다. 프로젝트를 먼저 만들거나 참여하세요.'));
     return;
   }
   final task = await showNewTaskDialog(
@@ -237,7 +244,7 @@ Future<void> openNewTaskFromChat(
     initialDescription: initialDescription,
   );
   if (task != null && context.mounted) {
-    showAppToast(context, '${task.key ?? '업무'}로 등록했습니다.');
+    showAppToast(context, tr('{p0}로 등록했습니다.', {'p0': task.key ?? tr('업무')}));
   }
 }
 
@@ -294,7 +301,7 @@ void showMessageActionSheet(
               if (message.reactions.isNotEmpty)
                 ListTile(
                   leading: const Icon(Icons.people_outline),
-                  title: const Text('공감한 사람'),
+                  title: Text(tr('공감한 사람')),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     showReactorsSheet(context, session, message);
@@ -305,7 +312,7 @@ void showMessageActionSheet(
             if (!cannotShare)
               ListTile(
                 leading: const Icon(Icons.share_outlined),
-                title: const Text('메시지 공유'),
+                title: Text(tr('메시지 공유')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   pushMessageShareScreen(
@@ -319,7 +326,7 @@ void showMessageActionSheet(
             if (onOpenThread != null)
               ListTile(
                 leading: const Icon(Icons.mode_comment_outlined),
-                title: const Text('댓글'),
+                title: Text(tr('댓글')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   onOpenThread(message);
@@ -327,7 +334,7 @@ void showMessageActionSheet(
               ),
             ListTile(
               leading: const Icon(Icons.copy_outlined),
-              title: const Text('복사'),
+              title: Text(tr('복사')),
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 copyMessageText(context, message);
@@ -335,7 +342,7 @@ void showMessageActionSheet(
             ),
             ListTile(
               leading: const Icon(Icons.text_fields),
-              title: const Text('선택 복사'),
+              title: Text(tr('선택 복사')),
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 showSelectCopyDialog(context, message);
@@ -348,7 +355,7 @@ void showMessageActionSheet(
                   favoriteOn ? Icons.star : Icons.star_border,
                   color: favoriteOn ? Colors.amber : null,
                 ),
-                title: Text(favoriteOn ? '즐겨찾기 해제' : '즐겨찾기'),
+                title: Text(favoriteOn ? tr('즐겨찾기 해제') : tr('즐겨찾기')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   toggleEntryFavorite(
@@ -362,7 +369,7 @@ void showMessageActionSheet(
             if (!isSecretRoom && session.canUseProjects)
               ListTile(
                 leading: const Icon(Icons.assignment_outlined),
-                title: const Text('업무로 등록'),
+                title: Text(tr('업무로 등록')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   registerMessageAsTask(
@@ -377,7 +384,7 @@ void showMessageActionSheet(
               ListTile(
                 key: const ValueKey('action-reminder'),
                 leading: const Icon(Icons.alarm_add_outlined),
-                title: const Text('나중에 알림'),
+                title: Text(tr('나중에 알림')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   showReminderPicker(context, session, message);
@@ -387,7 +394,7 @@ void showMessageActionSheet(
               ListTile(
                 key: const ValueKey('action-todo'),
                 leading: const Icon(Icons.checklist_rounded),
-                title: const Text('할 일로 등록'),
+                title: Text(tr('할 일로 등록')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   registerMessageAsTodo(
@@ -401,7 +408,7 @@ void showMessageActionSheet(
             if (!cannotShare)
               ListTile(
                 leading: const Icon(Icons.forward_outlined),
-                title: const Text('메시지 전달'),
+                title: Text(tr('메시지 전달')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   pushMessageForwardScreen(
@@ -415,7 +422,7 @@ void showMessageActionSheet(
             if (offerAnnouncement && canAnnounceMessage(session, message))
               ListTile(
                 leading: const Icon(Icons.campaign_outlined),
-                title: const Text('공지 등록'),
+                title: Text(tr('공지 등록')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   announceMessage(context, session, message);
@@ -424,7 +431,7 @@ void showMessageActionSheet(
             if (onEdit != null)
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
-                title: const Text('수정'),
+                title: Text(tr('수정')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   onEdit();
@@ -460,7 +467,7 @@ List<Widget> messageActionMenuItems(
     if (!cannotShare)
       hoverMenuItem(
         icon: Icons.share_outlined,
-        label: '메시지 공유',
+        label: tr('메시지 공유'),
         onPressed: () => pushMessageShareScreen(
           context,
           session: session,
@@ -470,13 +477,13 @@ List<Widget> messageActionMenuItems(
       ),
     hoverMenuItem(
       icon: Icons.copy_outlined,
-      label: '복사',
+      label: tr('복사'),
       onPressed: () => copyMessageText(context, message),
     ),
     if (canFavoriteEntry(session, message, isComment: isComment))
       hoverMenuItem(
         icon: favoriteOn ? Icons.star : Icons.star_border,
-        label: favoriteOn ? '즐겨찾기 해제' : '즐겨찾기',
+        label: favoriteOn ? tr('즐겨찾기 해제') : tr('즐겨찾기'),
         onPressed: () => toggleEntryFavorite(
           context,
           session,
@@ -487,7 +494,7 @@ List<Widget> messageActionMenuItems(
     if (!isSecretRoom && session.canUseProjects)
       hoverMenuItem(
         icon: Icons.assignment_outlined,
-        label: '업무로 등록',
+        label: tr('업무로 등록'),
         onPressed: () => registerMessageAsTask(
           context,
           session: session,
@@ -498,13 +505,13 @@ List<Widget> messageActionMenuItems(
     if (!isComment && canRemindMessage(message))
       hoverMenuItem(
         icon: Icons.alarm_add_outlined,
-        label: '나중에 알림',
+        label: tr('나중에 알림'),
         onPressed: () => showReminderPicker(context, session, message),
       ),
     if (canRegisterAsTodo(session, message))
       hoverMenuItem(
         icon: Icons.checklist_rounded,
-        label: '할 일로 등록',
+        label: tr('할 일로 등록'),
         onPressed: () => registerMessageAsTodo(
           context,
           session: session,
@@ -515,7 +522,7 @@ List<Widget> messageActionMenuItems(
     if (!cannotShare)
       hoverMenuItem(
         icon: Icons.forward_outlined,
-        label: '메시지 전달',
+        label: tr('메시지 전달'),
         onPressed: () => pushMessageForwardScreen(
           context,
           session: session,
@@ -526,7 +533,7 @@ List<Widget> messageActionMenuItems(
     if (offerAnnouncement && canAnnounceMessage(session, message))
       hoverMenuItem(
         icon: Icons.campaign_outlined,
-        label: '공지 등록',
+        label: tr('공지 등록'),
         onPressed: () => announceMessage(context, session, message),
       ),
   ];

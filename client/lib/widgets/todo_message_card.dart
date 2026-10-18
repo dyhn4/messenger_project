@@ -11,9 +11,10 @@ import '../services/todo_api.dart';
 import 'app_toast.dart';
 import 'todo_widgets.dart';
 import 'todos_panel.dart' show openTodoInPanel;
+import '../l10n/tr.dart';
 
 /// 할 일을 찾을 수 없을 때 서버가 주는 문구(server/src/todos.js) — 이 문구면 지워진 할 일로 본다.
-const _todoNotFound = '할 일을 찾을 수 없습니다.';
+final _todoNotFound = tr('할 일을 찾을 수 없습니다.');
 
 /// 다시 받은 할 일을 잠깐 들고 있는다 — 목록을 스크롤하며 카드가 다시 그려질 때마다 서버에 묻지 않게.
 final _cache = <String, (Todo, DateTime)>{};
@@ -99,7 +100,7 @@ class _TodoMessageCardState extends State<TodoMessageCard> {
 
   Future<void> _open() async {
     if (_deleted) {
-      showAppToast(context, '삭제된 할 일입니다.');
+      showAppToast(context, tr('삭제된 할 일입니다.'));
       return;
     }
     final id = _shared.id!;
@@ -110,7 +111,7 @@ class _TodoMessageCardState extends State<TodoMessageCard> {
     }
     if (!mounted) return;
     if (todo == null) {
-      if (!_deleted) showAppToast(context, '할 일을 불러오지 못했습니다.');
+      if (!_deleted) showAppToast(context, tr('할 일을 불러오지 못했습니다.'));
       return;
     }
     await openTodoInPanel(context, widget.session, todo, api: widget.api);
@@ -209,7 +210,7 @@ class _TodoMessageCardState extends State<TodoMessageCard> {
                       if (_deleted) ...[
                         const SizedBox(height: 6),
                         Text(
-                          '삭제된 할 일입니다.',
+                          tr('삭제된 할 일입니다.'),
                           key: const ValueKey('todo-card-deleted'),
                           style: TextStyle(fontSize: 13, color: hint),
                         ),
@@ -236,7 +237,7 @@ class _TodoMessageCardState extends State<TodoMessageCard> {
                           _line(
                             context,
                             Icons.people_outline,
-                            '담당 ${assignees.join(', ')}',
+                            tr('담당 {p0}', {'p0': assignees.join(', ')}),
                           ),
                         ],
                         for (final name in files.take(shownFiles)) ...[
@@ -246,7 +247,7 @@ class _TodoMessageCardState extends State<TodoMessageCard> {
                         if (fileCount > shownFiles) ...[
                           const SizedBox(height: 6),
                           Text(
-                            '외 ${fileCount - shownFiles}개 파일',
+                            tr('외 {p0}개 파일', {'p0': fileCount - shownFiles}),
                             style: TextStyle(fontSize: 12, color: hint),
                           ),
                         ],

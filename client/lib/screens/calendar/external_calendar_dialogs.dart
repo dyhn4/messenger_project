@@ -5,6 +5,7 @@ import '../../models/calendar.dart';
 import '../../services/api_client.dart' show ApiException;
 import '../../services/calendar_controller.dart';
 import '../../widgets/app_toast.dart';
+import '../../l10n/tr.dart';
 
 /// 외부 캘린더 연동 — 회사 일정을 Google·Outlook 등에서 관리하는 팀이 일정을 두 번 넣지 않게.
 ///  - 가져오기([showAddExternalCalendarDialog]): 외부 캘린더의 ICS 주소를 구독한다(나에게만 보이고 읽기 전용, 서버가 30분마다 받는다).
@@ -14,9 +15,13 @@ import '../../widgets/app_toast.dart';
 /// "방금 전" / "12분 전" / "3시간 전" / "10/14" — 외부 캘린더를 마지막으로 받아 온 때.
 String externalUpdatedLabel(DateTime at, {DateTime? now}) {
   final diff = (now ?? DateTime.now()).difference(at);
-  if (diff.inMinutes < 1) return '방금 전';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}분 전';
-  if (diff.inHours < 24) return '${diff.inHours}시간 전';
+  if (diff.inMinutes < 1) return tr('방금 전');
+  if (diff.inMinutes < 60) {
+    return tr('{diff.inMinutes}분 전', {'diff.inMinutes': diff.inMinutes});
+  }
+  if (diff.inHours < 24) {
+    return tr('{diff.inHours}시간 전', {'diff.inHours': diff.inHours});
+  }
   return '${at.month}/${at.day}';
 }
 
@@ -26,7 +31,9 @@ String externalStatusLabel(CalendarInfo calendar, {DateTime? now}) {
   final parts = [
     if ((calendar.host ?? '').isNotEmpty) calendar.host!,
     if (calendar.lastSuccessAt != null)
-      '${externalUpdatedLabel(calendar.lastSuccessAt!, now: now)} 업데이트',
+      tr('{p0} 업데이트', {
+        'p0': externalUpdatedLabel(calendar.lastSuccessAt!, now: now),
+      }),
   ];
   return parts.join(' · ');
 }
@@ -66,7 +73,7 @@ class _AddExternalCalendarDialogState
   Future<void> _submit() async {
     final url = _url.text.trim();
     if (url.isEmpty) {
-      setState(() => _error = '구독 주소(ICS)를 입력하세요.');
+      setState(() => _error = tr('구독 주소(ICS)를 입력하세요.'));
       return;
     }
     final name = _name.text.trim();
@@ -81,12 +88,15 @@ class _AddExternalCalendarDialogState
       );
       if (!mounted) return;
       Navigator.of(context).pop();
-      showAppToast(context, '"${calendar.name}" 캘린더를 구독했습니다.');
+      showAppToast(
+        context,
+        tr('"{calendar.name}" 캘린더를 구독했습니다.', {'calendar.name': calendar.name}),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = e is ApiException ? e.message : '캘린더를 추가하지 못했습니다.';
+        _error = e is ApiException ? trServer(e.message) : tr('캘린더를 추가하지 못했습니다.');
       });
     }
   }
@@ -96,7 +106,7 @@ class _AddExternalCalendarDialogState
     final theme = Theme.of(context);
     final hint = theme.textTheme.bodySmall?.copyWith(color: theme.hintColor);
     return AlertDialog(
-      title: const Text('외부 캘린더 추가'),
+      title: Text(tr('외부 캘린더 추가')),
       content: SizedBox(
         width: 460,
         child: SingleChildScrollView(
@@ -105,8 +115,9 @@ class _AddExternalCalendarDialogState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Google·Outlook·iCloud 캘린더의 ICS 구독 주소를 넣으면 그 일정이 내 캘린더에 함께 보입니다. '
-                '나에게만 보이고, 여기서는 고칠 수 없으며, 30분마다 새로 받아 옵니다.',
+                tr(
+                  'Google·Outlook·iCloud 캘린더의 ICS 구독 주소를 넣으면 그 일정이 내 캘린더에 함께 보입니다. 나에게만 보이고, 여기서는 고칠 수 없으며, 30분마다 새로 받아 옵니다.',
+                ),
                 style: hint,
               ),
               const SizedBox(height: 12),
@@ -116,8 +127,8 @@ class _AddExternalCalendarDialogState
                 autofocus: true,
                 enabled: !_busy,
                 keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: '구독 주소 (https:// 또는 webcal://)',
+                decoration: InputDecoration(
+                  labelText: tr('구독 주소 (https:// 또는 webcal://)'),
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
@@ -129,8 +140,8 @@ class _AddExternalCalendarDialogState
                 controller: _name,
                 enabled: !_busy,
                 maxLength: 30,
-                decoration: const InputDecoration(
-                  labelText: '이름 (비우면 캘린더 이름 그대로)',
+                decoration: InputDecoration(
+                  labelText: tr('이름 (비우면 캘린더 이름 그대로)'),
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
@@ -144,13 +155,12 @@ class _AddExternalCalendarDialogState
                     style: TextStyle(color: theme.colorScheme.error),
                   ),
                 ),
-              Text('주소 찾는 곳', style: theme.textTheme.labelLarge),
+              Text(tr('주소 찾는 곳'), style: theme.textTheme.labelLarge),
               const SizedBox(height: 4),
               Text(
-                '• Google 캘린더: 설정 → 왼쪽에서 캘린더 선택 → "캘린더 통합" → "iCal 형식의 비공개 주소"\n'
-                '• Outlook(웹): 설정 → 캘린더 → 공유 캘린더 → "캘린더 게시" → ICS 링크\n'
-                '• 회사 공용 캘린더: 관리자에게 ICS(iCal) 구독 주소를 받으세요.\n'
-                '비공개 주소는 비밀번호처럼 다른 사람에게 알려 주지 마세요.',
+                tr(
+                  '• Google 캘린더: 설정 → 왼쪽에서 캘린더 선택 → "캘린더 통합" → "iCal 형식의 비공개 주소"\n• Outlook(웹): 설정 → 캘린더 → 공유 캘린더 → "캘린더 게시" → ICS 링크\n• 회사 공용 캘린더: 관리자에게 ICS(iCal) 구독 주소를 받으세요.\n비공개 주소는 비밀번호처럼 다른 사람에게 알려 주지 마세요.',
+                ),
                 style: hint,
               ),
             ],
@@ -160,7 +170,7 @@ class _AddExternalCalendarDialogState
       actions: [
         TextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('ext-submit'),
@@ -171,7 +181,7 @@ class _AddExternalCalendarDialogState
                   height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('추가'),
+              : Text(tr('추가')),
         ),
       ],
     );
@@ -187,19 +197,22 @@ Future<void> confirmRemoveExternalCalendar(
   final ok = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('구독 해지'),
+      title: Text(tr('구독 해지')),
       content: Text(
-        '"${calendar.name}" 캘린더 구독을 해지할까요? 원래 캘린더(${calendar.host ?? '외부'})의 일정은 그대로입니다.',
+        tr('"{calendar.name}" 캘린더 구독을 해지할까요? 원래 캘린더({p0})의 일정은 그대로입니다.', {
+          'calendar.name': calendar.name,
+          'p0': calendar.host ?? tr('외부'),
+        }),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('ext-remove-confirm'),
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text('해지'),
+          child: Text(tr('해지')),
         ),
       ],
     ),
@@ -209,7 +222,10 @@ Future<void> confirmRemoveExternalCalendar(
     await controller.removeExternalCalendar(calendar);
   } catch (e) {
     if (context.mounted) {
-      showAppToast(context, e is ApiException ? e.message : '구독을 해지하지 못했습니다.');
+      showAppToast(
+        context,
+        e is ApiException ? trServer(e.message) : tr('구독을 해지하지 못했습니다.'),
+      );
     }
   }
 }
@@ -225,11 +241,12 @@ Future<void> refreshExternalCalendarNow(
     if (!context.mounted) return;
     showAppToast(
       context,
-      updated.lastError ?? '"${updated.name}" 캘린더를 새로 받았습니다.',
+      updated.lastError ??
+          tr('"{updated.name}" 캘린더를 새로 받았습니다.', {'updated.name': updated.name}),
     );
   } catch (e) {
     if (context.mounted) {
-      showAppToast(context, e is ApiException ? e.message : '새로 받지 못했습니다.');
+      showAppToast(context, e is ApiException ? trServer(e.message) : tr('새로 받지 못했습니다.'));
     }
   }
 }
@@ -282,7 +299,7 @@ class _CalendarFeedDialogState extends State<_CalendarFeedDialog> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = e is ApiException ? e.message : '내보내기 주소를 처리하지 못했습니다.';
+        _error = e is ApiException ? trServer(e.message) : tr('내보내기 주소를 처리하지 못했습니다.');
       });
     }
   }
@@ -291,19 +308,21 @@ class _CalendarFeedDialogState extends State<_CalendarFeedDialog> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('새 주소로 바꾸기'),
-        content: const Text(
-          '지금 주소는 바로 끊기고, 그 주소로 구독한 곳(Google·Outlook 등)에서는 일정이 더 이상 갱신되지 않습니다. 바꿀까요?',
+        title: Text(tr('새 주소로 바꾸기')),
+        content: Text(
+          tr(
+            '지금 주소는 바로 끊기고, 그 주소로 구독한 곳(Google·Outlook 등)에서는 일정이 더 이상 갱신되지 않습니다. 바꿀까요?',
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('feed-reset-confirm'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('바꾸기'),
+            child: Text(tr('바꾸기')),
           ),
         ],
       ),
@@ -311,14 +330,14 @@ class _CalendarFeedDialogState extends State<_CalendarFeedDialog> {
     if (ok == true && mounted) {
       await _run(
         widget.controller.createCalendarFeed,
-        done: '새 주소를 만들었습니다. 구독한 곳에 새 주소를 다시 넣으세요.',
+        done: tr('새 주소를 만들었습니다. 구독한 곳에 새 주소를 다시 넣으세요.'),
       );
     }
   }
 
   Future<void> _copy(String url) async {
     await Clipboard.setData(ClipboardData(text: url));
-    if (mounted) showAppToast(context, '주소를 복사했습니다.');
+    if (mounted) showAppToast(context, tr('주소를 복사했습니다.'));
   }
 
   @override
@@ -329,8 +348,9 @@ class _CalendarFeedDialogState extends State<_CalendarFeedDialog> {
     final url = feed?.url;
     final children = <Widget>[
       Text(
-        '내가 앱에서 보는 일정(숨긴 캘린더·공휴일·생일·외부 캘린더 제외)을 ICS 구독 주소로 내보냅니다. '
-        'Google·Outlook 캘린더에 이 주소를 추가하면 지난 60일부터 앞으로 1년까지의 일정이 따라옵니다(읽기 전용).',
+        tr(
+          '내가 앱에서 보는 일정(숨긴 캘린더·공휴일·생일·외부 캘린더 제외)을 ICS 구독 주소로 내보냅니다. Google·Outlook 캘린더에 이 주소를 추가하면 지난 60일부터 앞으로 1년까지의 일정이 따라옵니다(읽기 전용).',
+        ),
         style: hint,
       ),
       const SizedBox(height: 12),
@@ -357,10 +377,10 @@ class _CalendarFeedDialogState extends State<_CalendarFeedDialog> {
                 ? null
                 : () => _run(
                     widget.controller.createCalendarFeed,
-                    done: '내보내기 주소를 만들었습니다.',
+                    done: tr('내보내기 주소를 만들었습니다.'),
                   ),
             icon: const Icon(Icons.link),
-            label: const Text('주소 만들기'),
+            label: Text(tr('주소 만들기')),
           ),
         ),
       );
@@ -383,7 +403,7 @@ class _CalendarFeedDialogState extends State<_CalendarFeedDialog> {
               ),
               IconButton(
                 key: const ValueKey('feed-copy'),
-                tooltip: '복사',
+                tooltip: tr('복사'),
                 icon: const Icon(Icons.copy, size: 18),
                 onPressed: () => _copy(url),
               ),
@@ -392,14 +412,15 @@ class _CalendarFeedDialogState extends State<_CalendarFeedDialog> {
         ),
         const SizedBox(height: 8),
         Text(
-          '이 주소를 아는 사람은 누구나 내 일정을 볼 수 있습니다. 새어 나갔다면 "새 주소로 바꾸기"를 누르세요.',
+          tr('이 주소를 아는 사람은 누구나 내 일정을 볼 수 있습니다. 새어 나갔다면 "새 주소로 바꾸기"를 누르세요.'),
           style: hint,
         ),
         if (!feed.publicAddress) ...[
           const SizedBox(height: 8),
           Text(
-            '이 서버에는 공인 인증서가 걸린 웹 주소(도메인)가 없어, Google·Outlook 같은 인터넷 서비스가 이 주소를 받지 못할 수 '
-            '있습니다. 서버 관리자에게 웹 주소 설정을 요청하세요(사내망의 Outlook 데스크톱 등은 될 수 있습니다).',
+            tr(
+              '이 서버에는 공인 인증서가 걸린 웹 주소(도메인)가 없어, Google·Outlook 같은 인터넷 서비스가 이 주소를 받지 못할 수 있습니다. 서버 관리자에게 웹 주소 설정을 요청하세요(사내망의 Outlook 데스크톱 등은 될 수 있습니다).',
+            ),
             key: const ValueKey('feed-no-public'),
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.error,
@@ -407,12 +428,12 @@ class _CalendarFeedDialogState extends State<_CalendarFeedDialog> {
           ),
         ],
         const SizedBox(height: 12),
-        Text('추가하는 곳', style: theme.textTheme.labelLarge),
+        Text(tr('추가하는 곳'), style: theme.textTheme.labelLarge),
         const SizedBox(height: 4),
         Text(
-          '• Google 캘린더: 왼쪽 "다른 캘린더" 옆 + → "URL로 추가"\n'
-          '• Outlook: 캘린더 추가 → "웹에서 구독"\n'
-          '구독한 쪽이 몇 시간마다 새로 받아 가므로, 바뀐 일정이 늦게 보일 수 있습니다.',
+          tr(
+            '• Google 캘린더: 왼쪽 "다른 캘린더" 옆 + → "URL로 추가"\n• Outlook: 캘린더 추가 → "웹에서 구독"\n구독한 쪽이 몇 시간마다 새로 받아 가므로, 바뀐 일정이 늦게 보일 수 있습니다.',
+          ),
           style: hint,
         ),
         if (_error != null) ...[
@@ -422,7 +443,7 @@ class _CalendarFeedDialogState extends State<_CalendarFeedDialog> {
       ]);
     }
     return AlertDialog(
-      title: const Text('내 일정 내보내기'),
+      title: Text(tr('내 일정 내보내기')),
       content: SizedBox(
         width: 480,
         child: SingleChildScrollView(
@@ -441,19 +462,19 @@ class _CalendarFeedDialogState extends State<_CalendarFeedDialog> {
                 ? null
                 : () => _run(
                     widget.controller.deleteCalendarFeed,
-                    done: '내보내기를 껐습니다.',
+                    done: tr('내보내기를 껐습니다.'),
                   ),
-            child: const Text('끄기'),
+            child: Text(tr('끄기')),
           ),
           TextButton(
             key: const ValueKey('feed-reset'),
             onPressed: _busy ? null : _reset,
-            child: const Text('새 주소로 바꾸기'),
+            child: Text(tr('새 주소로 바꾸기')),
           ),
         ],
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
       ],
     );

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/session.dart';
 import '../widgets/email_address_field.dart';
 import 'find_password_screen.dart';
+import '../l10n/tr.dart';
 
 /// showDialog로 띄우는 플로팅 창 — 로그인 화면 전체를 덮는 새 페이지 대신 로그인 화면
 /// 위에 뜬다.
@@ -69,14 +70,14 @@ class _FindIdScreenState extends State<FindIdScreen> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('아이디 찾기'),
+      title: Text(tr('아이디 찾기')),
       content: SizedBox(
         width: 360,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('가입할 때 등록한 이메일을 입력하세요.'),
+            Text(tr('가입할 때 등록한 이메일을 입력하세요.')),
             const SizedBox(height: 16),
             EmailAddressField(
               onChanged: (v) {
@@ -101,8 +102,9 @@ class _FindIdScreenState extends State<FindIdScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  '${_sentTo!.isEmpty ? '가입한 이메일' : _sentTo}(으)로 아이디를 보냈습니다. '
-                  '메일함을 확인하세요(안 보이면 스팸함도).',
+                  tr('{p0}(으)로 아이디를 보냈습니다. 메일함을 확인하세요(안 보이면 스팸함도).', {
+                    'p0': _sentTo!.isEmpty ? tr('가입한 이메일') : _sentTo,
+                  }),
                 ),
               ),
             ],
@@ -115,7 +117,9 @@ class _FindIdScreenState extends State<FindIdScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  '아이디: $_foundUsername',
+                  tr('아이디: {_foundUsername}', {
+                    '_foundUsername': _foundUsername,
+                  }),
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
@@ -133,7 +137,7 @@ class _FindIdScreenState extends State<FindIdScreen> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
         FilledButton(
           onPressed: _loading ? null : (_found ? _goToFindPassword : _submit),
@@ -143,7 +147,7 @@ class _FindIdScreenState extends State<FindIdScreen> {
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : Text(_found ? '비밀번호 찾기' : '아이디 찾기'),
+              : Text(_found ? tr('비밀번호 찾기') : tr('아이디 찾기')),
         ),
       ],
     );

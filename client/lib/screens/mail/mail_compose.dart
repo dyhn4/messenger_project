@@ -6,6 +6,7 @@ import '../../services/api_client.dart' show ApiException;
 import '../../services/mail_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
+import '../../l10n/tr.dart';
 
 /// 메일 쓰기 — 받는 사람·참조·숨은 참조(쉼표로 여러 명, "주소록"으로 같은 팀에서 메일을 연결한 사람 고르기), 제목, 본문, 첨부(20MB까지). 답장·전달이면 [draft]에
 /// 채워 온다(mail.dart draftFrom). 보냈으면 true.
@@ -118,7 +119,14 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
     ];
     if (files.isEmpty) return;
     if (_attachments.length + files.length > kMailAttachmentsMax) {
-      if (mounted) showAppToast(context, '첨부는 $kMailAttachmentsMax개까지입니다.');
+      if (mounted) {
+        showAppToast(
+          context,
+          tr('첨부는 {kMailAttachmentsMax}개까지입니다.', {
+            'kMailAttachmentsMax': kMailAttachmentsMax,
+          }),
+        );
+      }
       return;
     }
     setState(() => _uploading = true);
@@ -134,7 +142,7 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
         if (mounted) setState(() {});
       }
     } catch (e) {
-      if (mounted) showAppToast(context, '첨부하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('첨부하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -147,14 +155,14 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
     final bad = firstBadAddress([...to, ...cc, ...bcc]);
     String? problem;
     if (to.isEmpty && cc.isEmpty && bcc.isEmpty) {
-      problem = '받는 사람을 넣으세요.';
+      problem = tr('받는 사람을 넣으세요.');
     } else if (bad != null) {
-      problem = '주소가 올바르지 않습니다: $bad';
+      problem = tr('주소가 올바르지 않습니다: {bad}', {'bad': bad});
     } else if (_subject.text.trim().isEmpty && _body.text.trim().isEmpty) {
-      problem = '제목이나 본문을 넣으세요.';
+      problem = tr('제목이나 본문을 넣으세요.');
     } else if (_attachments.fold<int>(0, (s, a) => s + a.size) >
         kMailAttachmentsBytesMax) {
-      problem = '첨부는 모두 합쳐 20MB까지입니다.';
+      problem = tr('첨부는 모두 합쳐 20MB까지입니다.');
     }
     if (problem != null) {
       setState(() => _error = problem);
@@ -185,7 +193,7 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
       if (mounted) {
         setState(() {
           _sending = false;
-          _error = e is ApiException ? e.message : '보내지 못했습니다.';
+          _error = e is ApiException ? trServer(e.message) : tr('보내지 못했습니다.');
         });
       }
     }
@@ -199,17 +207,17 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('쓰기를 그만할까요?'),
-        content: const Text('쓴 내용은 저장되지 않습니다.'),
+        title: Text(tr('쓰기를 그만할까요?')),
+        content: Text(tr('쓴 내용은 저장되지 않습니다.')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('계속 쓰기'),
+            child: Text(tr('계속 쓰기')),
           ),
           FilledButton(
             key: const ValueKey('mail-compose-discard'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('그만두기'),
+            child: Text(tr('그만두기')),
           ),
         ],
       ),
@@ -231,13 +239,13 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
           keyboardType: TextInputType.emailAddress,
           decoration: InputDecoration(
             labelText: label,
-            hintText: '쉼표로 여러 명',
+            hintText: tr('쉼표로 여러 명'),
             isDense: true,
           ),
         ),
       ),
       IconButton(
-        tooltip: '주소록',
+        tooltip: tr('주소록'),
         icon: const Icon(Icons.contacts_outlined),
         onPressed: () => _pickMembers(c),
       ),
@@ -257,15 +265,15 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
       child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
-            tooltip: '닫기',
+            tooltip: tr('닫기'),
             icon: const Icon(Icons.close),
             onPressed: _close,
           ),
-          title: Text(account.inReplyTo != null ? '답장' : '메일 쓰기'),
+          title: Text(account.inReplyTo != null ? tr('답장') : tr('메일 쓰기')),
           actions: [
             IconButton(
               key: const ValueKey('mail-compose-attach'),
-              tooltip: '파일 첨부',
+              tooltip: tr('파일 첨부'),
               icon: const Icon(Icons.attach_file),
               onPressed: _uploading || _sending ? null : _attach,
             ),
@@ -281,7 +289,7 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.send, size: 18),
-                label: const Text('보내기'),
+                label: Text(tr('보내기')),
               ),
             ),
           ],
@@ -294,24 +302,24 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
               children: [
                 _addressField(
                   _to,
-                  '받는 사람',
+                  tr('받는 사람'),
                   'mail-compose-to',
                   trailing: TextButton(
                     key: const ValueKey('mail-compose-show-cc'),
                     onPressed: () => setState(() => _showCc = !_showCc),
-                    child: const Text('참조'),
+                    child: Text(tr('참조')),
                   ),
                 ),
                 if (_showCc) ...[
-                  _addressField(_cc, '참조', 'mail-compose-cc'),
-                  _addressField(_bcc, '숨은 참조', 'mail-compose-bcc'),
+                  _addressField(_cc, tr('참조'), 'mail-compose-cc'),
+                  _addressField(_bcc, tr('숨은 참조'), 'mail-compose-bcc'),
                 ],
                 TextField(
                   key: const ValueKey('mail-compose-subject'),
                   controller: _subject,
                   maxLength: 300,
-                  decoration: const InputDecoration(
-                    labelText: '제목',
+                  decoration: InputDecoration(
+                    labelText: tr('제목'),
                     counterText: '',
                   ),
                 ),
@@ -351,8 +359,8 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
                   minLines: 12,
                   maxLines: null,
                   keyboardType: TextInputType.multiline,
-                  decoration: const InputDecoration(
-                    hintText: '내용',
+                  decoration: InputDecoration(
+                    hintText: tr('내용'),
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -399,7 +407,7 @@ class _DirectoryDialogState extends State<_DirectoryDialog> {
         })
         .catchError((Object e) {
           if (mounted) {
-            setState(() => _error = e is ApiException ? e.message : '$e');
+            setState(() => _error = e is ApiException ? trServer(e.message) : '$e');
           }
         });
   }
@@ -422,7 +430,7 @@ class _DirectoryDialogState extends State<_DirectoryDialog> {
           p,
     ];
     return AlertDialog(
-      title: const Text('주소록'),
+      title: Text(tr('주소록')),
       content: SizedBox(
         width: 400,
         height: 420,
@@ -431,10 +439,10 @@ class _DirectoryDialogState extends State<_DirectoryDialog> {
             TextField(
               key: const ValueKey('mail-directory-filter'),
               controller: _filter,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 isDense: true,
                 prefixIcon: Icon(Icons.search, size: 20),
-                hintText: '이름·주소',
+                hintText: tr('이름·주소'),
               ),
               onChanged: (_) => setState(() {}),
             ),
@@ -449,7 +457,7 @@ class _DirectoryDialogState extends State<_DirectoryDialog> {
                   : people.isEmpty
                   ? Center(
                       child: Text(
-                        '같은 팀에서 메일 계정을 연결한 사람이 없습니다.',
+                        tr('같은 팀에서 메일 계정을 연결한 사람이 없습니다.'),
                         style: TextStyle(color: hint),
                         textAlign: TextAlign.center,
                       ),
@@ -478,7 +486,7 @@ class _DirectoryDialogState extends State<_DirectoryDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('mail-directory-done'),
@@ -487,7 +495,9 @@ class _DirectoryDialogState extends State<_DirectoryDialog> {
               if (_picked.contains(p.email))
                 MailAddress(name: p.name, address: p.email),
           ]),
-          child: Text('더하기 (${_picked.length})'),
+          child: Text(
+            tr('더하기 ({_picked.length})', {'_picked.length': _picked.length}),
+          ),
         ),
       ],
     );

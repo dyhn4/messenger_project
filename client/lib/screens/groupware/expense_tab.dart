@@ -6,6 +6,7 @@ import '../../services/session.dart';
 import 'approval_forms.dart';
 import 'approval_tab.dart';
 import 'groupware_screen.dart';
+import '../../l10n/tr.dart';
 
 /// 지출 탭 — 지출 결재 올리기(금액·분류·쓴 날·영수증)와 내가 올린 지출 결재.
 class ExpenseTab extends StatefulWidget {
@@ -80,19 +81,19 @@ class _ExpenseTabState extends State<ExpenseTab> {
       child: ListView(
         children: [
           GroupwareSectionHeader(
-            '내 지출 결재',
+            tr('내 지출 결재'),
             trailing: FilledButton.icon(
               key: const ValueKey('expense-request'),
               onPressed: _request,
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('지출 결재 올리기'),
+              label: Text(tr('지출 결재 올리기')),
             ),
           ),
           if (approvedTotal > 0)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                '승인된 지출 합계 ${wonText(approvedTotal)}',
+                tr('승인된 지출 합계 {p0}', {'p0': wonText(approvedTotal)}),
                 style: TextStyle(color: Theme.of(context).hintColor),
               ),
             ),
@@ -104,7 +105,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
               child: Center(child: CircularProgressIndicator()),
             )
           else if (mine.isEmpty)
-            const GroupwareEmpty('올린 지출 결재가 없습니다.')
+            GroupwareEmpty(tr('올린 지출 결재가 없습니다.'))
           else
             for (final d in mine)
               ApprovalDocumentTile(

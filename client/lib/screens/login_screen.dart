@@ -15,6 +15,8 @@ import '../widgets/update_dialog.dart';
 import 'find_id_screen.dart';
 import 'find_password_screen.dart';
 import 'my_profile_dialog.dart' show kProfileNameMaxLength;
+import '../l10n/tr.dart';
+import '../widgets/language_picker.dart';
 
 const _loginGreen = Color(0xFF6FCF97);
 
@@ -25,11 +27,12 @@ const _loginGreen = Color(0xFF6FCF97);
 final kSignupUsernamePattern = RegExp(r'^[A-Za-z0-9._-]{4,20}$');
 
 /// 아이디 규칙을 어겼을 때의 안내 — 서버 USERNAME_RULE_ERROR와 같은 문구.
-const kSignupUsernameRule =
-    '아이디는 영문·숫자와 . _ - 만 써서 4~20자로 정하세요(한글·띄어쓰기·그 밖의 기호는 쓸 수 없습니다).';
+final kSignupUsernameRule = tr(
+  '아이디는 영문·숫자와 . _ - 만 써서 4~20자로 정하세요(한글·띄어쓰기·그 밖의 기호는 쓸 수 없습니다).',
+);
 
 /// 회원가입 아이디 칸 아래에 늘 보이는 안내.
-const kSignupUsernameHelper = '영문, 숫자와 . _ - 만 쓸 수 있습니다 (4~20자)';
+final kSignupUsernameHelper = tr('영문, 숫자와 . _ - 만 쓸 수 있습니다 (4~20자)');
 
 /// 회원가입에 쓸 아이디가 규칙에 맞는지 — 맞으면 null, 아니면 [kSignupUsernameRule]. 앞뒤 공백은 보낼 때처럼 떼고 본다.
 String? signupUsernameError(String raw) =>
@@ -189,7 +192,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       setState(() {
         _usernameAvailable = reason == null;
-        _usernameCheckMessage = reason ?? '사용 가능한 아이디입니다.';
+        _usernameCheckMessage = reason ?? tr('사용 가능한 아이디입니다.');
       });
     } catch (e) {
       if (!mounted) return;
@@ -216,7 +219,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (_usernameAvailable != true) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('아이디 중복 확인을 해주세요.')));
+        ).showSnackBar(SnackBar(content: Text(tr('아이디 중복 확인을 해주세요.'))));
         return;
       }
       final passwordError = passwordPolicyError(_password.text);
@@ -229,17 +232,17 @@ class _LoginScreenState extends State<LoginScreen> {
       if (_password.text != _confirmPassword.text) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('비밀번호가 서로 다릅니다.')));
+        ).showSnackBar(SnackBar(content: Text(tr('비밀번호가 서로 다릅니다.'))));
         return;
       }
       if (widget.session.mailEnabled) {
         // 메일이 켜진 서버는 보안 질문 대신 이메일로 받은 코드로 본인을 확인한다.
         final codeError = _codeSentFor == null
-            ? '이메일 인증 코드를 받아 넣어 주세요.'
+            ? tr('이메일 인증 코드를 받아 넣어 주세요.')
             : _codeSentFor != _email
-            ? '이메일을 바꿨다면 인증 코드를 다시 받으세요.'
+            ? tr('이메일을 바꿨다면 인증 코드를 다시 받으세요.')
             : !isEmailCodeShape(_emailCode.text)
-            ? '메일로 받은 6자리 인증 코드를 넣어 주세요.'
+            ? tr('메일로 받은 6자리 인증 코드를 넣어 주세요.')
             : null;
         if (codeError != null) {
           ScaffoldMessenger.of(
@@ -252,7 +255,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (question == null || _securityAnswer.text.trim().isEmpty) {
           ScaffoldMessenger.of(
             context,
-          ).showSnackBar(const SnackBar(content: Text('보안 질문과 답변을 입력하세요.')));
+          ).showSnackBar(SnackBar(content: Text(tr('보안 질문과 답변을 입력하세요.'))));
           return;
         }
       }
@@ -305,7 +308,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _loading = false);
     if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(widget.session.error ?? '실패했습니다.')),
+        SnackBar(content: Text(widget.session.error ?? tr('실패했습니다.'))),
       );
       return;
     }
@@ -344,7 +347,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _loading = false);
     if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(widget.session.error ?? '실패했습니다.')),
+        SnackBar(content: Text(widget.session.error ?? tr('실패했습니다.'))),
       );
     }
   }
@@ -361,7 +364,7 @@ class _LoginScreenState extends State<LoginScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Text(
-              '또는',
+              tr('또는'),
               style: TextStyle(
                 fontSize: 12,
                 color: Theme.of(context).hintColor,
@@ -382,7 +385,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             onPressed: _loading ? null : () => _loginWithSso(p),
             icon: const Icon(Icons.business_center_outlined),
-            label: Text('${ssoProviderLabel(p)} 회사 계정으로 로그인'),
+            label: Text(tr('{p0} 회사 계정으로 로그인', {'p0': ssoProviderLabel(p)})),
           ),
         ),
     ];
@@ -415,6 +418,9 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF2F2F4),
+      // 화면 언어 — 로그인하기 전에도 고를 수 있게 오른쪽 위에(language_picker.dart).
+      floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
+      floatingActionButton: const LanguagePicker(compact: true),
       body: Center(
         child: Scrollbar(
           controller: _scrollController,
@@ -458,7 +464,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          _isRegister ? '회원가입' : '로그인',
+                          _isRegister ? tr('회원가입') : tr('로그인'),
                           style: const TextStyle(
                             fontSize: 26,
                             fontWeight: FontWeight.bold,
@@ -484,7 +490,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             maxLength: 20,
                             onChanged: _onUsernameChanged,
                             decoration: InputDecoration(
-                              hintText: '아이디 입력 (영문·숫자 4~20자)',
+                              hintText: tr('아이디 입력 (영문·숫자 4~20자)'),
                               // 쓸 수 있는 글자를 미리 보여 준다(서버 규칙과 같다 — kSignupUsernamePattern).
                               helperText: kSignupUsernameHelper,
                               counterText: '',
@@ -521,7 +527,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                             color: Colors.white,
                                           ),
                                         )
-                                      : const Text('중복 확인'),
+                                      : Text(tr('중복 확인')),
                                 ),
                               ),
                             ),
@@ -530,10 +536,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           TextField(
                             controller: _username,
                             decoration: InputDecoration(
-                              labelText: '아이디',
+                              labelText: tr('아이디'),
                               // 회사 디렉터리(LDAP)가 켜진 서버 — 같은 칸에 회사(Windows) 계정을 넣어도 된다.
                               helperText: widget.session.loginMethods.ldap
-                                  ? '회사(Windows) 계정 아이디·비밀번호로도 로그인할 수 있습니다.'
+                                  ? tr('회사(Windows) 계정 아이디·비밀번호로도 로그인할 수 있습니다.')
                                   : null,
                               border: const OutlineInputBorder(),
                             ),
@@ -544,7 +550,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           controller: _password,
                           maxLength: _isRegister ? kPasswordMaxLength : null,
                           decoration: InputDecoration(
-                            labelText: '비밀번호',
+                            labelText: tr('비밀번호'),
                             hintText: _isRegister ? kPasswordHint : null,
                             counterText: _isRegister ? '' : null,
                             border: const OutlineInputBorder(),
@@ -557,11 +563,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           TextField(
                             controller: _confirmPassword,
                             decoration: InputDecoration(
-                              labelText: '비밀번호 확인',
+                              labelText: tr('비밀번호 확인'),
                               errorText:
                                   _confirmPassword.text.isNotEmpty &&
                                       _confirmPassword.text != _password.text
-                                  ? '비밀번호가 일치하지 않습니다'
+                                  ? tr('비밀번호가 일치하지 않습니다')
                                   : null,
                               border: const OutlineInputBorder(),
                             ),
@@ -572,14 +578,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             controller: _name,
                             // 서버 가입 규칙(이름 30자 이내 — 프로필 이름 변경과 같다)에 맞춰 입력 단계에서 자른다.
                             maxLength: kProfileNameMaxLength,
-                            decoration: const InputDecoration(
-                              labelText: '이름',
+                            decoration: InputDecoration(
+                              labelText: tr('이름'),
                               border: OutlineInputBorder(),
                             ),
                           ),
                           const SizedBox(height: 12),
-                          const Text(
-                            '이메일 주소',
+                          Text(
+                            tr('이메일 주소'),
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
@@ -588,8 +594,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           const SizedBox(height: 4),
                           EmailAddressField(onChanged: (v) => _email = v),
                           const SizedBox(height: 4),
-                          const Text(
-                            '아이디, 비밀번호 찾기에 이용됩니다',
+                          Text(
+                            tr('아이디, 비밀번호 찾기에 이용됩니다'),
                             style: TextStyle(fontSize: 12, color: Colors.grey),
                           ),
                           const SizedBox(height: 16),
@@ -629,13 +635,13 @@ class _LoginScreenState extends State<LoginScreen> {
                                 spacing: 4,
                                 children: [
                                   _CheckboxLabel(
-                                    label: '아이디 기억하기',
+                                    label: tr('아이디 기억하기'),
                                     value: _rememberUsername,
                                     onChanged: (v) =>
                                         setState(() => _rememberUsername = v),
                                   ),
                                   _CheckboxLabel(
-                                    label: '로그인 상태 유지',
+                                    label: tr('로그인 상태 유지'),
                                     value: _keepSignedIn,
                                     onChanged: (v) =>
                                         setState(() => _keepSignedIn = v),
@@ -658,8 +664,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                       builder: (_) =>
                                           FindIdScreen(session: widget.session),
                                     ),
-                                    child: const Text(
-                                      '아이디 찾기',
+                                    child: Text(
+                                      tr('아이디 찾기'),
                                       style: TextStyle(fontSize: 12),
                                     ),
                                   ),
@@ -678,8 +684,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                         session: widget.session,
                                       ),
                                     ),
-                                    child: const Text(
-                                      '비밀번호 찾기',
+                                    child: Text(
+                                      tr('비밀번호 찾기'),
                                       style: TextStyle(fontSize: 12),
                                     ),
                                   ),
@@ -708,7 +714,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     color: Colors.white,
                                   ),
                                 )
-                              : Text(_isRegister ? '가입하기' : '로그인'),
+                              : Text(_isRegister ? tr('가입하기') : tr('로그인')),
                         ),
                         ..._ssoButtons(),
                         const SizedBox(height: 16),
@@ -720,7 +726,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           Padding(
                             padding: const EdgeInsets.only(bottom: 4),
                             child: Text(
-                              '초대 링크로 들어왔습니다. 처음이라면 아래 회원가입으로 가입하세요.',
+                              tr('초대 링크로 들어왔습니다. 처음이라면 아래 회원가입으로 가입하세요.'),
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 13,
@@ -733,8 +739,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             onPressed: _toggleMode,
                             child: Text(
                               _isRegister
-                                  ? '이미 계정이 있으신가요? 로그인'
-                                  : '계정이 없으신가요? 회원가입',
+                                  ? tr('이미 계정이 있으신가요? 로그인')
+                                  : tr('계정이 없으신가요? 회원가입'),
                             ),
                           ),
                         ),
@@ -749,7 +755,11 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               ),
                               child: Text(
-                                '서버 주소 변경${widget.session.serverUrl != null ? ' (${widget.session.serverUrl})' : ''}',
+                                tr('서버 주소 변경{p0}', {
+                                  'p0': widget.session.serverUrl != null
+                                      ? ' (${widget.session.serverUrl})'
+                                      : '',
+                                }),
                                 style: const TextStyle(
                                   fontSize: 12,
                                   color: Colors.grey,
@@ -801,13 +811,13 @@ class _SecurityQuestionSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '본인 확인용 질문',
+          Text(
+            tr('본인 확인용 질문'),
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
           ),
           const SizedBox(height: 4),
-          const Text(
-            '아이디, 비밀번호 찾기에 이용됩니다',
+          Text(
+            tr('아이디, 비밀번호 찾기에 이용됩니다'),
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
           const SizedBox(height: 12),
@@ -815,7 +825,7 @@ class _SecurityQuestionSection extends StatelessWidget {
             children: [
               Expanded(
                 child: _SegmentTab(
-                  label: '직접 작성',
+                  label: tr('직접 작성'),
                   selected: customMode,
                   onTap: () => onModeChanged(true),
                 ),
@@ -823,7 +833,7 @@ class _SecurityQuestionSection extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: _SegmentTab(
-                  label: '목록에서 선택',
+                  label: tr('목록에서 선택'),
                   selected: !customMode,
                   onTap: () => onModeChanged(false),
                 ),
@@ -834,8 +844,8 @@ class _SecurityQuestionSection extends StatelessWidget {
           if (customMode)
             TextField(
               controller: customQuestionController,
-              decoration: const InputDecoration(
-                hintText: '질문을 직접 입력하세요',
+              decoration: InputDecoration(
+                hintText: tr('질문을 직접 입력하세요'),
                 border: OutlineInputBorder(),
               ),
             )
@@ -843,7 +853,7 @@ class _SecurityQuestionSection extends StatelessWidget {
             DropdownButtonFormField<String>(
               initialValue: presetChoice,
               isExpanded: true,
-              hint: const Text('질문 선택', style: _questionStyle),
+              hint: Text(tr('질문 선택'), style: _questionStyle),
               decoration: const InputDecoration(border: OutlineInputBorder()),
               style: _questionStyle,
               // itemHeight를 비워야 항목 높이가 내용에 맞게 늘어난다 — 질문이 길면 팝업에서
@@ -880,8 +890,8 @@ class _SecurityQuestionSection extends StatelessWidget {
           const SizedBox(height: 12),
           TextField(
             controller: answerController,
-            decoration: const InputDecoration(
-              labelText: '답변',
+            decoration: InputDecoration(
+              labelText: tr('답변'),
               border: OutlineInputBorder(),
             ),
           ),
@@ -1005,7 +1015,7 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
         if (!mounted) return;
         setState(() {
           _submitting = false;
-          _error = '인증서를 받지 못했습니다: $e';
+          _error = tr('인증서를 받지 못했습니다: {e}', {'e': e});
         });
         return;
       }
@@ -1017,14 +1027,14 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
     if (ok) {
       Navigator.of(context).pop();
     } else {
-      setState(() => _error = widget.session.error ?? '연결 실패');
+      setState(() => _error = widget.session.error ?? tr('연결 실패'));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('서버 주소 변경'),
+      title: Text(tr('서버 주소 변경')),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1032,8 +1042,8 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
           TextField(
             controller: _controller,
             autofocus: true,
-            decoration: const InputDecoration(
-              labelText: '서버 주소',
+            decoration: InputDecoration(
+              labelText: tr('서버 주소'),
               hintText: 'https://192.168.0.62:3000',
               border: OutlineInputBorder(),
             ),
@@ -1043,9 +1053,9 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
             controller: _code,
             // 4자리 페어링 코드뿐 아니라 초대 링크의 긴 코드도 그대로 붙여넣을 수 있어야
             // 해서 숫자 키패드/길이 제한을 두지 않는다(서버가 길이로 둘을 구분해서 처리).
-            decoration: const InputDecoration(
-              labelText: '페어링 코드 또는 초대 링크의 코드 (새 서버일 때만)',
-              hintText: '서버 콘솔의 4자리 코드, 또는 초대 페이지에 적힌 코드',
+            decoration: InputDecoration(
+              labelText: tr('페어링 코드 또는 초대 링크의 코드 (새 서버일 때만)'),
+              hintText: tr('서버 콘솔의 4자리 코드, 또는 초대 페이지에 적힌 코드'),
               border: OutlineInputBorder(),
             ),
             onSubmitted: (_) => _submit(),
@@ -1059,7 +1069,7 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
       actions: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: _submitting ? null : _submit,
@@ -1069,7 +1079,7 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('연결'),
+              : Text(tr('연결')),
         ),
       ],
     );

@@ -10,6 +10,7 @@ import 'download_storage.dart';
 import 'notification_popup_style.dart';
 import 'startup_registry.dart'
     if (dart.library.js_interop) 'startup_registry_stub.dart';
+import '../l10n/tr.dart';
 
 const _kDownloadWithoutAsking = 'settings_download_without_asking';
 const _kDownloadFolder = 'settings_download_folder';
@@ -40,7 +41,7 @@ const _kNotifyPopupMaxCards = 'settings_notify_popup_max_cards';
 /// 그 PC에서 직접 받아온다). 안드로이드는 이 이름들이 없어서 설정 자체를 숨긴다
 /// (settings_screen.dart). 빈 문자열이 "시스템 기본"이다. 채팅 내용과 방 목록에만 적용되고
 /// (widgets/chat_font_scope.dart) 그 외 화면(설정·관리자 콘솔 등)은 항상 기본 모습이다.
-String fontFamilyLabel(String family) => family.isEmpty ? '시스템 기본' : family;
+String fontFamilyLabel(String family) => family.isEmpty ? tr('시스템 기본') : family;
 
 /// 옛한글(고어) 자모 조합 글리프 — 기본 폰트(Roboto 등)에는 없어서 네모(tofu)로 보인다.
 /// pubspec.yaml에 번들된 폰트(SIL OFL 1.1, assets/fonts/OFL.txt 참고) — 앱 전체 기본 테마

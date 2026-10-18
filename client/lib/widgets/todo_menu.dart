@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/todo.dart';
 import 'compact_menu.dart';
 import 'todo_widgets.dart';
+import '../l10n/tr.dart';
 
 // 할 일 더보기 메뉴(상세 머리의 ••• · 목록/일정 카드의 ⋯)가 같이 쓰는 조각 — 항목(todoMenuItems)·삭제 확인
 // (confirmTodoDelete)·카드의 ⋯ 단추(TodoCardMenuButton). 두 메뉴는 항목·권한·모양이 같고, 고른 뒤의 동작은 상세
@@ -58,24 +59,25 @@ List<PopupMenuEntry<TodoMenuAction>> todoMenuItems(
   return [
     item(
       TodoMenuAction.favorite,
-      todo.favorite ? '즐겨찾기 해제' : '즐겨찾기',
+      todo.favorite ? tr('즐겨찾기 해제') : tr('즐겨찾기'),
       todo.favorite ? Icons.star : Icons.star_border,
       iconColor: todo.favorite ? Colors.amber : null,
     ),
-    if (todo.canEdit) item(TodoMenuAction.edit, '할 일 수정', Icons.edit_outlined),
+    if (todo.canEdit)
+      item(TodoMenuAction.edit, tr('할 일 수정'), Icons.edit_outlined),
     if (todo.attachments.isNotEmpty)
       item(
         TodoMenuAction.download,
-        '파일 다운로드',
+        tr('파일 다운로드'),
         Icons.file_download_outlined,
         enabled: !downloading,
       ),
     if (todo.canEdit)
-      item(TodoMenuAction.upload, '파일 업로드', Icons.file_upload_outlined),
+      item(TodoMenuAction.upload, tr('파일 업로드'), Icons.file_upload_outlined),
     if (todo.canManage)
       item(
         TodoMenuAction.delete,
-        '할 일 삭제',
+        tr('할 일 삭제'),
         Icons.delete_outline,
         color: theme.colorScheme.error,
       ),
@@ -97,12 +99,16 @@ Future<bool> confirmTodoDelete(
       // 닫히는 동안 다시 그려져도 닫힌 창을 다시 넘기지 않게 [open]일 때만.
       if (open) onRoute?.call(ModalRoute.of(dialogContext));
       return AlertDialog(
-        title: const Text('할 일 삭제'),
-        content: Text('"${todo.title}" 할 일을 삭제할까요?\n삭제하면 되돌릴 수 없습니다.'),
+        title: Text(tr('할 일 삭제')),
+        content: Text(
+          tr('"{todo.title}" 할 일을 삭제할까요?\n삭제하면 되돌릴 수 없습니다.', {
+            'todo.title': todo.title,
+          }),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             key: const ValueKey('todo-confirm-delete'),
@@ -110,7 +116,7 @@ Future<bool> confirmTodoDelete(
               backgroundColor: Theme.of(dialogContext).colorScheme.error,
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       );
@@ -181,7 +187,7 @@ class _TodoCardMenuButtonState extends State<TodoCardMenuButton> {
         dimension: TodoCardMenuButton.size,
         child: IconButton(
           key: ValueKey('todo-card-menu-${widget.todo.id}'),
-          tooltip: '더보기',
+          tooltip: tr('더보기'),
           padding: EdgeInsets.zero,
           iconSize: 18,
           style: IconButton.styleFrom(

@@ -4,6 +4,7 @@ import '../models/board_category.dart';
 import '../models/room.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
+import '../l10n/tr.dart';
 
 /// 보드 뷰 토픽의 말머리 관리(토픽을 관리할 수 있는 사람만) — 이름·색을 고치고, 더하고, 지우고, 끌어서 순서를 바꾼다.
 /// 저장하면 목록을 통째로 보낸다(서버 PATCH /rooms/:id의 boardCategories — 있던 말머리는 id를 그대로 보내서
@@ -90,11 +91,15 @@ class _BoardCategoriesDialogState extends State<BoardCategoriesDialog> {
     final seen = <String>{};
     for (final r in _rows) {
       final name = r.name.text.trim();
-      if (name.isEmpty) return '말머리 이름을 입력하세요.';
+      if (name.isEmpty) return tr('말머리 이름을 입력하세요.');
       if (name.characters.length > boardCategoryNameMax) {
-        return '말머리 이름은 $boardCategoryNameMax자까지 쓸 수 있습니다.';
+        return tr('말머리 이름은 {boardCategoryNameMax}자까지 쓸 수 있습니다.', {
+          'boardCategoryNameMax': boardCategoryNameMax,
+        });
       }
-      if (!seen.add(name)) return "같은 이름의 말머리가 있습니다: '$name'";
+      if (!seen.add(name)) {
+        return tr('같은 이름의 말머리가 있습니다: \'{name}\'', {'name': name});
+      }
     }
     return null;
   }
@@ -116,7 +121,7 @@ class _BoardCategoriesDialogState extends State<BoardCategoriesDialog> {
           BoardCategory(id: r.id, name: r.name.text.trim(), color: r.color),
       ]);
       if (!mounted) return;
-      showAppToast(context, '말머리를 저장했습니다.');
+      showAppToast(context, tr('말머리를 저장했습니다.'));
       Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -127,7 +132,7 @@ class _BoardCategoriesDialogState extends State<BoardCategoriesDialog> {
 
   Widget _colorButton(_Row row) {
     return PopupMenuButton<String>(
-      tooltip: '색 고르기',
+      tooltip: tr('색 고르기'),
       enabled: !_saving,
       onSelected: (c) => setState(() => row.color = c),
       itemBuilder: (_) => [
@@ -164,7 +169,7 @@ class _BoardCategoriesDialogState extends State<BoardCategoriesDialog> {
     final theme = Theme.of(context);
     final hint = theme.hintColor;
     return AlertDialog(
-      title: const Text('말머리 관리'),
+      title: Text(tr('말머리 관리')),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -172,7 +177,9 @@ class _BoardCategoriesDialogState extends State<BoardCategoriesDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '게시글을 쓸 때 고르는 분류입니다. 보드 위에서 말머리별로 모아 볼 수 있습니다. 지운 말머리의 게시글은 말머리 없이 보입니다.',
+              tr(
+                '게시글을 쓸 때 고르는 분류입니다. 보드 위에서 말머리별로 모아 볼 수 있습니다. 지운 말머리의 게시글은 말머리 없이 보입니다.',
+              ),
               style: TextStyle(fontSize: 13, color: hint),
             ),
             const SizedBox(height: 12),
@@ -180,7 +187,7 @@ class _BoardCategoriesDialogState extends State<BoardCategoriesDialog> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 20),
                 child: Text(
-                  '아직 말머리가 없습니다.',
+                  tr('아직 말머리가 없습니다.'),
                   textAlign: TextAlign.center,
                   style: TextStyle(color: hint),
                 ),
@@ -215,8 +222,8 @@ class _BoardCategoriesDialogState extends State<BoardCategoriesDialog> {
                               enabled: !_saving,
                               autofocus: row.id == null,
                               maxLength: boardCategoryNameMax,
-                              decoration: const InputDecoration(
-                                hintText: '말머리 이름',
+                              decoration: InputDecoration(
+                                hintText: tr('말머리 이름'),
                                 isDense: true,
                                 counterText: '',
                                 border: OutlineInputBorder(),
@@ -229,7 +236,7 @@ class _BoardCategoriesDialogState extends State<BoardCategoriesDialog> {
                             ),
                           ),
                           IconButton(
-                            tooltip: '삭제',
+                            tooltip: tr('삭제'),
                             onPressed: _saving ? null : () => _remove(row),
                             icon: const Icon(Icons.close, size: 20),
                           ),
@@ -249,8 +256,10 @@ class _BoardCategoriesDialogState extends State<BoardCategoriesDialog> {
                 icon: const Icon(Icons.add),
                 label: Text(
                   _rows.length >= boardCategoriesMax
-                      ? '말머리는 $boardCategoriesMax개까지'
-                      : '말머리 추가',
+                      ? tr('말머리는 {boardCategoriesMax}개까지', {
+                          'boardCategoriesMax': boardCategoriesMax,
+                        })
+                      : tr('말머리 추가'),
                 ),
               ),
             ),
@@ -271,12 +280,12 @@ class _BoardCategoriesDialogState extends State<BoardCategoriesDialog> {
       actions: [
         TextButton(
           onPressed: _saving ? null : () => Navigator.of(context).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           key: const ValueKey('board-category-save'),
           onPressed: _saving ? null : _save,
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ],
     );

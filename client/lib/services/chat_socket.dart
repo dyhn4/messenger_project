@@ -22,6 +22,7 @@ import '../models/team.dart';
 import '../models/text_format.dart';
 import '../models/todo.dart' show TodoComment;
 import 'pinned_tls.dart';
+import '../l10n/tr.dart';
 
 /// room:read 브로드캐스트 한 건. 누가(userId) 언제(lastReadAt) 어느 방(roomId)을 읽었는지.
 class RoomReadEvent {
@@ -388,7 +389,7 @@ class CallState {
 String? callJoinRejection(dynamic response) {
   if (response is! Map || response['ok'] != false) return null;
   final error = response['error'];
-  return error is String && error.isNotEmpty ? error : '화상회의에 참여하지 못했습니다.';
+  return error is String && error.isNotEmpty ? error : tr('화상회의에 참여하지 못했습니다.');
 }
 
 /// 진행자가 내 마이크를 켜거나 끄라고 했다(call:mic — 서버가 진행자인지 확인한 뒤 내 기기들에만 보낸다).
@@ -454,11 +455,17 @@ class RoomRemovedEvent {
   /// "토픽이 삭제되었습니다"로 잘못 알리지 않게 따로 둔다 — 토픽이 아닌 방(1:1 대화 등)일 수도 있다.
   String get toastText {
     if (isTeamRemoval) {
-      final room = name == null || name!.isEmpty ? '대화방' : "'$name' 대화방";
-      return '팀에서 제외되어 $room에서 나갔습니다.';
+      final room = name == null || name!.isEmpty
+          ? tr('대화방')
+          : tr('\'{name}\' 대화방', {'name': name});
+      return tr('팀에서 제외되어 {room}에서 나갔습니다.', {'room': room});
     }
-    final topic = name == null || name!.isEmpty ? '토픽' : "'$name' 토픽";
-    return isKicked ? '$topic에서 내보내졌습니다.' : '$topic이 삭제되었습니다.';
+    final topic = name == null || name!.isEmpty
+        ? tr('토픽')
+        : tr('\'{name}\' 토픽', {'name': name});
+    return isKicked
+        ? tr('{topic}에서 내보내졌습니다.', {'topic': topic})
+        : tr('{topic}이 삭제되었습니다.', {'topic': topic});
   }
 }
 
@@ -471,7 +478,7 @@ class MessageSendException implements Exception {
   final bool transient;
   const MessageSendException(this.message, {this.transient = false});
   @override
-  String toString() => message;
+  String toString() => trServer(message);
 }
 
 /// 서버가 소켓 한 번에 받는 크기(server/src/messageLimits.js SOCKET_MAX_PAYLOAD_BYTES) — 이보다 큰 message:send는 서버가
@@ -892,7 +899,7 @@ class ChatSocket {
   ) {
     final socket = _socket;
     if (socket == null || !socket.connected) {
-      onAck(const {'ok': false, 'error': '서버와 연결되어 있지 않습니다.'});
+      onAck({'ok': false, 'error': tr('서버와 연결되어 있지 않습니다.')});
       return;
     }
     socket.emitWithAck(
@@ -901,7 +908,7 @@ class ChatSocket {
       ack: (dynamic response) => onAck(
         response is Map
             ? Map<String, dynamic>.from(response)
-            : const {'ok': false, 'error': '서버 응답이 없습니다.'},
+            : {'ok': false, 'error': tr('서버 응답이 없습니다.')},
       ),
     );
   }
@@ -1513,9 +1520,7 @@ class ChatSocket {
     bool requireConnection = false,
   }) {
     if (!fitsSocketMessage(payload)) {
-      return Future.error(
-        const MessageSendException('메시지가 너무 깁니다. 나눠서 보내 주세요.'),
-      );
+      return Future.error(MessageSendException(tr('메시지가 너무 깁니다. 나눠서 보내 주세요.')));
     }
     final override = debugSendOverride;
     if (override != null) return override(payload).then(_messageFromAck);
@@ -1523,7 +1528,7 @@ class ChatSocket {
     final socket = _socket;
     if (socket == null || (requireConnection && !socket.connected)) {
       return Future.error(
-        const MessageSendException('서버와 연결되어 있지 않습니다.', transient: true),
+        MessageSendException(tr('서버와 연결되어 있지 않습니다.'), transient: true),
       );
     }
 
@@ -1545,8 +1550,8 @@ class ChatSocket {
     );
     return completer.future.timeout(
       const Duration(seconds: 15),
-      onTimeout: () => throw const MessageSendException(
-        '서버 응답이 없습니다. 연결 상태를 확인해주세요.',
+      onTimeout: () => throw MessageSendException(
+        tr('서버 응답이 없습니다. 연결 상태를 확인해주세요.'),
         transient: true,
       ),
     );
@@ -1555,7 +1560,9 @@ class ChatSocket {
   /// message:send ack 해석 — 실패면 서버 문구로 예외를 던지고, 성공이면 같이 온 메시지를 읽는다.
   static Message? _messageFromAck(Map<String, dynamic> ack) {
     if (ack['ok'] != true) {
-      throw MessageSendException(ack['error']?.toString() ?? '메시지 전송에 실패했습니다.');
+      throw MessageSendException(
+        ack['error']?.toString() ?? tr('메시지 전송에 실패했습니다.'),
+      );
     }
     final message = ack['message'];
     if (message is! Map) return null;

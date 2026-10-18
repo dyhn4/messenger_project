@@ -25,6 +25,7 @@ import 'floating_dialog.dart';
 import 'secret_safety_number_dialog.dart';
 import 'self_destruct_picker_dialog.dart';
 import 'user_avatar.dart';
+import '../l10n/tr.dart';
 
 /// 토픽 이름 옆에 붙이는 작은 상태 배지(보드 뷰 · 읽기 전용 · 보관됨) — 참여 가능한 토픽 목록과
 /// 모바일 대화 헤더(좁으면 이름 아래 줄)가 같이 쓴다.
@@ -61,7 +62,7 @@ class TopicBadge extends StatelessWidget {
           Icon(icon, size: 12, color: fg),
           const SizedBox(width: 3),
           Text(
-            label,
+            tr(label),
             style: TextStyle(
               fontSize: 11,
               height: 1.2,
@@ -157,11 +158,11 @@ mixin CloseWhenRoomRemoved<T extends StatefulWidget> on State<T> {
 /// RoomOptionsMenu의 자동 삭제 타이머 항목 트레일링 표시용 — self_destruct_picker_dialog.dart의
 /// 프리셋(1초/5초/30초/1분/5분/1시간/1일/1주) 라벨과 맞춘 짧은 문구.
 String _formatSeconds(int seconds) {
-  if (seconds >= 7 * 24 * 60 * 60) return '1주';
-  if (seconds >= 24 * 60 * 60) return '1일';
-  if (seconds >= 60 * 60) return '1시간';
-  if (seconds >= 60) return '${seconds ~/ 60}분';
-  return '$seconds초';
+  if (seconds >= 7 * 24 * 60 * 60) return tr('1주');
+  if (seconds >= 24 * 60 * 60) return tr('1일');
+  if (seconds >= 60 * 60) return tr('1시간');
+  if (seconds >= 60) return tr('{p0}분', {'p0': seconds ~/ 60});
+  return tr('{seconds}초', {'seconds': seconds});
 }
 
 /// 방 나가기/숨기기 확인 대화상자 + 실행 — 채팅 화면의 "더보기" 메뉴와 방 목록의 길게 누르기
@@ -183,8 +184,8 @@ Future<void> showLeaveRoomDialog(
   // 비밀 대화는 "나만 목록에서 숨기기"가 의미가 없다(서버가 내용을 못 보므로) — 항상
   // "나가기"로 표시하고, 상대방도 같이 나가지는지는 아래 체크박스로 고른다.
   final staticLabel = room.isSecret
-      ? '채팅방 나가기'
-      : (isDm ? '채팅방 숨기기' : (isTopic ? '토픽 나가기' : '채팅방 나가기'));
+      ? tr('채팅방 나가기')
+      : (isDm ? tr('채팅방 숨기기') : (isTopic ? tr('토픽 나가기') : tr('채팅방 나가기')));
   var alsoRemoveOther = false;
   // 평문 DM 전용 — 기본(체크 안 함)은 지금처럼 "숨기기"(다시 대화하면 예전 내용이 그대로
   // 복원됨), 체크하면 "진짜 나가기"(다시 대화해도 예전 내용이 안 보임)로 문구/버튼이
@@ -195,7 +196,7 @@ Future<void> showLeaveRoomDialog(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
       builder: (dialogContext, setDialogState) {
-        final label = plainDm && realLeave ? '채팅방 나가기' : staticLabel;
+        final label = plainDm && realLeave ? tr('채팅방 나가기') : staticLabel;
         return AlertDialog(
           title: Text(label),
           // 체크박스 상태에 따라 안내 문구 길이가 달라지는데, 폭을 안 고정해두면 그 자연스러운
@@ -209,12 +210,22 @@ Future<void> showLeaveRoomDialog(
               children: [
                 Text(
                   room.isSecret
-                      ? '\'${room.displayName(session.userId ?? '')}\' 비밀 대화를 나가시겠습니까?'
+                      ? tr('\'{p0}\' 비밀 대화를 나가시겠습니까?', {
+                          'p0': room.displayName(session.userId ?? ''),
+                        })
                       : plainDm
                       ? (realLeave
-                            ? '\'${room.displayName(session.userId ?? '')}\' 방에서 나가시겠습니까? 나중에 다시 대화를 시작해도 예전 내용은 보이지 않습니다.'
-                            : '\'${room.displayName(session.userId ?? '')}\' 방을 목록에서 숨기시겠습니까? 나중에 다시 대화를 시작하면 예전 내용이 그대로 보입니다.')
-                      : '\'${room.displayName(session.userId ?? '')}\' 방에서 나가시겠습니까?',
+                            ? tr(
+                                '\'{p0}\' 방에서 나가시겠습니까? 나중에 다시 대화를 시작해도 예전 내용은 보이지 않습니다.',
+                                {'p0': room.displayName(session.userId ?? '')},
+                              )
+                            : tr(
+                                '\'{p0}\' 방을 목록에서 숨기시겠습니까? 나중에 다시 대화를 시작하면 예전 내용이 그대로 보입니다.',
+                                {'p0': room.displayName(session.userId ?? '')},
+                              ))
+                      : tr('\'{p0}\' 방에서 나가시겠습니까?', {
+                          'p0': room.displayName(session.userId ?? ''),
+                        }),
                 ),
                 if (room.isSecret)
                   CheckboxListTile(
@@ -223,8 +234,8 @@ Future<void> showLeaveRoomDialog(
                     value: alsoRemoveOther,
                     onChanged: (v) =>
                         setDialogState(() => alsoRemoveOther = v ?? false),
-                    title: const Text('상대방도 나가기'),
-                    subtitle: const Text('(양쪽 방 폭파)'),
+                    title: Text(tr('상대방도 나가기')),
+                    subtitle: Text(tr('(양쪽 방 폭파)')),
                   ),
                 if (plainDm)
                   CheckboxListTile(
@@ -233,8 +244,8 @@ Future<void> showLeaveRoomDialog(
                     value: realLeave,
                     onChanged: (v) =>
                         setDialogState(() => realLeave = v ?? false),
-                    title: const Text('나가기'),
-                    subtitle: const Text('(체크하면 다시 대화해도 예전 내용이 안 보입니다)'),
+                    title: Text(tr('나가기')),
+                    subtitle: Text(tr('(체크하면 다시 대화해도 예전 내용이 안 보입니다)')),
                   ),
               ],
             ),
@@ -242,12 +253,12 @@ Future<void> showLeaveRoomDialog(
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('취소'),
+              child: Text(tr('취소')),
             ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
               child: Text(
-                plainDm ? (realLeave ? '나가기' : '숨기기') : '나가기',
+                plainDm ? (realLeave ? tr('나가기') : tr('숨기기')) : tr('나가기'),
                 style: const TextStyle(color: Colors.redAccent),
               ),
             ),
@@ -271,7 +282,7 @@ Future<void> showLeaveRoomDialog(
     if (isTopic && e is ApiException && e.message.contains('토픽 관리자')) {
       await _showCannotLeaveTopicDialog(context, session, room, e.message);
     } else {
-      showAppToast(context, '나가지 못했습니다: $e');
+      showAppToast(context, tr('나가지 못했습니다: {e}', {'e': e}));
     }
     return;
   }
@@ -290,17 +301,17 @@ Future<void> _showCannotLeaveTopicDialog(
   final openMembers = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('토픽을 나갈 수 없습니다'),
+      title: Text(tr('토픽을 나갈 수 없습니다')),
       content: SizedBox(width: 340, child: Text(message)),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('닫기'),
+          child: Text(tr('닫기')),
         ),
         if (canManage)
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('토픽 관리자 지정하기'),
+            child: Text(tr('토픽 관리자 지정하기')),
           ),
       ],
     ),
@@ -326,19 +337,20 @@ Future<void> showHideDmDialog(
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('채팅방 숨기기'),
+      title: Text(tr('채팅방 숨기기')),
       content: Text(
-        '\'${room.displayName(session.userId ?? '')}\' 방을 목록에서 숨기시겠습니까?'
-        ' 나중에 다시 대화를 시작하면 예전 내용이 그대로 보입니다.',
+        tr('\'{p0}\' 방을 목록에서 숨기시겠습니까? 나중에 다시 대화를 시작하면 예전 내용이 그대로 보입니다.', {
+          'p0': room.displayName(session.userId ?? ''),
+        }),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text('숨기기'),
+          child: Text(tr('숨기기')),
         ),
       ],
     ),
@@ -479,7 +491,7 @@ class RoomOptionsMenu extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => FloatingDialog(
-        title: '멤버 (${sorted.length})',
+        title: tr('멤버 ({sorted.length})', {'sorted.length': sorted.length}),
         child: SizedBox(
           width: double.maxFinite,
           child: ListView(
@@ -513,8 +525,8 @@ class RoomOptionsMenu extends StatelessWidget {
     final isDm = room.type == RoomType.dm;
     final isTopic = room.type == RoomType.topic;
     final leaveLabel = room.isSecret
-        ? '채팅방 나가기'
-        : (isDm ? '채팅방 숨기기' : (isTopic ? '토픽 나가기' : '채팅방 나가기'));
+        ? tr('채팅방 나가기')
+        : (isDm ? tr('채팅방 숨기기') : (isTopic ? tr('토픽 나가기') : tr('채팅방 나가기')));
     final iconColor = IconTheme.of(context).color;
 
     // "더보기" 메뉴 — 채팅 목록 우클릭 메뉴와 같은 간결한 모양(compact_menu.dart). 항목 묶음
@@ -528,7 +540,7 @@ class RoomOptionsMenu extends StatelessWidget {
           CompactMenu.item<void>(
             context,
             icon: Icons.campaign_outlined,
-            label: '공지',
+            label: tr('공지'),
             onTap: () => openAnnouncementPanel(context, session, room),
           ),
       ],
@@ -538,19 +550,19 @@ class RoomOptionsMenu extends StatelessWidget {
           CompactMenu.item<void>(
             context,
             icon: Icons.insert_drive_file_outlined,
-            label: '파일 보기',
+            label: tr('파일 보기'),
             onTap: () => _openFiles(context),
           ),
           CompactMenu.item<void>(
             context,
             icon: Icons.link,
-            label: '링크 보기',
+            label: tr('링크 보기'),
             onTap: () => _openLinks(context),
           ),
           CompactMenu.item<void>(
             context,
             icon: Icons.photo_library_outlined,
-            label: '앨범 보기',
+            label: tr('앨범 보기'),
             onTap: () => _openAlbums(context),
           ),
         ],
@@ -559,8 +571,10 @@ class RoomOptionsMenu extends StatelessWidget {
             context,
             icon: Icons.timer_outlined,
             label: room.secretSelfDestructSeconds == null
-                ? '자동 삭제 타이머'
-                : '자동 삭제 타이머 (${_formatSeconds(room.secretSelfDestructSeconds!)})',
+                ? tr('자동 삭제 타이머')
+                : tr('자동 삭제 타이머 ({p0})', {
+                    'p0': _formatSeconds(room.secretSelfDestructSeconds!),
+                  }),
             onTap: () => showDialog(
               context: context,
               builder: (_) =>
@@ -575,7 +589,7 @@ class RoomOptionsMenu extends StatelessWidget {
           CompactMenu.item<void>(
             context,
             icon: Icons.file_download_outlined,
-            label: '대화 내보내기',
+            label: tr('대화 내보내기'),
             onTap: () => showExportChatDialog(context, session, room),
           ),
       ],
@@ -585,7 +599,7 @@ class RoomOptionsMenu extends StatelessWidget {
           CompactMenu.item<void>(
             context,
             icon: Icons.edit_outlined,
-            label: '정보 변경하기',
+            label: tr('정보 변경하기'),
             onTap: () => showTopicSettingsDialog(context, session, room),
           ),
         // 보드 뷰 토픽의 말머리(분류) — 게시글을 쓸 때 고르고, 보드 위에서 말머리별로 모아 본다.
@@ -593,7 +607,7 @@ class RoomOptionsMenu extends StatelessWidget {
           CompactMenu.item<void>(
             context,
             icon: Icons.label_outline,
-            label: '말머리 관리',
+            label: tr('말머리 관리'),
             onTap: () => showBoardCategoriesDialog(context, session, room),
           ),
         // 들어오는 웹훅 — 바깥 서비스의 알림을 봇 메시지로 받는다(room_webhooks_dialog.dart).
@@ -601,7 +615,7 @@ class RoomOptionsMenu extends StatelessWidget {
           CompactMenu.item<void>(
             context,
             icon: Icons.webhook_outlined,
-            label: '웹훅',
+            label: tr('웹훅'),
             onTap: () => showRoomWebhooksDialog(context, session, room),
           ),
         if (room.type == RoomType.group) ...[
@@ -632,7 +646,7 @@ class RoomOptionsMenu extends StatelessWidget {
       children: [
         if (!isDm)
           Tooltip(
-            message: '멤버',
+            message: tr('멤버'),
             child: TextButton.icon(
               onPressed: () => _showMembers(context, room),
               style: TextButton.styleFrom(
@@ -650,19 +664,19 @@ class RoomOptionsMenu extends StatelessWidget {
                 ? Icons.notifications_off_outlined
                 : Icons.notifications_none_outlined,
           ),
-          tooltip: room.muted ? '알림 켜기' : '알림 끄기',
+          tooltip: room.muted ? tr('알림 켜기') : tr('알림 끄기'),
           onPressed: () => session.toggleMuted(room),
         ),
         // 초대 권한은 팀 설정(초대 권한: 정회원 이상 / 관리자만)과 내 등급에 달려 있다.
         if (!isDm && session.canInviteToRooms)
           IconButton(
             icon: const Icon(Icons.person_add_alt_outlined),
-            tooltip: '멤버 초대',
+            tooltip: tr('멤버 초대'),
             onPressed: () => _invite(context, room),
           ),
         PopupMenuButton<void>(
           icon: const Icon(Icons.more_vert),
-          tooltip: '더보기',
+          tooltip: tr('더보기'),
           color: CompactMenu.color(context),
           shape: CompactMenu.shape,
           menuPadding: CompactMenu.menuPadding,
@@ -695,9 +709,9 @@ class RoomOptionsMenu extends StatelessWidget {
             color: verified ? Colors.green : Theme.of(context).hintColor,
           ),
           const SizedBox(width: 8),
-          const Flexible(
+          Flexible(
             child: Text(
-              '보안 코드 확인',
+              tr('보안 코드 확인'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: CompactMenu.textStyle,
@@ -705,8 +719,8 @@ class RoomOptionsMenu extends StatelessWidget {
           ),
           if (verified) ...[
             const SizedBox(width: 6),
-            const Text(
-              '확인함',
+            Text(
+              tr('확인함'),
               style: TextStyle(fontSize: 12, color: Colors.green),
             ),
           ],
@@ -723,7 +737,7 @@ class RoomOptionsMenu extends StatelessWidget {
       children: [
         Icon(Icons.edit_outlined, size: 16, color: Theme.of(context).hintColor),
         const SizedBox(width: 8),
-        const Text('정보 변경', style: CompactMenu.textStyle),
+        Text(tr('정보 변경'), style: CompactMenu.textStyle),
       ],
     );
     return PopupMenuItem<void>(
@@ -756,7 +770,9 @@ Future<void> showRenameRoomForMeDialog(
   try {
     await session.renameRoomForMe(room, result);
   } catch (e) {
-    if (context.mounted) showAppToast(context, '이름을 바꾸지 못했습니다: $e');
+    if (context.mounted) {
+      showAppToast(context, tr('이름을 바꾸지 못했습니다: {e}', {'e': e}));
+    }
   }
 }
 
@@ -764,8 +780,8 @@ Future<void> showRenameRoomForMeDialog(
 /// 이렇게 부른다. 별칭을 붙여둔 방이면 원래 방 이름을 괄호로 같이 보여준다.
 String renameRoomMenuLabel(Room room, String myUserId) =>
     room.customName == null
-    ? '나에게만 이름 변경'
-    : '나에게만 이름 변경(${room.originalDisplayName(myUserId)})';
+    ? tr('나에게만 이름 변경')
+    : tr('나에게만 이름 변경({p0})', {'p0': room.originalDisplayName(myUserId)});
 
 /// "나에게만 이름 변경" 입력 대화상자 — 저장하면 입력값(빈 문자열이면 별칭 삭제)을, 취소하면 null을 돌려준다.
 class _RenameRoomDialog extends StatefulWidget {
@@ -789,13 +805,13 @@ class _RenameRoomDialogState extends State<_RenameRoomDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('나에게만 이름 변경'),
+      title: Text(tr('나에게만 이름 변경')),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '나에게만 바뀌어 보이고, 다른 멤버에게는 영향이 없습니다.\n비우고 저장하면 원래 이름으로 돌아갑니다.',
+            tr('나에게만 바뀌어 보이고, 다른 멤버에게는 영향이 없습니다.\n비우고 저장하면 원래 이름으로 돌아갑니다.'),
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 12),
@@ -814,11 +830,11 @@ class _RenameRoomDialogState extends State<_RenameRoomDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(_controller.text),
-          child: const Text('저장'),
+          child: Text(tr('저장')),
         ),
       ],
     );

@@ -11,6 +11,7 @@ import '../../widgets/floating_dialog.dart';
 import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/user_avatar.dart';
 import 'project_widgets.dart';
+import '../../l10n/tr.dart';
 
 // intl의 DateFormat(locale: 'ko')는 initializeDateFormatting()을 먼저 부르지 않으면
 // LocaleDataException을 던진다(이 앱은 그 초기화를 어디서도 안 한다 — time_format.dart와
@@ -21,7 +22,13 @@ String _formatDue(DateTime dt) =>
 String _formatCommentTime(DateTime dt) {
   final isPm = dt.hour >= 12;
   final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-  return '${dt.month}월 ${dt.day}일 ${isPm ? '오후' : '오전'} $hour12:${dt.minute.toString().padLeft(2, '0')}';
+  return tr('{dt.month}월 {dt.day}일 {p0} {hour12}:{p1}', {
+    'dt.month': dt.month,
+    'dt.day': dt.day,
+    'p0': isPm ? tr('오후') : tr('오전'),
+    'hour12': hour12,
+    'p1': dt.minute.toString().padLeft(2, '0'),
+  });
 }
 
 /// "프로젝트 생성" — 이름, 대표 색상, 프로젝트 키, 설명, 공개 설정을 입력한다. 만든 사람이
@@ -214,9 +221,9 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
         children: [
           Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
-                  '프로젝트 템플릿',
+                  tr('프로젝트 템플릿'),
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                 ),
               ),
@@ -231,7 +238,7 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                     textStyle: const TextStyle(fontSize: 12),
                   ),
                   icon: const Icon(Icons.add, size: 14),
-                  label: const Text('새 템플릿'),
+                  label: Text(tr('새 템플릿')),
                 ),
             ],
           ),
@@ -256,8 +263,8 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                   shrinkWrap: true,
                   children: [
                     tile(
-                      title: '빈 프로젝트',
-                      subtitle: '기본 상태·유형·우선순위로 시작',
+                      title: tr('빈 프로젝트'),
+                      subtitle: tr('기본 상태·유형·우선순위로 시작'),
                       selected: _templateId == null,
                       onTap: () => setState(() => _templateId = null),
                     ),
@@ -295,7 +302,7 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
           const Icon(Icons.grid_view_outlined, size: 16, color: blue),
           const SizedBox(width: 8),
           Text(
-            '템플릿',
+            tr('템플릿'),
             style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
           ),
           const SizedBox(width: 8),
@@ -308,7 +315,7 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
             ),
           ),
           IconButton(
-            tooltip: '템플릿 빼기',
+            tooltip: tr('템플릿 빼기'),
             onPressed: () => setState(() => _templateId = null),
             icon: const Icon(Icons.close, size: 16),
             visualDensity: VisualDensity.compact,
@@ -324,7 +331,7 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
 
   Future<void> _submit() async {
     if (_name.text.trim().isEmpty) {
-      setState(() => _error = '프로젝트 이름을 입력하세요.');
+      setState(() => _error = tr('프로젝트 이름을 입력하세요.'));
       return;
     }
     setState(() {
@@ -383,14 +390,14 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
               padding: const EdgeInsets.only(right: 20),
               children: [
                 if (template != null) _selectedTemplateChip(template),
-                _label('프로젝트 이름'),
+                _label(tr('프로젝트 이름')),
                 TextField(
                   controller: _name,
                   focusNode: _nameFocus,
                   autofocus: true,
                   maxLength: 60,
                   decoration: InputDecoration(
-                    hintText: _hintWhenIdle(_nameFocus, '프로젝트 이름을 입력하세요'),
+                    hintText: _hintWhenIdle(_nameFocus, tr('프로젝트 이름을 입력하세요')),
                     counterText: '',
                     border: const OutlineInputBorder(),
                   ),
@@ -413,7 +420,7 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                   },
                 ),
                 const SizedBox(height: 20),
-                _label('대표 색상'),
+                _label(tr('대표 색상')),
                 Wrap(
                   spacing: 10,
                   runSpacing: 10,
@@ -446,7 +453,7 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                   ],
                 ),
                 const SizedBox(height: 20),
-                _label('프로젝트 키'),
+                _label(tr('프로젝트 키')),
                 TextField(
                   controller: _identifier,
                   focusNode: _identifierFocus,
@@ -455,14 +462,14 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                   decoration: InputDecoration(
                     hintText: _hintWhenIdle(
                       _identifierFocus,
-                      '프로젝트 식별 키를 입력하세요. (예: HR, CX, DEV)',
+                      tr('프로젝트 식별 키를 입력하세요. (예: HR, CX, DEV)'),
                     ),
                     counterText: '',
                     border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 20),
-                _label('설명'),
+                _label(tr('설명')),
                 TextField(
                   controller: _description,
                   focusNode: _descriptionFocus,
@@ -471,13 +478,13 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                   decoration: InputDecoration(
                     hintText: _hintWhenIdle(
                       _descriptionFocus,
-                      '프로젝트에 대한 설명을 추가하세요...',
+                      tr('프로젝트에 대한 설명을 추가하세요...'),
                     ),
                     border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 20),
-                _label('공개 설정'),
+                _label(tr('공개 설정')),
                 // 고른 값 위에 메뉴가 겹쳐 뜨는 기본 드롭다운(DropdownButtonFormField) 대신,
                 // 메뉴가 입력칸 바로 아래로 펼쳐지는 DropdownMenu를 쓴다 — 펼쳤을 때 공개·
                 // 비공개 두 항목이 입력칸에 가리지 않고 다 보인다.
@@ -491,15 +498,15 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
-                  dropdownMenuEntries: const [
+                  dropdownMenuEntries: [
                     DropdownMenuEntry(
                       value: true,
-                      label: '공개',
+                      label: tr('공개'),
                       leadingIcon: Icon(Icons.public, size: 18),
                     ),
                     DropdownMenuEntry(
                       value: false,
-                      label: '비공개',
+                      label: tr('비공개'),
                       leadingIcon: Icon(Icons.lock_outline, size: 18),
                     ),
                   ],
@@ -513,11 +520,13 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                   alignment: Alignment.centerLeft,
                   children: [
                     Text(
-                      '정회원 이상 권한을 가진 모든 멤버가 별도 초대 없이 자동으로 참여하며, 만들면 이들에게 알림이 갑니다.',
+                      tr(
+                        '정회원 이상 권한을 가진 모든 멤버가 별도 초대 없이 자동으로 참여하며, 만들면 이들에게 알림이 갑니다.',
+                      ),
                       style: TextStyle(color: hint, fontSize: 12),
                     ),
                     Text(
-                      '초대한 구성원만 프로젝트를 확인할 수 있습니다.',
+                      tr('초대한 구성원만 프로젝트를 확인할 수 있습니다.'),
                       style: TextStyle(color: hint, fontSize: 12),
                     ),
                   ],
@@ -552,8 +561,8 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text(
-                          '프로젝트 생성',
+                      : Text(
+                          tr('프로젝트 생성'),
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                 ),
@@ -564,7 +573,7 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
       ],
     );
     return FloatingDialog(
-      title: '프로젝트 생성',
+      title: tr('프로젝트 생성'),
       maxWidth: wide ? 900 : 520,
       maxHeight: 780,
       // 스크롤바를 창 오른쪽 끝에 붙이려고 오른쪽 여백을 0으로 받고, 안쪽 내용이 좌우 여백을
@@ -791,7 +800,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
   Future<void> _submit() async {
     final projectId = _projectId;
     if (projectId == null) {
-      setState(() => _error = '프로젝트를 고르세요.');
+      setState(() => _error = tr('프로젝트를 고르세요.'));
       return;
     }
     setState(() {
@@ -947,8 +956,8 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                   children: [
                     Text(
                       _startDate == null || _dueDate != null
-                          ? '시작일을 선택하세요'
-                          : '마감일을 선택하세요',
+                          ? tr('시작일을 선택하세요')
+                          : tr('마감일을 선택하세요'),
                       style: TextStyle(color: hint, fontSize: 12),
                     ),
                     const SizedBox(height: 6),
@@ -982,14 +991,14 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
               children: [
                 Icon(Icons.calendar_today_outlined, size: 14, color: hint),
                 const SizedBox(width: 6),
-                dateText(_startDate, '시작일'),
+                dateText(_startDate, tr('시작일')),
                 Text('  —  ', style: TextStyle(color: hint)),
-                dateText(_dueDate, '마감일'),
+                dateText(_dueDate, tr('마감일')),
                 const Spacer(),
                 if (_startDate != null || _dueDate != null)
                   IconButton(
                     icon: const Icon(Icons.close, size: 14),
-                    tooltip: '기간 지우기',
+                    tooltip: tr('기간 지우기'),
                     visualDensity: VisualDensity.compact,
                     onPressed: () => setState(() {
                       _startDate = null;
@@ -1010,7 +1019,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
       menuChildren: [
         MenuItemButton(
           onPressed: () => setState(() => _assigneeId = null),
-          child: const Text('미배정'),
+          child: Text(tr('미배정')),
         ),
         for (final user in _members)
           MenuItemButton(
@@ -1035,7 +1044,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: me == null
               ? Text(
-                  '미배정',
+                  tr('미배정'),
                   style: TextStyle(
                     fontSize: 13,
                     color: Theme.of(context).hintColor,
@@ -1081,7 +1090,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
             label: Text(user.name),
             onDeleted: () => setState(() => _referenceIds.remove(user.id)),
           ),
-        DashedAddButton(label: '+ 추가', onTap: _pickReferences),
+        DashedAddButton(label: tr('+ 추가'), onTap: _pickReferences),
       ],
     );
   }
@@ -1119,7 +1128,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
     );
 
     return FloatingDialog(
-      title: '새 업무',
+      title: tr('새 업무'),
       maxWidth: 560,
       maxHeight: 760,
       // 스크롤바를 창 오른쪽 끝에 붙이려고 오른쪽 여백을 0으로 받고, 안쪽 내용이 좌우 여백을
@@ -1145,13 +1154,13 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                 shrinkWrap: true,
                 padding: const EdgeInsets.only(right: 20),
                 children: [
-                  _sectionLabel('프로젝트'),
+                  _sectionLabel(tr('프로젝트')),
                   if (widget.projects.isNotEmpty)
                     // 고른 값 위에 메뉴가 겹쳐 뜨는 기본 드롭다운 대신, 입력칸 바로 아래로
                     // 펼쳐지는 DropdownMenu를 쓴다(프로젝트 생성 창의 "공개 설정"과 같다).
                     DropdownMenu<String>(
                       initialSelection: _projectId,
-                      hintText: '프로젝트 선택',
+                      hintText: tr('프로젝트 선택'),
                       requestFocusOnTap: false,
                       expandedInsets: EdgeInsets.zero,
                       menuStyle: const MenuStyle(
@@ -1201,20 +1210,20 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        _projectName ?? '프로젝트',
+                        _projectName ?? tr('프로젝트'),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   if (_templates.isNotEmpty) ...[
                     const SizedBox(height: 12),
-                    _sectionLabel('양식에서 불러오기'),
+                    _sectionLabel(tr('양식에서 불러오기')),
                     DropdownButtonFormField<String>(
                       key: ValueKey('tpl-$_templateId-${_templates.length}'),
                       initialValue: _templateId,
                       isExpanded: true,
                       decoration: InputDecoration(
                         isDense: true,
-                        hintText: '양식에서 불러오기',
+                        hintText: tr('양식에서 불러오기'),
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 14,
@@ -1241,13 +1250,13 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  _sectionLabel('업무'),
+                  _sectionLabel(tr('업무')),
                   TextField(
                     controller: _title,
                     autofocus: true,
                     maxLength: 200,
                     decoration: InputDecoration(
-                      hintText: '업무 입력',
+                      hintText: tr('업무 입력'),
                       counterText: '',
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
@@ -1261,7 +1270,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                   const SizedBox(height: 12),
                   _card([
                     _row(
-                      '담당자',
+                      tr('담당자'),
                       _assigneeField,
                       trailing: canAssignMe
                           ? TextButton(
@@ -1271,14 +1280,14 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                               ),
                               onPressed: () =>
                                   setState(() => _assigneeId = myId),
-                              child: const Text('나에게 할당'),
+                              child: Text(tr('나에게 할당')),
                             )
                           : null,
                     ),
-                    _row('기간', _periodField),
+                    _row(tr('기간'), _periodField),
                     if (_statuses.isNotEmpty)
                       _row(
-                        '상태',
+                        tr('상태'),
                         _chipRow([
                           for (final s in _statuses)
                             _chip(
@@ -1291,7 +1300,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                       ),
                     if (_types.isNotEmpty)
                       _row(
-                        '유형',
+                        tr('유형'),
                         _chipRow([
                           for (final t in _types)
                             _chip(
@@ -1306,7 +1315,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                       ),
                     if (_priorities.isNotEmpty)
                       _row(
-                        '우선순위',
+                        tr('우선순위'),
                         _chipRow([
                           for (final p in _priorities)
                             _chip(
@@ -1321,7 +1330,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                             ),
                         ]),
                       ),
-                    _row('참조', _referenceField),
+                    _row(tr('참조'), _referenceField),
                   ]),
                   const SizedBox(height: 12),
                   TextField(
@@ -1329,7 +1338,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                     maxLines: 5,
                     minLines: 3,
                     decoration: InputDecoration(
-                      hintText: '설명을 추가하세요...',
+                      hintText: tr('설명을 추가하세요...'),
                       contentPadding: const EdgeInsets.all(12),
                       border: boxBorder,
                       enabledBorder: boxBorder,
@@ -1376,7 +1385,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                       onPressed: _submitting
                           ? null
                           : () => Navigator.of(context).pop(),
-                      child: const Text('취소'),
+                      child: Text(tr('취소')),
                     ),
                     const SizedBox(width: 8),
                     FilledButton(
@@ -1389,7 +1398,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                               height: 18,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text('생성'),
+                          : Text(tr('생성')),
                     ),
                   ],
                 ),
@@ -1527,7 +1536,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
         await _load();
       }
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('저장하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -1562,7 +1571,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
       await widget.session.api!.addTaskComment(widget.taskId, text);
       await _load();
     } catch (e) {
-      if (mounted) showAppToast(context, '댓글을 남기지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('댓글을 남기지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -1570,17 +1579,17 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('업무 삭제'),
-        content: const Text('이 업무와 달린 댓글이 모두 삭제됩니다. 계속할까요?'),
+        title: Text(tr('업무 삭제')),
+        content: Text(tr('이 업무와 달린 댓글이 모두 삭제됩니다. 계속할까요?')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+            child: Text(tr('취소')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('삭제'),
+            child: Text(tr('삭제')),
           ),
         ],
       ),
@@ -1590,7 +1599,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
       await widget.session.api!.deleteTask(widget.taskId);
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+      if (mounted) showAppToast(context, tr('삭제하지 못했습니다: {e}', {'e': e}));
     }
   }
 
@@ -1599,7 +1608,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
     final hint = Theme.of(context).hintColor;
     final task = _task;
     return FloatingDialog(
-      title: task?.key ?? '업무',
+      title: task?.key ?? tr('업무'),
       maxWidth: 560,
       maxHeight: 780,
       child: _error != null
@@ -1682,7 +1691,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
                         ),
                         const SizedBox(height: 12),
                         _DueDateField(
-                          label: '시작일',
+                          label: tr('시작일'),
                           value: task.startDate,
                           onChanged: (v) => v == null
                               ? _patch(clearStartDate: true)
@@ -1706,7 +1715,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
                         const SizedBox(height: 12),
                         Row(
                           children: [
-                            Text('우선순위', style: TextStyle(color: hint)),
+                            Text(tr('우선순위'), style: TextStyle(color: hint)),
                             const SizedBox(width: 12),
                             DropdownButton<String>(
                               value: _currentPriorityId(task),
@@ -1743,12 +1752,14 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
                         ],
                         const SizedBox(height: 20),
                         Text(
-                          '댓글 ${task.comments.length}',
+                          tr('댓글 {task.comments.length}', {
+                            'task.comments.length': task.comments.length,
+                          }),
                           style: Theme.of(context).textTheme.labelLarge,
                         ),
                         const SizedBox(height: 8),
                         if (task.comments.isEmpty)
-                          const EmptyHint('아직 댓글이 없습니다')
+                          EmptyHint(tr('아직 댓글이 없습니다'))
                         else
                           for (final comment in task.comments)
                             Padding(
@@ -1778,8 +1789,8 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
                     Expanded(
                       child: TextField(
                         controller: _comment,
-                        decoration: const InputDecoration(
-                          hintText: '댓글 남기기',
+                        decoration: InputDecoration(
+                          hintText: tr('댓글 남기기'),
                           border: OutlineInputBorder(),
                           isDense: true,
                         ),
@@ -1803,8 +1814,8 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
                       size: 18,
                       color: Colors.redAccent,
                     ),
-                    label: const Text(
-                      '업무 삭제',
+                    label: Text(
+                      tr('업무 삭제'),
                       style: TextStyle(color: Colors.redAccent),
                     ),
                   ),
@@ -1834,13 +1845,13 @@ class _AssigneeField extends StatelessWidget {
     final safeValue = members.any((m) => m.id == value) ? value : null;
     return DropdownButtonFormField<String?>(
       initialValue: safeValue,
-      decoration: const InputDecoration(
-        labelText: '담당자',
+      decoration: InputDecoration(
+        labelText: tr('담당자'),
         border: OutlineInputBorder(),
         isDense: true,
       ),
       items: [
-        const DropdownMenuItem(value: null, child: Text('담당자 없음')),
+        DropdownMenuItem(value: null, child: Text(tr('담당자 없음'))),
         for (final user in members)
           DropdownMenuItem(
             value: user.id,
@@ -1880,13 +1891,13 @@ class _TypeField extends StatelessWidget {
       key: ValueKey('type-$safeValue-${types.length}'),
       initialValue: safeValue,
       isExpanded: true,
-      decoration: const InputDecoration(
-        labelText: '유형',
+      decoration: InputDecoration(
+        labelText: tr('유형'),
         border: OutlineInputBorder(),
         isDense: true,
       ),
       items: [
-        const DropdownMenuItem(value: null, child: Text('유형 없음')),
+        DropdownMenuItem(value: null, child: Text(tr('유형 없음'))),
         for (final type in types)
           DropdownMenuItem(
             value: type.id,
@@ -1950,13 +1961,13 @@ class _ReferenceField extends StatelessWidget {
       onTap: () => _pick(context),
       borderRadius: BorderRadius.circular(4),
       child: InputDecorator(
-        decoration: const InputDecoration(
-          labelText: '참조자',
+        decoration: InputDecoration(
+          labelText: tr('참조자'),
           border: OutlineInputBorder(),
           isDense: true,
         ),
         child: selected.isEmpty
-            ? Text('참조자 없음 (눌러서 추가)', style: TextStyle(color: hint))
+            ? Text(tr('참조자 없음 (눌러서 추가)'), style: TextStyle(color: hint))
             : Wrap(
                 spacing: 6,
                 runSpacing: 4,
@@ -2007,7 +2018,7 @@ class _ReferencePickDialogState extends State<_ReferencePickDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('참조자 선택'),
+      title: Text(tr('참조자 선택')),
       content: SizedBox(
         width: 360,
         height: 360,
@@ -2047,11 +2058,11 @@ class _ReferencePickDialogState extends State<_ReferencePickDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+          child: Text(tr('취소')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(_selected.toList()),
-          child: const Text('확인'),
+          child: Text(tr('확인')),
         ),
       ],
     );
@@ -2076,7 +2087,7 @@ class _DueDateField extends StatelessWidget {
       children: [
         Icon(Icons.event_outlined, size: 18, color: hint),
         const SizedBox(width: 8),
-        Text(label, style: TextStyle(color: hint)),
+        Text(tr(label), style: TextStyle(color: hint)),
         const SizedBox(width: 12),
         TextButton(
           onPressed: () async {
@@ -2089,12 +2100,12 @@ class _DueDateField extends StatelessWidget {
             );
             if (picked != null) onChanged(picked);
           },
-          child: Text(value == null ? '설정 안 함' : _formatDue(value!)),
+          child: Text(value == null ? tr('설정 안 함') : _formatDue(value!)),
         ),
         if (value != null)
           IconButton(
             icon: const Icon(Icons.close, size: 16),
-            tooltip: '$label 지우기',
+            tooltip: tr('{label} 지우기', {'label': label}),
             onPressed: () => onChanged(null),
           ),
       ],
@@ -2122,7 +2133,7 @@ class _CustomFieldsEditor extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('추가 정보', style: TextStyle(color: hint, fontSize: 12)),
+        Text(tr('추가 정보'), style: TextStyle(color: hint, fontSize: 12)),
         const SizedBox(height: 8),
         for (final f in fields)
           Padding(
@@ -2162,7 +2173,7 @@ class _CustomFieldsEditor extends StatelessWidget {
                   isDense: true,
                 ),
                 items: [
-                  const DropdownMenuItem(value: null, child: Text('선택 안 함')),
+                  DropdownMenuItem(value: null, child: Text(tr('선택 안 함'))),
                   for (final o in f.options)
                     DropdownMenuItem(value: o, child: Text(o)),
                 ],

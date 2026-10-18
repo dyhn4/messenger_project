@@ -6,6 +6,7 @@ import '../models/room.dart';
 import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/room_picker_field.dart';
+import '../l10n/tr.dart';
 
 String _typeToWire(MessageType type) => switch (type) {
   MessageType.image => 'image',
@@ -111,18 +112,19 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
     // 비밀 대화의 글·파일은 다른 방으로 보내지 않는다 — 글은 평문으로 새고, 파일은 받는 사람이 풀 수 없는 암호문이다.
     if (_fromSecretRoom) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('비밀 대화의 메시지·파일은 다른 대화방으로 전달할 수 없습니다.')),
+        SnackBar(content: Text(tr('비밀 대화의 메시지·파일은 다른 대화방으로 전달할 수 없습니다.'))),
       );
       return;
     }
     // 파일 삭제로 지워진 파일은 전달할 수 없다(메시지 자리와 댓글만 남아 있다).
     final isFileMessage =
         message.type == MessageType.image || message.type == MessageType.file;
-    if (isFileMessage && message.attachments.isNotEmpty &&
+    if (isFileMessage &&
+        message.attachments.isNotEmpty &&
         message.liveAttachments.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('삭제된 파일은 전달할 수 없습니다.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(tr('삭제된 파일은 전달할 수 없습니다.'))));
       return;
     }
     setState(() => _sending = true);
@@ -171,7 +173,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('전달 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text(tr('전달 실패: {e}', {'e': e}))));
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -184,20 +186,23 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
     final (icon, label) = message.isPost
         ? switch (message.attachments.length) {
             0 => (null, null),
-            final n when n == images => (Icons.image_outlined, '사진 $n장'),
-            final n => (Icons.attach_file, '첨부 $n개'),
+            final n when n == images => (
+              Icons.image_outlined,
+              tr('사진 {n}장', {'n': n}),
+            ),
+            final n => (Icons.attach_file, tr('첨부 {n}개', {'n': n})),
           }
         : switch (message.type) {
-            MessageType.image => (Icons.image_outlined, '사진'),
+            MessageType.image => (Icons.image_outlined, tr('사진')),
             MessageType.file => (
               Icons.insert_drive_file_outlined,
-              message.fileName ?? '파일',
+              message.fileName ?? tr('파일'),
             ),
             MessageType.sticker => (
               Icons.emoji_emotions_outlined,
               switch (findStickerById(message.text ?? '')?.emoji) {
                 final String e when e.isNotEmpty => e,
-                _ => '이모티콘',
+                _ => tr('이모티콘'),
               },
             ),
             MessageType.text ||
@@ -239,7 +244,9 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${widget.senderDisplayName}에서 전달한 메시지입니다',
+                  tr('{widget.senderDisplayName}에서 전달한 메시지입니다', {
+                    'widget.senderDisplayName': widget.senderDisplayName,
+                  }),
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 2),
@@ -254,7 +261,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
                 if (_includeAttribution && _edited) ...[
                   const SizedBox(height: 6),
                   Text(
-                    '내용을 고치면 원본 표시는 붙지 않습니다.',
+                    tr('내용을 고치면 원본 표시는 붙지 않습니다.'),
                     key: const ValueKey('forward-edited-note'),
                     style: TextStyle(
                       fontSize: 12,
@@ -269,7 +276,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
         const SizedBox(width: 8),
         Column(
           children: [
-            const Text('포함', style: TextStyle(fontSize: 12)),
+            Text(tr('포함'), style: TextStyle(fontSize: 12)),
             Switch(
               value: _includeAttribution,
               onChanged: (v) => setState(() => _includeAttribution = v),
@@ -289,7 +296,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
       expands: true,
       textAlignVertical: TextAlignVertical.top,
       decoration: InputDecoration(
-        hintText: '내용을 입력하세요.',
+        hintText: tr('내용을 입력하세요.'),
         border: widget.asDialog ? const OutlineInputBorder() : InputBorder.none,
       ),
     );
@@ -298,7 +305,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: widget.asDialog ? MainAxisSize.min : MainAxisSize.max,
       children: [
-        Text('대화방', style: Theme.of(context).textTheme.labelLarge),
+        Text(tr('대화방'), style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 8),
         RoomPickerField(
           session: widget.session,
@@ -325,7 +332,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
                   onPressed: _sending
                       ? null
                       : () => Navigator.of(context).pop(),
-                  child: const Text('취소'),
+                  child: Text(tr('취소')),
                 ),
               ),
               const SizedBox(width: 8),
@@ -338,7 +345,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('전달'),
+                      : Text(tr('전달')),
                 ),
               ),
             ],
@@ -348,11 +355,11 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
     );
 
     if (widget.asDialog) {
-      return FloatingDialog(title: '메시지 전달', maxWidth: 480, child: body);
+      return FloatingDialog(title: tr('메시지 전달'), maxWidth: 480, child: body);
     }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('메시지 전달'),
+        title: Text(tr('메시지 전달')),
         actions: [
           TextButton(
             onPressed: canForward ? _forward : null,
@@ -362,7 +369,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('전달'),
+                : Text(tr('전달')),
           ),
         ],
       ),

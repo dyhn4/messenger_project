@@ -255,6 +255,52 @@ class GroupwareApi {
     await _getMap('/api/groupware/stats${_query({'from': from, 'to': to})}'),
   );
 
+  /// 결재 통계 엑셀 내려받기 경로(Session.downloadAuthedFile에 넘긴다 — 요약·결재자별·문서 세 시트).
+  String statsExportPath({required String from, required String to}) =>
+      '/api/groupware/stats/export${_query({'from': from, 'to': to})}';
+
+  /// 결재 문서의 전자서명 검증(문서를 볼 수 있는 사람).
+  Future<ApprovalVerification> verifyDocument(String id) async =>
+      ApprovalVerification.fromJson(
+        await _getMap('/api/groupware/documents/$id/verify'),
+      );
+
+  /// 결재 전자서명의 서버 공개 키(PEM)와 지문.
+  Future<({String fingerprint, String publicKey})> sealKey() async {
+    final m = await _getMap('/api/groupware/seal-key');
+    return (
+      fingerprint: m['fingerprint'] as String? ?? '',
+      publicKey: m['publicKey'] as String? ?? '',
+    );
+  }
+
+  /// 이 범위의 전결 규정.
+  Future<List<ApprovalFinalRule>> finalRules() async => [
+    for (final r in await _getList('/api/groupware/final-rules${_query()}'))
+      ApprovalFinalRule.fromJson(r),
+  ];
+
+  /// 전결 규정 만들기·바꾸기(그룹웨어 관리자) — [rule.id]가 비어 있으면 새로.
+  Future<ApprovalFinalRule> saveFinalRule(ApprovalFinalRule rule) async =>
+      ApprovalFinalRule.fromJson(
+        (await _api.requestJson(
+                  rule.id.isEmpty ? 'POST' : 'PUT',
+                  rule.id.isEmpty
+                      ? '/api/groupware/final-rules'
+                      : '/api/groupware/final-rules/${rule.id}',
+                  body: _body(rule.toJson()),
+                )
+                as Map)
+            .cast<String, dynamic>(),
+      );
+
+  Future<void> deleteFinalRule(String id) async {
+    await _api.requestJson(
+      'DELETE',
+      '/api/groupware/final-rules/$id${_query()}',
+    );
+  }
+
   Future<void> deleteApprovalLine(String id) =>
       _api.requestJson('DELETE', '/api/groupware/approval-lines/$id');
 
@@ -266,9 +312,14 @@ class GroupwareApi {
 
     /// 정산 안 된 승인 구매·출장만(서버 ?unsettled=1).
     bool unsettled = false,
+
+    /// 검색 — 제목·문서 번호·올린 사람에 들어간 글, 올린 날 [from]~[to]('YYYY-MM-DD').
+    String? q,
+    String? from,
+    String? to,
   }) async => [
     for (final d in await _getList(
-      '/api/groupware/documents${_query({'box': box.wire, 'kind': kind?.wire, 'status': status?.wire, 'before': before?.millisecondsSinceEpoch.toString(), 'unsettled': unsettled ? '1' : null})}',
+      '/api/groupware/documents${_query({'box': box.wire, 'kind': kind?.wire, 'status': status?.wire, 'before': before?.millisecondsSinceEpoch.toString(), 'unsettled': unsettled ? '1' : null, 'q': q, 'from': from, 'to': to})}',
     ))
       ApprovalDocument.fromJson(d),
   ];

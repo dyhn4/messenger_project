@@ -45,9 +45,13 @@ export const EXPENSE_AMOUNT_MAX = MONEY_MAX;
 
 const isIdList = (v) => Array.isArray(v) && v.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 64);
 
-/** 결재선 칸의 역할 — 결재(차례대로), 합의(이어진 합의 칸은 한 단계 — 동시에 차례, 모두 동의해야 넘어감), 전결(승인하면 남은 칸은 생략). */
-export const LINE_ROLES = Object.freeze(['approve', 'agree', 'final']);
-export const LINE_ROLE_LABEL = Object.freeze({ approve: '결재', agree: '합의', final: '전결' });
+/**
+ * 결재선 칸의 역할 — 결재(차례대로), 합의(이어진 합의 칸은 한 단계 — 동시에 차례, 모두 동의해야 넘어감. 반대 의견을 남기고 진행할 수도
+ * 있다), 전결(승인하면 남은 칸은 생략), 후결(결재선 맨 뒤 — 앞의 결재가 끝나 문서가 승인된 **뒤에** 확인한다. 후결 칸은 함께 차례가 되고
+ * 문서의 효력에는 영향이 없다).
+ */
+export const LINE_ROLES = Object.freeze(['approve', 'agree', 'final', 'post']);
+export const LINE_ROLE_LABEL = Object.freeze({ approve: '결재', agree: '합의', final: '전결', post: '후결' });
 
 /**
  * 결재선 검사 — 결재자 1~[APPROVERS_MAX]명(순서대로), 참조자 0~10명. 같은 사람을 두 번 넣거나, 올린 사람 자신을 넣거나, 결재자를 참조자에도
@@ -71,12 +75,19 @@ export function validateApprovalLine({ authorId, approverIds, ccIds = [], roles 
   const roleOf = (id) => roleMap[id] ?? 'approve';
   if (approverIds.some((id) => !LINE_ROLES.includes(roleOf(id)))) return { error: '결재선 역할은 결재·합의·전결 중에서 고르세요.' };
   if (approverIds.filter((id) => roleOf(id) === 'final').length > 1) return { error: '전결은 한 명만 정할 수 있습니다.' };
+  // 후결은 맨 뒤에만, 그 앞에 결재할 사람이 한 명은 있어야 한다(문서가 승인되는 칸).
+  const firstPost = approverIds.findIndex((id) => roleOf(id) === 'post');
+  if (firstPost === 0) return { error: '후결 앞에 결재할 사람이 한 명 이상 있어야 합니다.' };
+  if (firstPost > 0 && approverIds.slice(firstPost).some((id) => roleOf(id) !== 'post')) {
+    return { error: '후결은 결재선 맨 뒤에만 둘 수 있습니다.' };
+  }
   const line = [];
   let stage = -1;
   for (const [i, id] of approverIds.entries()) {
     const role = roleOf(id);
-    // 바로 앞 칸도 합의면 같은 단계(동시 결재) — 그 밖에는 새 단계.
-    if (!(role === 'agree' && i > 0 && roleOf(approverIds[i - 1]) === 'agree')) stage += 1;
+    // 바로 앞 칸도 합의(또는 후결)면 같은 단계(동시 차례) — 그 밖에는 새 단계.
+    const prev = i > 0 ? roleOf(approverIds[i - 1]) : null;
+    if (!((role === 'agree' || role === 'post') && prev === role)) stage += 1;
     line.push({ userId: id, role, stage });
   }
   return { approverIds: [...approverIds], ccIds: [...ccIds], line };
@@ -177,7 +188,12 @@ export const stageOf = (step) => step.stage ?? step.stepOrder;
  *   전결 칸(role 'final')이 승인하면 남은 칸은 모두 생략(status 'skipped')되고 문서가 바로 승인된다. [signaturePath]가 있으면 그 칸에 적는다.
  * - 반려: 같은 사람만, 사유가 있어야 한다. 문서가 반려되고(같은 단계의 다른 차례 칸은 거둔다) 올린 사람·참조자·앞선 결재자에게 알린다.
  * - 회수: 올린 사람만, 진행 중일 때. 지금 차례였던 칸들의 차례를 거둔다.
- * - 취소: 관리자만, 승인된 문서를. 사유가 있어야 하고 올린 사람에게 알린다(휴가면 연차가 돌아가고 캘린더에서 빠진다).
+ * - 취소: 관리자만, 승인된 문서를. 사유가 있어야 하고 올린 사람에게 알린다(휴가면 연차가 돌아가고 캘린더에서 빠진다). 아직 확인하지 않은
+ *   후결 칸은 생략한다.
+ * - 반대(disagree): 합의 칸만, 의견이 있어야 한다. 그 칸은 'disagreed'로 남고 결재는 승인처럼 이어진다(올린 사람에게 반대 의견을 알림 —
+ *   [alsoNotify]).
+ * - 후결: 앞의 결재가 모두 끝나 문서가 승인되면(전결 포함) 후결 칸이 함께 차례가 된다(그 사람들에게 "후결 요청" — [alsoNotify]). 후결 칸은
+ *   승인(확인)만 할 수 있고 문서 상태는 그대로다.
  */
 export function planDecision({
   doc,
@@ -196,16 +212,48 @@ export function planDecision({
   const text = typeof comment === 'string' ? comment.trim() : '';
   if (text.length > COMMENT_MAX) return { error: `의견은 ${COMMENT_MAX}자 이내로 쓰세요.`, status: 400 };
   const pending = ordered.filter((s) => s.status === 'pending');
-  const decidedApprovers = ordered.filter((s) => s.status === 'approved').map((s) => s.approverId);
+  const decidedApprovers = ordered.filter((s) => s.status === 'approved' || s.status === 'disagreed').map((s) => s.approverId);
+  const isPost = (s) => s.role === 'post';
+  // 문서가 승인되며 끝날 때 — 후결 칸을 차례로 하고 그 사람들에게 따로 알린다.
+  const complete = (stepPatches, extraNotify = []) => {
+    const post = ordered.filter((s) => isPost(s) && s.status === 'waiting');
+    for (const s of post) stepPatches.push({ id: s.id, patch: { status: 'pending' } });
+    return {
+      doc: { status: 'approved', currentStep: post.length ? stageOf(post[0]) : null, decidedAt: now, updatedAt: now },
+      steps: stepPatches,
+      notify: { event: 'approved', userIds: everyone(extraNotify) },
+      ...(post.length ? { alsoNotify: [{ event: 'post', userIds: post.map((s) => s.approverId).filter(Boolean) }] } : {}),
+    };
+  };
   const everyone = (extra = []) => [...new Set([doc.authorId, ...ccIds, ...decidedApprovers, ...extra].filter(Boolean))];
 
-  if (action === 'approve' || action === 'reject') {
-    if (doc.status !== 'pending' || pending.length === 0) return { error: '이미 끝난 결재입니다.', status: 409 };
+  if (action === 'approve' || action === 'reject' || action === 'disagree') {
+    // 승인된 문서는 후결 칸만 차례가 될 수 있다.
+    const turnable = doc.status === 'pending' ? pending : doc.status === 'approved' ? pending.filter(isPost) : [];
+    if (turnable.length === 0) return { error: '이미 끝난 결재입니다.', status: 409 };
     // 내 칸이 먼저, 없으면 대결을 맡은 사람의 칸.
-    const own = pending.find((s) => s.approverId === actorId) ?? null;
-    const target = own ?? pending.find((s) => s.approverId && proxyFor.has(s.approverId)) ?? null;
+    const own = turnable.find((s) => s.approverId === actorId) ?? null;
+    const target = own ?? turnable.find((s) => s.approverId && proxyFor.has(s.approverId)) ?? null;
     if (!target) return { error: '지금 결재할 차례가 아닙니다.', status: 403 };
     const proxy = own ? {} : { actedById: actorId, actedByName: actorName };
+    if (isPost(target)) {
+      // 후결 — 확인(승인)만. 문서는 이미 승인돼 있어 상태를 바꾸지 않는다.
+      if (action !== 'approve') return { error: '후결은 확인만 할 수 있습니다. 의견이 있으면 확인하며 남기세요.', status: 400 };
+      return {
+        doc: { updatedAt: now },
+        steps: [
+          {
+            id: target.id,
+            patch: { status: 'approved', comment: text || null, decidedAt: now, ...proxy, ...(signaturePath ? { signaturePath } : {}) },
+          },
+        ],
+        notify: { event: 'postConfirmed', userIds: [] },
+      };
+    }
+    if (action === 'disagree') {
+      if (target.role !== 'agree') return { error: '반대 의견은 합의 칸에서만 남길 수 있습니다.', status: 400 };
+      if (!text) return { error: '반대 의견을 쓰세요.', status: 400 };
+    }
     const stage = stageOf(target);
     const othersInStage = pending.filter((s) => s.id !== target.id && stageOf(s) === stage);
     if (action === 'reject') {
@@ -220,47 +268,43 @@ export function planDecision({
       };
     }
     const approvedPatch = {
-      status: 'approved',
+      status: action === 'disagree' ? 'disagreed' : 'approved',
       comment: text || null,
       decidedAt: now,
       ...proxy,
       ...(signaturePath ? { signaturePath } : {}),
     };
     const stepPatches = [{ id: target.id, patch: approvedPatch }];
-    // 전결 — 남은 칸(같은 단계의 다른 차례 칸 포함)은 생략하고 문서를 끝낸다.
+    // 반대 의견 — 올린 사람에게 따로 알린다(결재는 그대로 이어짐).
+    const disagreeNotify = action === 'disagree' && doc.authorId ? [{ event: 'disagreed', userIds: [doc.authorId] }] : [];
+    const withDisagree = (plan) =>
+      disagreeNotify.length ? { ...plan, alsoNotify: [...disagreeNotify, ...(plan.alsoNotify ?? [])] } : plan;
+    // 전결 — 남은 칸(같은 단계의 다른 차례 칸 포함 — 후결 칸은 빼고)은 생략하고 문서를 끝낸다.
     if (target.role === 'final') {
       for (const s of ordered) {
-        if (s.id !== target.id && (s.status === 'waiting' || s.status === 'pending')) {
+        if (s.id !== target.id && !isPost(s) && (s.status === 'waiting' || s.status === 'pending')) {
           stepPatches.push({ id: s.id, patch: { status: 'skipped' } });
         }
       }
-      return {
-        doc: { status: 'approved', currentStep: null, decidedAt: now, updatedAt: now },
-        steps: stepPatches,
-        notify: { event: 'approved', userIds: everyone([target.approverId, actorId]) },
-      };
+      return complete(stepPatches, [target.approverId, actorId]);
     }
     // 같은 단계(합의)에 아직 차례인 사람이 있으면 기다린다.
     if (othersInStage.length > 0) {
-      return { doc: { updatedAt: now }, steps: stepPatches, notify: { event: 'agreed', userIds: [] } };
+      return withDisagree({ doc: { updatedAt: now }, steps: stepPatches, notify: { event: 'agreed', userIds: [] } });
     }
     const nextStage = ordered
-      .filter((s) => s.status === 'waiting' && stageOf(s) > stage)
+      .filter((s) => s.status === 'waiting' && !isPost(s) && stageOf(s) > stage)
       .reduce((min, s) => (min === null || stageOf(s) < min ? stageOf(s) : min), null);
     if (nextStage !== null) {
-      const next = ordered.filter((s) => s.status === 'waiting' && stageOf(s) === nextStage);
+      const next = ordered.filter((s) => s.status === 'waiting' && !isPost(s) && stageOf(s) === nextStage);
       for (const s of next) stepPatches.push({ id: s.id, patch: { status: 'pending' } });
-      return {
+      return withDisagree({
         doc: { currentStep: nextStage, updatedAt: now },
         steps: stepPatches,
         notify: { event: 'next', userIds: next.map((s) => s.approverId).filter(Boolean) },
-      };
+      });
     }
-    return {
-      doc: { status: 'approved', currentStep: null, decidedAt: now, updatedAt: now },
-      steps: stepPatches,
-      notify: { event: 'approved', userIds: everyone([target.approverId, actorId]) },
-    };
+    return withDisagree(complete(stepPatches, [target.approverId, actorId]));
   }
 
   if (action === 'withdraw') {
@@ -278,8 +322,9 @@ export function planDecision({
     if (doc.status !== 'approved') return { error: '승인된 결재만 취소할 수 있습니다.', status: 409 };
     if (!text) return { error: '취소 사유를 쓰세요.', status: 400 };
     return {
-      doc: { status: 'canceled', cancelReason: text, updatedAt: now },
-      steps: [],
+      doc: { status: 'canceled', cancelReason: text, currentStep: null, updatedAt: now },
+      // 아직 확인하지 않은 후결 칸은 생략.
+      steps: pending.filter(isPost).map((s) => ({ id: s.id, patch: { status: 'skipped' } })),
       notify: { event: 'canceled', userIds: everyone() },
     };
   }
@@ -400,15 +445,29 @@ export function approvalStats(docs, { labelOf = (doc) => APPROVAL_KIND_LABEL[doc
     for (const s of ordered) {
       if (!s.approverId) continue;
       if (!byApprover.has(s.approverId)) {
-        byApprover.set(s.approverId, { userId: s.approverId, name: s.approverName, decided: 0, approved: 0, rejected: 0, proxied: 0, waiting: 0, hours: [] });
+        byApprover.set(s.approverId, {
+          userId: s.approverId,
+          name: s.approverName,
+          decided: 0,
+          approved: 0,
+          rejected: 0,
+          disagreed: 0,
+          proxied: 0,
+          waiting: 0,
+          hours: [],
+        });
       }
       const row = byApprover.get(s.approverId);
-      if (s.status === 'pending' && doc.status === 'pending') row.waiting += 1;
-      if (s.status !== 'approved' && s.status !== 'rejected') continue;
+      // 기다리는 칸 — 진행 중인 문서의 차례, 또는 승인된 문서의 아직 확인하지 않은 후결.
+      if (s.status === 'pending' && (doc.status === 'pending' || (doc.status === 'approved' && s.role === 'post'))) row.waiting += 1;
+      if (s.status !== 'approved' && s.status !== 'rejected' && s.status !== 'disagreed') continue;
       row.decided += 1;
       row[s.status] += 1;
       if (s.actedById) row.proxied += 1;
-      const before = ordered.filter((o) => stageOf(o) < stageOf(s) && o.decidedAt).map((o) => new Date(o.decidedAt).getTime());
+      // 후결은 문서가 승인된 때부터.
+      const before = ordered
+        .filter((o) => stageOf(o) < stageOf(s) && o.decidedAt && (s.role !== 'post' || o.role !== 'post'))
+        .map((o) => new Date(o.decidedAt).getTime());
       const turnAt = before.length ? new Date(Math.max(...before)) : doc.createdAt;
       if (s.decidedAt) row.hours.push(hoursBetween(turnAt, s.decidedAt));
     }
@@ -422,7 +481,7 @@ export function approvalStats(docs, { labelOf = (doc) => APPROVAL_KIND_LABEL[doc
 }
 
 /** 결재 알림함(approval_notifications.kind)의 종류 — 'request'는 "내 결재 차례"(새로 올라왔거나 앞 결재자가 승인해 넘어옴). */
-export const APPROVAL_NOTIFICATION_KINDS = Object.freeze(['request', 'approved', 'rejected', 'withdrawn', 'canceled']);
+export const APPROVAL_NOTIFICATION_KINDS = Object.freeze(['request', 'approved', 'rejected', 'withdrawn', 'canceled', 'disagreed']);
 
 /**
  * 결재 진행 [event](planDecision의 notify.event 또는 새로 올림 'created')를 알림 한 건 `{ kind, title, body }`로 — 푸시와 결재 알림함이
@@ -434,6 +493,10 @@ export function approvalNotificationOf(event, doc) {
     case 'created':
     case 'next':
       return { kind: 'request', title: '결재 요청', body: `${doc.authorName} — ${doc.title}` };
+    case 'post':
+      return { kind: 'request', title: '후결 요청', body: `승인된 결재를 확인하세요: ${doc.authorName} — ${doc.title}` };
+    case 'disagreed':
+      return { kind: 'disagreed', title: '합의 반대 의견', body: `반대 의견이 남았습니다(결재는 계속 진행): ${doc.title}` };
     case 'approved':
       return { kind: 'approved', title: `${label} 결재 승인`, body: `승인되었습니다: ${doc.title}` };
     case 'rejected':

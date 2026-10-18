@@ -629,6 +629,9 @@ export const serverSettings = pgTable('server_settings', {
   samlGroupsAttr: text('saml_groups_attr').notNull().default('groups'),
   samlSpPrivateKeyEnc: text('saml_sp_private_key_enc'),
   samlSpCert: text('saml_sp_cert'),
+  // 결재 전자서명(위변조 방지 — approvalSeal.js·approvalSealKeys.js)의 서버 키(Ed25519). 처음 서명할 때 만든다 — 비밀 키는 암호화(PEM).
+  approvalSealPrivateKeyEnc: text('approval_seal_private_key_enc'),
+  approvalSealPublicKey: text('approval_seal_public_key'),
   // 디렉터리 그룹으로 팀·등급 저절로 정하기(groupSync.js — 규칙은 directory_group_mappings). 로그인할 때(와 디렉터리 계정을 10분마다
   // 다시 볼 때) 맞춘다. [groupSyncRemove]면 그룹에서 빠진 사람을 그 규칙으로 넣었던 팀에서 빼고, 등급도 기본 등급으로 되돌린다.
   groupSyncEnabled: boolean('group_sync_enabled').notNull().default(false),
@@ -3091,6 +3094,9 @@ export const approvalSteps = pgTable(
     actedByName: text('acted_by_name'),
     // 승인할 때의 서명·도장 그림(결정한 사람 것 — 업로드 경로).
     signaturePath: text('signature_path'),
+    // 전자서명(approvalSeal.js) — 결정할 때 서버 키로 서명한 값(base64)과 그때 서명 그림 파일의 SHA-256. 이 기능 전 칸은 null.
+    seal: text('seal'),
+    signatureHash: text('signature_hash'),
   },
   (t) => [
     index('approval_steps_document_idx').on(t.documentId, t.stepOrder),
@@ -3204,6 +3210,24 @@ export const approvalLines = pgTable(
  *  - [extraApproverIds]: 사슬 뒤에 늘 붙일 결재자(예: 재무팀장·대표), [ccIds]: 늘 넣을 참조자.
  * 규칙은 결재선을 **미리 채울 때만** 쓴다 — 올리는 사람이 고칠 수 있다.
  */
+/**
+ * 전결 규정(approvalFinalRules.js) — 결재 종류(와 양식·금액)마다 전결하는 직책. 결재를 올릴 때 결재선에서 [positionLabel] 이상인 첫 결재자가
+ * 저절로 전결이 된다. 고르는 순서는 결재선 규칙과 같다(양식 하나 > 종류 > 'any', 그 안에서 문서 금액 이하인 가장 큰 [minAmount]).
+ */
+export const approvalFinalRules = pgTable(
+  'approval_final_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    kind: text('kind').notNull(),
+    templateId: uuid('template_id').references(() => approvalTemplates.id, { onDelete: 'cascade' }),
+    minAmount: bigint('min_amount', { mode: 'number' }),
+    positionLabel: text('position_label').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('approval_final_rules_scope_idx').on(t.scopeKey, t.kind)],
+);
+
 export const approvalLineRules = pgTable(
   'approval_line_rules',
   {

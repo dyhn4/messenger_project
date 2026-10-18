@@ -11,12 +11,12 @@ import '../../widgets/app_toast.dart';
 import 'line_rule_text.dart';
 import '../../l10n/tr.dart';
 
-/// 결재선 — 결재자(순서대로)·결재자마다의 역할(결재·합의·전결)과 참조자. 신청 창과 결재선 선택기([ApprovalLinePicker])가 같이 본다.
+/// 결재선 — 결재자(순서대로)·결재자마다의 역할(결재·합의·전결·후결)과 참조자. 신청 창과 결재선 선택기([ApprovalLinePicker])가 같이 본다.
 class ApprovalLineController extends ChangeNotifier {
   final List<String> approverIds = [];
   final List<String> ccIds = [];
 
-  /// 결재가 아닌 칸의 역할 — 이어진 합의는 한 단계(동시에 차례), 전결은 한 명.
+  /// 결재가 아닌 칸의 역할 — 이어진 합의는 한 단계(동시에 차례), 전결은 한 명, 후결은 맨 뒤에만(이어진 후결도 한 단계).
   final Map<String, LineRole> roles = {};
 
   void setLine(
@@ -37,32 +37,73 @@ class ApprovalLineController extends ChangeNotifier {
           if (approvers.contains(e.key) && e.value != LineRole.approve)
             e.key: e.value,
       });
+    // 후결 칸은 맨 뒤로(순서는 지킨다) — 저장한 결재선·추천은 이미 그렇지만 예전 것이 섞여도 서버가 거르지 않게.
+    final posts = approverIds.where(isPost).toList();
+    if (posts.isNotEmpty) {
+      approverIds
+        ..removeWhere(isPost)
+        ..addAll(posts);
+    }
     notifyListeners();
   }
 
   LineRole roleOf(String id) => roles[id] ?? LineRole.approve;
 
-  /// 역할을 다음 것으로(결재 → 합의 → 전결 → 결재). 전결은 한 명만이라 다른 사람의 전결은 결재로 돌린다.
-  void cycleRole(String id) {
-    final next = roleOf(id).next;
+  /// 후결 칸인지.
+  bool isPost(String id) => roleOf(id) == LineRole.post;
+
+  /// 처음 후결 칸의 자리(없으면 결재자 수 — 새 결재자는 여기 앞에 넣는다).
+  int get _firstPostIndex {
+    final i = approverIds.indexWhere(isPost);
+    return i < 0 ? approverIds.length : i;
+  }
+
+  /// 역할을 다음 것으로(결재 → 합의 → 전결 → 후결 → 결재). 전결은 한 명만이라 다른 사람의 전결은 결재로 돌린다.
+  ///
+  /// 후결은 결재선 맨 뒤에만(서버 validateApprovalLine) — 후결이 되는 사람은 다른 후결 칸 뒤, 맨 끝으로 옮기고, 후결에서 결재로
+  /// 돌아갈 때는 자리를 그대로 둔다(맨 앞 후결 칸이라 순서가 깨지지 않는다 — 가운데 후결이면 후결 칸들 앞으로 옮긴다). 그 사람 말고는
+  /// 후결 아닌 결재자가 없으면(혼자거나 모두 후결) 후결은 건너뛰고 그다음 역할로 — 이때 true를 돌려 부른 쪽이 안내를 띄운다.
+  /// [allowFinal]이 false면(전결 규정이 맞는 문서 — 전결은 올릴 때 서버가 정한다) 전결도 건너뛴다.
+  bool cycleRole(String id, {bool allowFinal = true}) {
+    var next = roleOf(id).next;
+    var postRefused = false;
+    if (next == LineRole.finalApprove && !allowFinal) next = next.next;
+    if (next == LineRole.post &&
+        !approverIds.any((o) => o != id && !isPost(o))) {
+      postRefused = true;
+      next = next.next;
+    }
     if (next == LineRole.finalApprove) {
       roles.removeWhere((_, r) => r == LineRole.finalApprove);
     }
+    final wasPost = isPost(id);
     if (next == LineRole.approve) {
       roles.remove(id);
     } else {
       roles[id] = next;
     }
+    if (next == LineRole.post) {
+      // 맨 끝(다른 후결 칸 뒤)으로.
+      approverIds
+        ..remove(id)
+        ..add(id);
+    } else if (wasPost) {
+      // 후결에서 벗어나면 후결 칸들 바로 앞으로(이미 거기면 그대로).
+      approverIds.remove(id);
+      approverIds.insert(_firstPostIndex, id);
+    }
     notifyListeners();
+    return postRefused;
   }
 
-  /// 결재자마다의 단계 번호(1부터) — 이어진 합의 칸은 같은 번호(서버 approvalRules.js validateApprovalLine과 같은 규칙).
+  /// 결재자마다의 단계 번호(1부터) — 이어진 합의 칸, 이어진 후결 칸은 같은 번호(서버 approvalRules.js validateApprovalLine과 같은 규칙).
   List<int> get stageNumbers {
     final out = <int>[];
     var stage = 0;
     for (final (i, id) in approverIds.indexed) {
-      final agree = roleOf(id) == LineRole.agree;
-      if (!(agree && i > 0 && roleOf(approverIds[i - 1]) == LineRole.agree)) {
+      final role = roleOf(id);
+      final shared = role == LineRole.agree || role == LineRole.post;
+      if (!(shared && i > 0 && roleOf(approverIds[i - 1]) == role)) {
         stage += 1;
       }
       out.add(stage);
@@ -70,10 +111,11 @@ class ApprovalLineController extends ChangeNotifier {
     return out;
   }
 
+  /// 결재자를 더한다 — 후결 칸이 있으면 그 앞에(후결은 맨 뒤에만).
   void addApprover(String id) {
     if (approverIds.contains(id)) return;
     ccIds.remove(id);
-    approverIds.add(id);
+    approverIds.insert(_firstPostIndex, id);
     notifyListeners();
   }
 
@@ -83,12 +125,19 @@ class ApprovalLineController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// [index]번째 결재자를 [delta]만큼 옮긴다(위로 -1, 아래로 +1).
-  void moveApprover(int index, int delta) {
+  /// [index]번째 결재자를 [delta]만큼 옮길 수 있는지 — 끝을 넘거나, 후결 칸과 후결 아닌 칸이 자리를 바꾸면(후결이 앞에 오면) 안 된다.
+  bool canMove(int index, int delta) {
     final to = index + delta;
-    if (to < 0 || to >= approverIds.length) return;
+    if (index < 0 || index >= approverIds.length) return false;
+    if (to < 0 || to >= approverIds.length) return false;
+    return isPost(approverIds[index]) == isPost(approverIds[to]);
+  }
+
+  /// [index]번째 결재자를 [delta]만큼 옮긴다(위로 -1, 아래로 +1). 후결 칸의 앞뒤 경계는 넘지 않는다([canMove]).
+  void moveApprover(int index, int delta) {
+    if (!canMove(index, delta)) return;
     final id = approverIds.removeAt(index);
-    approverIds.insert(to, id);
+    approverIds.insert(index + delta, id);
     notifyListeners();
   }
 
@@ -97,6 +146,19 @@ class ApprovalLineController extends ChangeNotifier {
     ccIds.contains(id) ? ccIds.remove(id) : ccIds.add(id);
     notifyListeners();
   }
+}
+
+/// 결재선 고르기의 전결 규정 안내 — "전결 규정: 팀장 이상의 첫 결재자가 전결합니다 (100만 원 이상 문서) — 올리면 저절로
+/// 정해집니다." 뒤에, 역할 칩으로는 전결을 고를 수 없다는 말.
+String finalRuleHintText(ApprovalFinalRule rule) {
+  final amount = rule.minAmount == null
+      ? ''
+      : tr(' ({won} 이상 문서)', {'won': wonText(rule.minAmount!)});
+  final main = tr(
+    '전결 규정: {position} 이상의 첫 결재자가 전결합니다{amount} — 올리면 저절로 정해집니다.',
+    {'position': rule.positionLabel, 'amount': amount},
+  );
+  return '$main ${tr('역할을 눌러도 전결은 고를 수 없습니다.')}';
 }
 
 /// 결재선 고르기 — 저장한 결재선 불러오기, 결재자 추가·순서 바꾸기·빼기, 참조자, "이 결재선 저장". 처음에는 서버가 추천한 결재선
@@ -391,6 +453,8 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
     final rule = suggestion?.suggestedSource == 'rule'
         ? suggestion?.suggestedRule
         : null;
+    // 이 문서에 맞는 전결 규정 — 있으면 전결은 올릴 때 서버가 정하므로 역할 칩은 전결을 건너뛴다.
+    final finalRule = suggestion?.finalRule;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -469,6 +533,16 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
               style: TextStyle(fontSize: 12, color: hint),
             ),
           ),
+        // 전결 규정(서버 approvalFinalRules.js) — 어느 직책 이상이 전결하는지, 그리고 손으로 전결을 고를 수 없다는 것.
+        if (finalRule != null)
+          Padding(
+            key: const ValueKey('approval-line-final-rule-hint'),
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Text(
+              finalRuleHintText(finalRule),
+              style: TextStyle(fontSize: 12, color: theme.colorScheme.primary),
+            ),
+          ),
         // 손으로 고친 뒤 금액이 바뀌어 추천이 달라졌다 — 덮어쓰지 않고 다시 채울 수 있게만.
         if (_stale && suggestion != null && !_lineMatches(suggestion))
           Align(
@@ -492,7 +566,7 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Text(
               tr(
-                '결재자를 순서대로 고르세요. 앞사람이 승인해야 다음 사람에게 넘어갑니다. 이름 옆 역할을 눌러 합의(이어진 합의는 동시에)·전결(승인하면 남은 결재 생략)로 바꿀 수 있습니다.',
+                '결재자를 순서대로 고르세요. 앞사람이 승인해야 다음 사람에게 넘어갑니다. 이름 옆 역할을 눌러 합의(이어진 합의는 동시에)·전결(승인하면 남은 결재 생략)·후결(결재가 끝난 뒤 확인 — 맨 뒤에만)로 바꿀 수 있습니다.',
               ),
               style: TextStyle(fontSize: 12, color: hint),
             ),
@@ -513,7 +587,9 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
               ActionChip(
                 key: ValueKey('approval-line-role-$id'),
                 visualDensity: VisualDensity.compact,
-                tooltip: tr('역할 바꾸기(결재 → 합의 → 전결)'),
+                tooltip: finalRule != null
+                    ? tr('역할 바꾸기(결재 → 합의 → 후결)')
+                    : tr('역할 바꾸기(결재 → 합의 → 전결 → 후결)'),
                 label: Text(
                   c.roleOf(id).label,
                   style: TextStyle(
@@ -523,21 +599,30 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
                         : theme.colorScheme.primary,
                   ),
                 ),
-                onPressed: () => c.cycleRole(id),
+                onPressed: () {
+                  // 전결 규정이 맞으면 전결은 건너뛴다. 후결 앞에 결재할 사람이 없으면 후결도 건너뛰고 알린다.
+                  final refused = c.cycleRole(
+                    id,
+                    allowFinal: finalRule == null,
+                  );
+                  if (refused) {
+                    showAppToast(context, tr('후결 앞에 결재할 사람이 한 명 이상 있어야 합니다.'));
+                  }
+                },
               ),
               IconButton(
                 tooltip: tr('위로'),
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.arrow_upward, size: 16),
-                onPressed: i == 0 ? null : () => c.moveApprover(i, -1),
+                onPressed: c.canMove(i, -1)
+                    ? () => c.moveApprover(i, -1)
+                    : null,
               ),
               IconButton(
                 tooltip: tr('아래로'),
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.arrow_downward, size: 16),
-                onPressed: i == c.approverIds.length - 1
-                    ? null
-                    : () => c.moveApprover(i, 1),
+                onPressed: c.canMove(i, 1) ? () => c.moveApprover(i, 1) : null,
               ),
               IconButton(
                 tooltip: tr('빼기'),

@@ -707,7 +707,7 @@ class _LineDraft {
   _LineDraft(this.userId, this.role);
 }
 
-/// 양식 하나(기본 양식도)의 기본 결재선·참조자 — 결재자 순서·역할(결재→합의→전결)·빼기·더하기, 참조자 더하기·빼기. 저장은 창 안에서
+/// 양식 하나(기본 양식도)의 기본 결재선·참조자 — 결재자 순서·역할(결재→합의→전결→후결, 후결은 맨 뒤)·빼기·더하기, 참조자 더하기·빼기. 저장은 창 안에서
 /// PATCH /groupware/forms/:id(defaultLine·defaultCcIds — 빈 목록이면 지움)로 하고, 저장했으면 true로 닫는다. 후보에 없는 사람(나간 사람
 /// 등)은 "(알 수 없음)"으로 보이고 뺄 수 있다.
 class _FormDefaultsDialog extends StatefulWidget {
@@ -757,10 +757,18 @@ class _FormDefaultsDialogState extends State<_FormDefaultsDialog> {
     return tr('(알 수 없음)');
   }
 
-  /// 역할 바꾸기(결재 → 합의 → 전결 → 결재). 전결은 한 명만 — 다른 사람이 전결이었으면 그 사람을 결재로 돌리고 알린다.
+  /// 역할 바꾸기(결재 → 합의 → 전결 → 후결 → 결재). 전결은 한 명만 — 다른 사람이 전결이었으면 그 사람을 결재로 돌리고 알린다.
+  /// 후결은 맨 뒤에만(서버 validateApprovalLine) — 후결이 되면 맨 끝(다른 후결 칸 뒤)으로 옮기고, 후결에서 벗어나면 후결 칸들 바로
+  /// 앞으로 둔다. 그 사람 말고 후결 아닌 결재자가 없으면 후결은 건너뛰고 알린다.
   void _cycleRole(int i) => setState(() {
-    final next = _line[i].role.next;
+    final d = _line[i];
+    var next = d.role.next;
     _notice = null;
+    if (next == LineRole.post &&
+        !_line.any((o) => o != d && o.role != LineRole.post)) {
+      next = next.next;
+      _notice = tr('후결 앞에 결재할 사람이 한 명 이상 있어야 합니다.');
+    }
     if (next == LineRole.finalApprove) {
       for (final (j, other) in _line.indexed) {
         if (j != i && other.role == LineRole.finalApprove) {
@@ -771,8 +779,31 @@ class _FormDefaultsDialogState extends State<_FormDefaultsDialog> {
         }
       }
     }
-    _line[i].role = next;
+    final wasPost = d.role == LineRole.post;
+    d.role = next;
+    if (next == LineRole.post) {
+      _line
+        ..remove(d)
+        ..add(d);
+    } else if (wasPost) {
+      _line.remove(d);
+      _line.insert(_firstPostIndex, d);
+    }
   });
+
+  /// 처음 후결 칸의 자리(없으면 결재자 수 — 새 결재자는 여기 앞에 넣는다).
+  int get _firstPostIndex {
+    final i = _line.indexWhere((d) => d.role == LineRole.post);
+    return i < 0 ? _line.length : i;
+  }
+
+  /// [i]번째 칸을 [delta]만큼 옮길 수 있는지 — 끝을 넘거나 후결 칸과 후결 아닌 칸이 자리를 바꾸면(후결이 앞에 오면) 안 된다.
+  bool _canMove(int i, int delta) {
+    final to = i + delta;
+    if (to < 0 || to >= _line.length) return false;
+    return (_line[i].role == LineRole.post) ==
+        (_line[to].role == LineRole.post);
+  }
 
   void _move(int i, int delta) =>
       setState(() => _line.insert(i + delta, _line.removeAt(i)));
@@ -794,7 +825,10 @@ class _FormDefaultsDialogState extends State<_FormDefaultsDialog> {
   Future<void> _addApprover() async {
     final id = await _pick();
     if (id == null || !mounted) return;
-    setState(() => _line.add(_LineDraft(id, LineRole.approve)));
+    // 후결 칸이 있으면 그 앞에(후결은 맨 뒤에만).
+    setState(
+      () => _line.insert(_firstPostIndex, _LineDraft(id, LineRole.approve)),
+    );
   }
 
   Future<void> _addCc() async {
@@ -837,7 +871,7 @@ class _FormDefaultsDialogState extends State<_FormDefaultsDialog> {
         ),
         ActionChip(
           key: ValueKey('gw-form-defaults-role-$i'),
-          tooltip: tr('눌러서 역할 바꾸기(결재 → 합의 → 전결)'),
+          tooltip: tr('눌러서 역할 바꾸기(결재 → 합의 → 전결 → 후결)'),
           visualDensity: VisualDensity.compact,
           label: Text(d.role.label),
           onPressed: _saving ? null : () => _cycleRole(i),
@@ -847,16 +881,14 @@ class _FormDefaultsDialogState extends State<_FormDefaultsDialog> {
           tooltip: tr('위로'),
           visualDensity: VisualDensity.compact,
           icon: const Icon(Icons.arrow_upward, size: 18),
-          onPressed: i == 0 || _saving ? null : () => _move(i, -1),
+          onPressed: !_canMove(i, -1) || _saving ? null : () => _move(i, -1),
         ),
         IconButton(
           key: ValueKey('gw-form-defaults-down-$i'),
           tooltip: tr('아래로'),
           visualDensity: VisualDensity.compact,
           icon: const Icon(Icons.arrow_downward, size: 18),
-          onPressed: i == _line.length - 1 || _saving
-              ? null
-              : () => _move(i, 1),
+          onPressed: !_canMove(i, 1) || _saving ? null : () => _move(i, 1),
         ),
         IconButton(
           key: ValueKey('gw-form-defaults-remove-$i'),

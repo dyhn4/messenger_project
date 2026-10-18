@@ -4,8 +4,10 @@ import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../../models/groupware.dart';
+import '../../services/download_storage.dart';
 import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
@@ -663,11 +665,20 @@ class _DelegationEditDialogState extends State<_DelegationEditDialog> {
 
 // ── 결재 통계(관리 탭) ─────────────────────────────────────────────────────
 
-/// 관리 탭의 "결재 통계" — 달마다(앞뒤로 넘김) 올린 결재의 종류별·결재자별 건수와 평균 처리 시간.
+/// 관리 탭의 "결재 통계" — 달마다(앞뒤로 넘김) 올린 결재의 종류별·결재자별 건수와 평균 처리 시간. [session]이 있으면 보고 있는 기간을
+/// 엑셀(요약·결재자별·문서 세 시트 — 서버 GET /groupware/stats/export)로 받아 여는 단추도 보인다.
 class ApprovalStatsSection extends StatefulWidget {
   final GroupwareApi api;
   final GroupwareContext ctx;
-  const ApprovalStatsSection({super.key, required this.api, required this.ctx});
+
+  /// 엑셀 내려받기([Session.downloadAuthedFile])에 쓴다 — 없으면 내보내기 단추를 숨긴다.
+  final Session? session;
+  const ApprovalStatsSection({
+    super.key,
+    required this.api,
+    required this.ctx,
+    this.session,
+  });
 
   @override
   State<ApprovalStatsSection> createState() => _ApprovalStatsSectionState();
@@ -677,6 +688,9 @@ class _ApprovalStatsSectionState extends State<ApprovalStatsSection> {
   late String _month = widget.ctx.today.substring(0, 7);
   ApprovalStats? _stats;
   String? _error;
+
+  /// 엑셀을 받는 중 — 단추를 막고 돌아가는 표시.
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -714,6 +728,30 @@ class _ApprovalStatsSectionState extends State<ApprovalStatsSection> {
     if (next.compareTo(widget.ctx.today.substring(0, 7)) > 0) return;
     _month = next;
     _load();
+  }
+
+  /// 보고 있는 기간([_range] — 이번 달이면 오늘까지)을 엑셀로 받아 연다. 파일 이름은 근태 엑셀처럼
+  /// "결재통계_{범위}_{시작}_{끝}.xlsx"(파일 이름에 못 쓰는 글자는 '_'). 이름은 내려받은 파일이라 옮기지 않는다.
+  Future<void> _export() async {
+    final session = widget.session;
+    if (session == null) return;
+    setState(() => _exporting = true);
+    try {
+      final (from, to) = _range;
+      final name = '결재통계_${widget.ctx.scopeLabel}_${from}_$to.xlsx'.replaceAll(
+        RegExp(r'[\\/:*?"<>|]'),
+        '_',
+      );
+      final path = await session.downloadAuthedFile(
+        widget.api.statsExportPath(from: from, to: to),
+        fileName: name,
+      );
+      await openLocalFile(path);
+    } catch (e) {
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   @override
@@ -760,6 +798,19 @@ class _ApprovalStatsSectionState extends State<ApprovalStatsSection> {
                     ? null
                     : () => _shift(1),
               ),
+              if (widget.session != null)
+                IconButton(
+                  key: const ValueKey('gw-stats-export'),
+                  tooltip: tr('엑셀로 내보내기'),
+                  onPressed: _exporting ? null : _export,
+                  icon: _exporting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download),
+                ),
             ],
           ),
         ),
@@ -809,6 +860,8 @@ class _ApprovalStatsSectionState extends State<ApprovalStatsSection> {
                       tr('결재자'),
                       tr('결정'),
                       tr('반려'),
+                      // 합의에서 반대 의견을 남긴 수(반려와 달리 결재는 계속된다).
+                      tr('반대'),
                       tr('대결'),
                       tr('대기'),
                       tr('평균 응답'),
@@ -818,6 +871,7 @@ class _ApprovalStatsSectionState extends State<ApprovalStatsSection> {
                         a.name,
                         '${a.decided}',
                         '${a.rejected}',
+                        '${a.disagreed}',
                         '${a.proxied}',
                         '${a.waiting}',
                         hoursText(a.avgHours),
@@ -830,6 +884,103 @@ class _ApprovalStatsSectionState extends State<ApprovalStatsSection> {
                   ],
                 ),
         ),
+      ],
+    );
+  }
+}
+
+// ── 결재 전자서명(관리 탭) ─────────────────────────────────────────────────
+
+/// 관리 탭의 "결재 전자서명" — 서버 서명 키(Ed25519)의 지문과 공개 키(PEM). 결재자가 승인·반려할 때마다 서버가 그 결정을 이 키로
+/// 서명하고(server approvalSeal.js), 결재 문서의 "전자서명 검증"이 그 서명으로 바뀐 데가 있는지 본다. 관리 탭을 열 때마다 부르지 않게
+/// 펼칠 때 한 번만 받는다(GET /groupware/seal-key). 못 받으면 그 까닭만 보이고, 접었다 다시 펼치면 다시 받는다.
+class ApprovalSealKeySection extends StatefulWidget {
+  final GroupwareApi api;
+  const ApprovalSealKeySection({super.key, required this.api});
+
+  @override
+  State<ApprovalSealKeySection> createState() => _ApprovalSealKeySectionState();
+}
+
+class _ApprovalSealKeySectionState extends State<ApprovalSealKeySection> {
+  ({String fingerprint, String publicKey})? _key;
+  String? _error;
+  bool _loading = false;
+
+  Future<void> _load() async {
+    if (_key != null || _loading) return;
+    setState(() => (_loading = true, _error = null));
+    try {
+      final key = await widget.api.sealKey();
+      if (mounted) setState(() => _key = key);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _copy() async {
+    final key = _key;
+    if (key == null) return;
+    await Clipboard.setData(ClipboardData(text: key.publicKey));
+    if (mounted) showAppToast(context, tr('공개 키를 복사했습니다.'));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final small = TextStyle(fontSize: 12, color: theme.hintColor);
+    final key = _key;
+    return ExpansionTile(
+      key: const ValueKey('gw-seal-key'),
+      leading: const Icon(Icons.verified_user_outlined),
+      title: Text(tr('결재 전자서명')),
+      onExpansionChanged: (open) {
+        if (open) _load();
+      },
+      expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      children: [
+        Text(
+          tr(
+            '결재자가 승인·반려할 때마다 서버가 그 결정을 이 키로 서명합니다. 결재 문서의 "전자서명 검증"으로 내용·결정 기록·서명 그림이 바뀌었는지 볼 수 있습니다.',
+          ),
+          style: small,
+        ),
+        const SizedBox(height: 8),
+        if (_error != null)
+          Text(
+            tr('키를 불러오지 못했습니다: {e}', {'e': _error}),
+            key: const ValueKey('gw-seal-key-error'),
+            style: TextStyle(fontSize: 12, color: theme.colorScheme.error),
+          )
+        else if (key == null)
+          const Center(
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          )
+        else ...[
+          Text(tr('키 지문'), style: small),
+          SelectableText(
+            key.fingerprint,
+            key: const ValueKey('gw-seal-key-fingerprint'),
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              key: const ValueKey('gw-seal-key-copy'),
+              onPressed: key.publicKey.isEmpty ? null : _copy,
+              icon: const Icon(Icons.copy, size: 18),
+              label: Text(tr('공개 키 복사')),
+            ),
+          ),
+        ],
       ],
     );
   }

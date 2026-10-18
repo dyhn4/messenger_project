@@ -7,7 +7,9 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import 'approval_form_admin.dart' show ApprovalFormsAdminSection;
 import 'approval_forms.dart' show isHmText;
-import 'approval_settings.dart' show ApprovalStatsSection;
+import 'approval_settings.dart'
+    show ApprovalSealKeySection, ApprovalStatsSection;
+import 'final_rules_section.dart';
 import 'groupware_work_admin.dart';
 import 'line_rules_section.dart';
 import 'resource_tab.dart' show ResourcesAdminSection;
@@ -264,7 +266,20 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
           changes: widget.changes,
           session: widget.session,
         ),
-        ApprovalStatsSection(api: widget.api, ctx: widget.ctx),
+        // 전결 규정 — 종류·금액마다 어느 직책 이상이 전결할지(결재를 올릴 때 서버가 결재선에서 전결권자를 정한다).
+        FinalRulesAdminSection(
+          api: widget.api,
+          ctx: widget.ctx,
+          changes: widget.changes,
+          session: widget.session,
+        ),
+        ApprovalStatsSection(
+          api: widget.api,
+          ctx: widget.ctx,
+          session: widget.session,
+        ),
+        // 결재 전자서명 — 서버 서명 키의 지문과 공개 키(펼칠 때만 받는다).
+        ApprovalSealKeySection(api: widget.api),
         LeavePromotionSection(
           api: widget.api,
           ctx: widget.ctx,

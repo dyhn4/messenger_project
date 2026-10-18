@@ -35,6 +35,11 @@ import '../../l10n/tr.dart';
     icon: Icons.block,
     color: Colors.orange,
   ),
+  // 합의에서 반대 의견이 남음 — 결재는 이어지지만 올린 사람이 의견을 봐야 한다(주황 말풍선).
+  ApprovalNotificationKind.disagreed => (
+    icon: Icons.record_voice_over_outlined,
+    color: Colors.deepOrange,
+  ),
   ApprovalNotificationKind.other => (
     icon: Icons.notifications_none,
     color: scheme.outline,

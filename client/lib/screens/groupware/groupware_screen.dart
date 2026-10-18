@@ -279,16 +279,47 @@ class ApprovalDocumentTile extends StatelessWidget {
       key: ValueKey('approval-doc-${doc.id}'),
       onTap: onTap,
       leading: Icon(icon),
-      title: Text(doc.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              doc.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          // 내 차례가 후결이면(문서는 이미 승인됨 — 확인만 한다) 결재할 문서와 섞여도 알아보게 작은 표시.
+          if (doc.postForMe)
+            Container(
+              key: ValueKey('approval-doc-post-${doc.id}'),
+              margin: const EdgeInsets.only(left: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.tertiaryContainer,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                tr('후결'),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Theme.of(context).colorScheme.onTertiaryContainer,
+                ),
+              ),
+            ),
+        ],
+      ),
       subtitle: Text(
         [
           doc.authorName,
           doc.summary(ctx),
           if (doc.createdAt != null) formatDateTime(doc.createdAt!),
+          // 승인된 문서의 남은 후결 칸이면 "확인 차례"(결재는 끝났다).
           if (current != null)
-            tr('{current.approverName} 결재 차례', {
-              'current.approverName': current.approverName,
-            }),
+            current.role == LineRole.post
+                ? tr('{name} 후결 차례', {'name': current.approverName})
+                : tr('{current.approverName} 결재 차례', {
+                    'current.approverName': current.approverName,
+                  }),
           // 승인된 구매·출장 — 정산했는지(서버 settlementRules.js settlementOf).
           if (kSettleKinds.contains(doc.kind) &&
               doc.status == ApprovalStatus.approved)

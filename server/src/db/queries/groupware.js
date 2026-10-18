@@ -91,7 +91,11 @@ export async function applyApprovalDecision(id, plan, afterApply = null) {
     for (const { id: stepId, patch } of result.steps) {
       await tx.update(approvalSteps).set(patch).where(eq(approvalSteps.id, stepId));
     }
-    if (afterApply) await afterApply(tx, { doc: updated, steps, ccIds, result });
+    if (afterApply) {
+      // 결정을 반영한 칸들(전자서명이 지금 값으로 서명하게 — approvalSeal.js).
+      const freshSteps = await tx.select().from(approvalSteps).where(eq(approvalSteps.documentId, id)).orderBy(asc(approvalSteps.stepOrder));
+      await afterApply(tx, { doc: updated, steps, freshSteps, ccIds, result });
+    }
     return { ...result, before: doc, document: updated };
   });
 }
@@ -111,8 +115,39 @@ export async function listApprovalDocuments({
   limit = 50,
   proxyFor = [],
   unsettled = false,
+  q = null,
+  from = null,
+  to = null,
+  isManager = false,
 }) {
   const conditions = [eq(approvalDocuments.scopeKey, scopeKey)];
+  // 검색 — 제목·문서 번호·올린 사람 이름에 [q]가 들어간 것(대소문자 무시), 올린 날 [from]~[to]('YYYY-MM-DD' — 서버 PC 날짜).
+  if (q) {
+    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    conditions.push(
+      or(
+        sql`${approvalDocuments.title} ilike ${like}`,
+        sql`${approvalDocuments.docNumber} ilike ${like}`,
+        sql`${approvalDocuments.authorName} ilike ${like}`,
+      ),
+    );
+  }
+  if (from) conditions.push(gte(approvalDocuments.createdAt, new Date(`${from}T00:00:00`)));
+  if (to) conditions.push(lt(approvalDocuments.createdAt, new Date(new Date(`${to}T00:00:00`).getTime() + 86_400_000)));
+  // 보관함 — 끝난 문서(결재 중이 아닌 것) 중 내가 볼 수 있는 것: 관리자는 범위 전부, 아니면 올렸거나 결재선(대결 포함)·참조에 있는 것.
+  if (box === 'archive') {
+    conditions.push(sql`${approvalDocuments.status} <> 'pending'`);
+    if (!isManager) {
+      conditions.push(
+        or(
+          eq(approvalDocuments.authorId, userId),
+          sql`exists (select 1 from ${approvalSteps} where ${approvalSteps.documentId} = ${approvalDocuments.id}
+            and (${approvalSteps.approverId} = ${userId} or ${approvalSteps.actedById} = ${userId}))`,
+          sql`exists (select 1 from ${approvalCc} where ${approvalCc.documentId} = ${approvalDocuments.id} and ${approvalCc.userId} = ${userId})`,
+        ),
+      );
+    }
+  }
   // 정산 안 된 것 — 승인된 구매·출장 중 결재 중이거나 승인된 정산(지출 결재)이 없는 것(settlementRules.js).
   if (unsettled) {
     conditions.push(inArray(approvalDocuments.kind, ['purchase', 'trip']), eq(approvalDocuments.status, 'approved'));
@@ -127,14 +162,15 @@ export async function listApprovalDocuments({
   if (box === 'mine') conditions.push(eq(approvalDocuments.authorId, userId));
   if (box === 'inbox') {
     conditions.push(or(myPendingStep(userId), proxyPendingStep(userId, proxyFor)));
-    conditions.push(eq(approvalDocuments.status, 'pending'));
+    // 결재 중인 문서, 또는 승인된 문서의 후결 차례(그 밖의 끝난 문서에는 차례인 칸이 없다).
+    conditions.push(inArray(approvalDocuments.status, ['pending', 'approved']));
   }
   if (box === 'done') {
     // 내가 결정한 칸 — 내 칸이거나 대결로 내가 처리한 칸.
     conditions.push(
       sql`exists (select 1 from ${approvalSteps} where ${approvalSteps.documentId} = ${approvalDocuments.id}
         and (${approvalSteps.approverId} = ${userId} or ${approvalSteps.actedById} = ${userId})
-        and ${inArray(approvalSteps.status, ['approved', 'rejected'])})`,
+        and ${inArray(approvalSteps.status, ['approved', 'rejected', 'disagreed'])})`,
     );
   }
   if (box === 'cc') {
@@ -149,6 +185,11 @@ export async function listApprovalDocuments({
     .orderBy(desc(approvalDocuments.createdAt))
     .limit(limit);
   return attachSteps(docs);
+}
+
+/** 칸들에 전자서명을 적는다(applyApprovalDecision의 afterApply 안에서 — [seals] `[{ id, seal }]`). */
+export async function writeStepSeals(tx, seals) {
+  for (const { id, seal } of seals) await tx.update(approvalSteps).set({ seal }).where(eq(approvalSteps.id, id));
 }
 
 /** 문서들에 결재선을 붙인다 `[{ doc, steps }]`. */
@@ -189,7 +230,8 @@ export async function countPendingApprovals(scopeKey, userId, proxyFor = []) {
     .where(
       and(
         eq(approvalDocuments.scopeKey, scopeKey),
-        eq(approvalDocuments.status, 'pending'),
+        // 승인된 문서의 후결 차례도 센다.
+        inArray(approvalDocuments.status, ['pending', 'approved']),
         or(myPendingStep(userId), proxyPendingStep(userId, proxyFor)),
       ),
     );

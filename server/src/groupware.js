@@ -53,6 +53,10 @@ import {
   parseFormDefinition,
 } from './approvalForms.js';
 import { applyFormDefaults, parseFormDefaults } from './approvalFormDefaults.js';
+import { applyFinalRule, FINAL_RULES_MAX, finalRuleDto, parseFinalRule, pickFinalRule } from './approvalFinalRules.js';
+import { countFinalRules, deleteFinalRule, insertFinalRule, listFinalRules, updateFinalRule } from './db/queries/approvalFinalRules.js';
+import { isDecidedStep, sealsFor, verifyDocument } from './approvalSeal.js';
+import { sealKeys, signWith, uploadSha256, verifyWith } from './approvalSealKeys.js';
 import { canSettle, checkSettlement, SETTLE_KINDS, settlementOf } from './settlementRules.js';
 import { clientIp, isLanAddress, limits, retryLater, waitText } from './authGuard.js';
 import {
@@ -63,6 +67,7 @@ import {
   deleteApprovalLine,
   findApprovalDocument,
   findApprovalDocumentRow,
+  writeStepSeals,
   listSettlementsOf,
   findHireDate,
   findOverlappingLeave,
@@ -116,7 +121,7 @@ import { fileFieldsDenial, sanitizeFileSize } from './messageLimits.js';
 import { updateUser } from './db/queries/users.js';
 import { optionsView } from './groupwareOptions.js';
 import { managerChainWithPositions } from './orgTree.js';
-import { applyLineRule, LINE_RULES_MAX, lineRuleDto, parseLineRule, pickLineRule, RULE_CHAIN_MAX } from './approvalLineRules.js';
+import { applyLineRule, documentAmountOf, LINE_RULES_MAX, lineRuleDto, parseLineRule, pickLineRule, RULE_CHAIN_MAX } from './approvalLineRules.js';
 import { countLineRules, deleteLineRule, insertLineRule, listLineRules, updateLineRule } from './db/queries/approvalLineRules.js';
 import { listPositionOptions } from './db/queries/positionOptions.js';
 import {
@@ -250,6 +255,8 @@ function stepDto(s) {
     actedByName: s.actedByName ?? null,
     // 승인할 때의 서명·도장(서명 링크).
     signatureUrl: s.signaturePath ? (signFileUrl(s.signaturePath) ?? null) : null,
+    // 전자서명이 있는지(approvalSeal.js — 맞는지는 GET /groupware/documents/:id/verify).
+    sealed: !!s.seal,
   };
 }
 
@@ -277,7 +284,13 @@ function attachmentDtos(list) {
 
 /** 앱에 내려줄 문서 모양 — [viewerId] 기준으로 지금 내 차례인지·회수·취소할 수 있는지를 함께. */
 function documentDto({ doc, steps }, viewerId, { isManager = false, cc = null, proxySources = [], settlements = null } = {}) {
-  const pending = doc.status === 'pending' ? steps.filter((s) => s.status === 'pending') : [];
+  // 차례인 칸 — 진행 중이면 그 단계, 승인됐으면 아직 확인하지 않은 후결 칸.
+  const pending =
+    doc.status === 'pending'
+      ? steps.filter((s) => s.status === 'pending')
+      : doc.status === 'approved'
+        ? steps.filter((s) => s.status === 'pending' && s.role === 'post')
+        : [];
   const own = pending.find((s) => s.approverId === viewerId) ?? null;
   // 대결 — 내가 올렸거나 이미 결재선에 있으면 대신 결재하지 않는다(approvalRules.js proxyForOf).
   const proxyFor = proxyForOf({ actorId: viewerId, doc, steps, delegationMap: new Map(proxySources.map((id) => [id, viewerId])) });
@@ -305,6 +318,9 @@ function documentDto({ doc, steps }, viewerId, { isManager = false, cc = null, p
     actingFor: proxied ? proxied.approverName : null,
     // 내 칸이 전결이면 승인하는 순간 결재가 끝난다(남은 칸은 생략).
     finalForMe: (own ?? proxied)?.role === 'final',
+    // 내 칸이 합의면 "반대 의견으로 진행"을 할 수 있고, 후결이면 확인만 한다.
+    canDisagree: (own ?? proxied)?.role === 'agree',
+    postForMe: (own ?? proxied)?.role === 'post',
     canWithdraw: doc.status === 'pending' && doc.authorId === viewerId,
     canCancel: doc.status === 'approved' && isManager,
     // 정산(구매·출장 — settlementRules.js) — 이 결재를 정산하는 지출 결재(승인 → 결재 중 → 최근 순)와 "정산하기"를 누를 수 있는지.
@@ -460,7 +476,9 @@ function approvalNotificationDto(n) {
 async function announce(io, { doc, steps, ccIds, event, notifyIds, actorId, actorName }) {
   // 결재 차례가 된 사람이 대결을 맡겨 두었으면 맡은 사람에게도 알린다.
   const delegationMap = await delegationMapOf(doc.scopeKey).catch(() => new Map());
-  const delegates = (event === 'created' || event === 'next' ? notifyIds : []).map((id) => delegationMap.get(id)).filter(Boolean);
+  const delegates = (event === 'created' || event === 'next' || event === 'post' ? notifyIds : [])
+    .map((id) => delegationMap.get(id))
+    .filter(Boolean);
   notifyIds = [...notifyIds, ...delegates];
   const involved = new Set([doc.authorId, ...steps.map((s) => s.approverId), ...ccIds, ...delegates].filter(Boolean));
   for (const id of involved) io.to(`user:${id}`).emit('groupware:changed', { documentId: doc.id, scopeKey: doc.scopeKey });
@@ -643,11 +661,12 @@ export function createGroupwareRouter(io) {
   router.get(
     '/groupware/approval-lines',
     withContext(async (req, res, ctx) => {
-      const [lines, candidates, rules, templates] = await Promise.all([
+      const [lines, candidates, rules, templates, finalRules] = await Promise.all([
         listApprovalLines(ctx.user.id, ctx.scopeKey),
         approverCandidates(ctx),
         listLineRules(ctx.scopeKey),
         listApprovalTemplates(ctx.scopeKey),
+        listFinalRules(ctx.scopeKey),
       ]);
       const kind = typeof req.query.kind === 'string' ? req.query.kind : null;
       const amount = Number.isFinite(Number(req.query.amount)) && req.query.amount !== '' ? Number(req.query.amount) : null;
@@ -687,6 +706,23 @@ export function createGroupwareRouter(io) {
         const form = formForLine(mergeForms(templates), kind, isUuid(req.query.templateId) ? req.query.templateId : null);
         suggested = applyFormDefaults({ form, authorId: ctx.user.id, suggested, isCandidate: (id) => candidates.has(id) });
       }
+      // 전결 규정 — 맞는 규정이 있으면 미리 채운 결재선에도 입혀 보이고(올릴 때 서버가 다시 정한다), 어떤 규정인지 알려 준다.
+      const finalRule = kind
+        ? pickFinalRule(
+            finalRules.map((r) => r.rule),
+            { kind, templateId: isUuid(req.query.templateId) ? req.query.templateId : null, amount },
+          )
+        : null;
+      if (finalRule && suggested?.approverIds?.length) {
+        const ranks = new Map((await listPositionOptions()).map((o) => [o.label, o.sortOrder ?? 0]));
+        const applied = applyFinalRule(finalRule, {
+          approverIds: suggested.approverIds,
+          roles: suggested.roles ?? {},
+          rankOf: (id) => ranks.get(positionOf(id)) ?? null,
+          rankOfLabel: (label) => ranks.get(label) ?? null,
+        });
+        suggested = { ...suggested, roles: applied.roles, finalUserId: applied.finalUserId };
+      }
       res.json({
         lines: lines.map((l) => ({
           id: l.id,
@@ -698,6 +734,10 @@ export function createGroupwareRouter(io) {
         })),
         // 새 결재를 올릴 때 미리 채울 결재선 — 결재선 규칙, 조직도 상위자 사슬, 가장 최근에 저장한 결재선 순서(approvalRules.js suggestApprovalLine).
         suggested,
+        // 이 문서에 맞는 전결 규정(없으면 null — approvalFinalRules.js).
+        finalRule: finalRule
+          ? finalRuleDto(finalRule, { templateName: finalRules.find((r) => r.rule.id === finalRule.id)?.templateName ?? null })
+          : null,
       });
     }),
   );
@@ -757,6 +797,55 @@ export function createGroupwareRouter(io) {
     }),
   );
 
+
+  // ── 전결 규정(approvalFinalRules.js) ──
+
+  /** 이 범위의 전결 규정 — 누구나 본다(결재를 쓸 때 "전결 규정: 본부장 이상 전결"로 보인다). */
+  router.get(
+    '/groupware/final-rules',
+    withContext(async (req, res, ctx) => {
+      res.json((await listFinalRules(ctx.scopeKey)).map((r) => finalRuleDto(r.rule, { templateName: r.templateName ?? null })));
+    }),
+  );
+
+  const parsedFinalRule = async (body) => parseFinalRule(body, { positionLabels: (await listPositionOptions()).map((o) => o.label) });
+
+  /** 규정 만들기(그룹웨어 관리자) `{ kind, templateId?, minAmount?, positionLabel }`. */
+  router.post(
+    '/groupware/final-rules',
+    withContext(async (req, res, ctx) => {
+      if (!ctx.isManager) return fail(res, { error: '전결 규정은 그룹웨어 관리자만 정할 수 있습니다.', status: 403 });
+      const parsed = await parsedFinalRule(req.body);
+      if (parsed.error) return fail(res, parsed);
+      if ((await countFinalRules(ctx.scopeKey)) >= FINAL_RULES_MAX) return fail(res, { error: `전결 규정은 ${FINAL_RULES_MAX}개까지입니다.` });
+      const row = await insertFinalRule({ scopeKey: ctx.scopeKey, ...parsed.fields });
+      res.status(201).json(finalRuleDto(row));
+    }),
+  );
+
+  router.put(
+    '/groupware/final-rules/:id',
+    withContext(async (req, res, ctx) => {
+      if (!ctx.isManager) return fail(res, { error: '전결 규정은 그룹웨어 관리자만 정할 수 있습니다.', status: 403 });
+      if (!isUuid(req.params.id)) return fail(res, { error: '전결 규정을 찾을 수 없습니다.', status: 404 });
+      const parsed = await parsedFinalRule(req.body);
+      if (parsed.error) return fail(res, parsed);
+      const row = await updateFinalRule(req.params.id, ctx.scopeKey, parsed.fields);
+      if (!row) return fail(res, { error: '전결 규정을 찾을 수 없습니다.', status: 404 });
+      res.json(finalRuleDto(row));
+    }),
+  );
+
+  router.delete(
+    '/groupware/final-rules/:id',
+    withContext(async (req, res, ctx) => {
+      if (!ctx.isManager) return fail(res, { error: '전결 규정은 그룹웨어 관리자만 정할 수 있습니다.', status: 403 });
+      if (!isUuid(req.params.id) || !(await deleteFinalRule(req.params.id, ctx.scopeKey))) {
+        return fail(res, { error: '전결 규정을 찾을 수 없습니다.', status: 404 });
+      }
+      res.json({ ok: true });
+    }),
+  );
 
   router.post(
     '/groupware/approval-lines',
@@ -835,7 +924,8 @@ export function createGroupwareRouter(io) {
   router.get(
     '/groupware/documents',
     withContext(async (req, res, ctx) => {
-      const box = ['inbox', 'mine', 'cc', 'done', 'all'].includes(req.query.box) ? req.query.box : 'inbox';
+      // archive — 보관함(끝난 문서 중 내가 볼 수 있는 것, 관리자는 범위 전부).
+      const box = ['inbox', 'mine', 'cc', 'done', 'all', 'archive'].includes(req.query.box) ? req.query.box : 'inbox';
       if (box === 'all' && !ctx.isManager) return fail(res, { error: '관리자만 전체 문서를 볼 수 있습니다.', status: 403 });
       const kind = APPROVAL_KINDS.includes(req.query.kind) ? req.query.kind : null;
       const status = APPROVAL_STATUSES.includes(req.query.status) ? req.query.status : null;
@@ -843,6 +933,11 @@ export function createGroupwareRouter(io) {
       const proxySources = await proxySourcesOf(ctx.scopeKey, ctx.user.id);
       // 정산 안 된 승인 구매·출장만(?unsettled=1) — 관리자는 전체에서, 아니면 내가 올린 것에서.
       const unsettled = req.query.unsettled === '1' || req.query.unsettled === 'true';
+      // 검색 — ?q=(제목·문서 번호·올린 사람, 100자까지) &from=&to=(올린 날 'YYYY-MM-DD').
+      const q = typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim().slice(0, 100) : null;
+      const from = isDateKey(req.query.from) ? req.query.from : null;
+      const to = isDateKey(req.query.to) ? req.query.to : null;
+      if (from && to && to < from) return fail(res, { error: '끝 날짜가 시작보다 빠릅니다.' });
       const rows = await listApprovalDocuments({
         scopeKey: ctx.scopeKey,
         box,
@@ -852,6 +947,10 @@ export function createGroupwareRouter(io) {
         before,
         proxyFor: proxySources,
         unsettled,
+        q,
+        from,
+        to,
+        isManager: ctx.isManager,
       });
       const settlements = await settlementsByDoc(rows);
       res.json(
@@ -879,6 +978,40 @@ export function createGroupwareRouter(io) {
     const cc = found.ccIds.map((id) => ({ id, name: names.get(id) ?? '(알 수 없음)' }));
     const settlements = (await settlementsByDoc([found])).get(found.doc.id) ?? null;
     res.json(documentDto(found, req.user.sub, { isManager, cc, proxySources, settlements }));
+  });
+
+  /**
+   * 전자서명 검증(approvalSeal.js) — 문서를 볼 수 있는 사람. 결정한 칸마다 서버 키로 한 서명이 지금 DB의 내용·결정 기록·서명 그림 파일과
+   * 맞는지 → `{ digest(문서 지문), fingerprint(서버 키 지문), ok, steps: [{ id, order, approverName, status, result }] }`.
+   */
+  router.get('/groupware/documents/:id/verify', async (req, res) => {
+    if (!isUuid(req.params.id)) return fail(res, { error: '결재 문서를 찾을 수 없습니다.', status: 404 });
+    const found = await findApprovalDocument(req.params.id);
+    if (!found) return fail(res, { error: '결재 문서를 찾을 수 없습니다.', status: 404 });
+    const isManager = await isManagerOfDocument(found.doc, req.user.sub);
+    const proxySources = await proxySourcesOf(found.doc.scopeKey, req.user.sub);
+    const proxyFor = proxyForOf({ actorId: req.user.sub, ...found, delegationMap: new Map(proxySources.map((id) => [id, req.user.sub])) });
+    if (!canViewDocument({ ...found, userId: req.user.sub, isManager, proxyFor })) {
+      return fail(res, { error: '결재 문서를 찾을 수 없습니다.', status: 404 });
+    }
+    const keys = await sealKeys();
+    const hashes = new Map();
+    for (const s of found.steps) {
+      if (isDecidedStep(s) && s.signatureHash && s.signaturePath) hashes.set(s.id, await uploadSha256(s.signaturePath));
+    }
+    const result = verifyDocument({
+      doc: found.doc,
+      steps: found.steps,
+      verify: verifyWith(keys),
+      fileHashOf: (s) => (hashes.has(s.id) ? hashes.get(s.id) : undefined),
+    });
+    res.json({ ...result, fingerprint: keys.fingerprint });
+  });
+
+  /** 결재 전자서명의 서버 공개 키와 지문 — 인쇄한 문서를 바깥에서 맞춰 볼 때. */
+  router.get('/groupware/seal-key', async (req, res) => {
+    const keys = await sealKeys();
+    res.json({ fingerprint: keys.fingerprint, publicKey: keys.publicKeyPem, algorithm: 'Ed25519' });
   });
 
   // ── 결재 양식 ──
@@ -1078,11 +1211,35 @@ export function createGroupwareRouter(io) {
         body.kind === 'expense' || form?.allowAttachments ? await parseAttachments(body.attachments, ctx.user.id) : { attachments: [] };
       if (files.error) return fail(res, files);
 
+      // 전결 규정 — 종류·양식·문서 금액에 맞는 규정이 있으면 결재선에서 그 직책 이상인 첫 결재자를 전결로(올리는 사람이 고른 전결은 지움).
+      let roles = body.roles;
+      const finalRule = pickFinalRule(
+        (await listFinalRules(ctx.scopeKey)).map((r) => r.rule),
+        { kind: body.kind, templateId: form?.id ?? null, amount: documentAmountOf(body.kind, payload) },
+      );
+      if (finalRule && Array.isArray(body.approverIds)) {
+        const [{ positionOf }, positions] = await Promise.all([
+          managerChainWithPositions({ settings: ctx.settings, teamId: ctx.teamId, userId: ctx.user.id, isEligible: () => false, max: 0 }).catch(
+            () => ({ positionOf: () => null }),
+          ),
+          listPositionOptions(),
+        ]);
+        const ranks = new Map(positions.map((o) => [o.label, o.sortOrder ?? 0]));
+        const applied = applyFinalRule(finalRule, {
+          approverIds: body.approverIds,
+          roles: body.roles && typeof body.roles === 'object' && !Array.isArray(body.roles) ? body.roles : {},
+          rankOf: (id) => ranks.get(positionOf(id)) ?? null,
+          rankOfLabel: (label) => ranks.get(label) ?? null,
+        });
+        roles = applied.roles;
+        // 문서에 그때의 규정을 적어 둔다(상세에 "전결 규정: 본부장 이상").
+        payload.finalRule = { positionLabel: finalRule.positionLabel, minAmount: finalRule.minAmount ?? null, applied: !!applied.finalUserId };
+      }
       const line = validateApprovalLine({
         authorId: ctx.user.id,
         approverIds: body.approverIds,
         ccIds: body.ccIds ?? [],
-        roles: body.roles,
+        roles,
         isCandidate: (id) => candidates.has(id),
       });
       if (line.error) return fail(res, line);
@@ -1117,7 +1274,7 @@ export function createGroupwareRouter(io) {
   );
 
   /** 승인·반려·회수·취소 — 규칙은 approvalRules.js planDecision. 근태 수정이 승인되면 기록을 고치고, 취소되면 되돌린다. */
-  for (const action of ['approve', 'reject', 'withdraw', 'cancel']) {
+  for (const action of ['approve', 'reject', 'withdraw', 'cancel', 'disagree']) {
     router.post(`/groupware/documents/:id/${action}`, async (req, res) => {
       if (!isUuid(req.params.id)) return fail(res, { error: '결재 문서를 찾을 수 없습니다.', status: 404 });
       const found = await findApprovalDocument(req.params.id);
@@ -1125,6 +1282,9 @@ export function createGroupwareRouter(io) {
       const isManager = action === 'cancel' ? await isManagerOfDocument(found.doc, req.user.sub) : false;
       const actor = (await userAccess(req.user.sub)).user;
       const delegationMap = await delegationMapOf(found.doc.scopeKey);
+      // 전자서명 — 서버 키와 지금 서명 그림의 SHA-256(키를 못 읽으면 — 예: 마이그레이션 전 — 서명 없이 결정만 한다).
+      const keys = action === 'withdraw' || action === 'cancel' ? null : await sealKeys().catch((err) => (console.error('[groupware] 전자서명 키:', err?.message ?? err), null));
+      const signatureHash = keys && actor?.signaturePath ? await uploadSha256(actor.signaturePath) : null;
       const outcome = await applyApprovalDecision(
         req.params.id,
         async ({ doc, steps, ccIds }) => {
@@ -1145,10 +1305,20 @@ export function createGroupwareRouter(io) {
             proxyFor,
             signaturePath: actor?.signaturePath ?? null,
           });
-          if (plan.error || action !== 'cancel') return plan;
-          return { ...plan, doc: { ...plan.doc, canceledByName: actor?.name ?? actor?.username ?? '관리자' } };
+          if (plan.error) return plan;
+          if (action === 'cancel') return { ...plan, doc: { ...plan.doc, canceledByName: actor?.name ?? actor?.username ?? '관리자' } };
+          // 서명 그림을 넣은 칸에는 그 파일의 SHA-256도 적는다(전자서명이 파일까지 덮게).
+          return {
+            ...plan,
+            steps: plan.steps.map((s) => (s.patch.signaturePath && signatureHash ? { ...s, patch: { ...s.patch, signatureHash } } : s)),
+          };
         },
-        async (tx, { doc }) => {
+        async (tx, { doc, freshSteps, result }) => {
+          // 이번에 결정된 칸들을 서명한다(같은 트랜잭션 — 결정과 서명이 따로 남지 않게).
+          if (keys) {
+            const decided = result.steps.filter((s) => ['approved', 'rejected', 'disagreed'].includes(s.patch.status)).map((s) => s.id);
+            if (decided.length) await writeStepSeals(tx, sealsFor({ doc, steps: freshSteps, stepIds: decided, sign: signWith(keys) }));
+          }
           if (doc.kind !== 'attendance') return;
           if (doc.status === 'approved') {
             const minutesIn = parseHm(doc.payload.clockIn);
@@ -1188,6 +1358,16 @@ export function createGroupwareRouter(io) {
         actorId: req.user.sub,
         actorName: actor?.name ?? actor?.username ?? null,
       });
+      // 덧붙인 알림 — 후결 요청, 합의 반대 의견(approvalRules.js planDecision의 alsoNotify).
+      for (const extra of outcome.alsoNotify ?? []) {
+        await announce(io, {
+          ...fresh,
+          event: extra.event,
+          notifyIds: extra.userIds,
+          actorId: req.user.sub,
+          actorName: actor?.name ?? actor?.username ?? null,
+        });
+      }
       res.json(
         documentDto(fresh, req.user.sub, {
           isManager: isManager || (await isManagerOfDocument(fresh.doc, req.user.sub)),
@@ -1297,6 +1477,83 @@ export function createGroupwareRouter(io) {
         if (to < from || addDaysKey(from, 365) < to) return fail(res, { error: '기간은 366일 안으로 고르세요.' });
         const docs = await listDocumentsCreatedBetween({ scopeKey: ctx.scopeKey, from, to });
         res.json({ from, to, truncated: docs.length >= 5000, ...approvalStats(docs, { labelOf: approvalLabelOf }) });
+      },
+      { managerOnly: true },
+    ),
+  );
+
+  /**
+   * 결재 통계 엑셀(관리자) `?from=&to=` — "요약"(전체·종류별), "결재자별", "문서"(번호·종류·제목·올린 사람·상태·올린 시각·끝난 시각·걸린 시간)
+   * 세 시트.
+   */
+  router.get(
+    '/groupware/stats/export',
+    withContext(
+      async (req, res, ctx) => {
+        const today = localDateKey(new Date());
+        const from = isDateKey(req.query.from) ? req.query.from : `${today.slice(0, 7)}-01`;
+        const to = isDateKey(req.query.to) ? req.query.to : today;
+        if (to < from || addDaysKey(from, 365) < to) return fail(res, { error: '기간은 366일 안으로 고르세요.' });
+        const docs = await listDocumentsCreatedBetween({ scopeKey: ctx.scopeKey, from, to });
+        const stats = approvalStats(docs, { labelOf: approvalLabelOf });
+        const workbook = new ExcelJS.Workbook();
+        const hoursText = (h) => (h === null || h === undefined ? '' : h);
+        const summary = workbook.addWorksheet('요약');
+        summary.columns = [
+          { header: '종류', key: 'label', width: 16 },
+          { header: '건수', key: 'total', width: 8 },
+          { header: '진행 중', key: 'pending', width: 8 },
+          { header: '승인', key: 'approved', width: 8 },
+          { header: '반려', key: 'rejected', width: 8 },
+          { header: '회수', key: 'withdrawn', width: 8 },
+          { header: '취소', key: 'canceled', width: 8 },
+          { header: '평균 처리 시간(시간)', key: 'avgHours', width: 18 },
+        ];
+        summary.addRow({ ...stats.totals, label: '전체', avgHours: hoursText(stats.totals.avgHours) });
+        for (const k of stats.byKind) summary.addRow({ ...k, avgHours: hoursText(k.avgHours) });
+        const approvers = workbook.addWorksheet('결재자별');
+        approvers.columns = [
+          { header: '결재자', key: 'name', width: 16 },
+          { header: '결정', key: 'decided', width: 8 },
+          { header: '승인', key: 'approved', width: 8 },
+          { header: '반려', key: 'rejected', width: 8 },
+          { header: '반대 의견', key: 'disagreed', width: 10 },
+          { header: '대결로 처리', key: 'proxied', width: 12 },
+          { header: '기다리는 중', key: 'waiting', width: 12 },
+          { header: '평균 응답 시간(시간)', key: 'avgHours', width: 18 },
+        ];
+        for (const a of stats.byApprover) approvers.addRow({ ...a, avgHours: hoursText(a.avgHours) });
+        const list = workbook.addWorksheet('문서');
+        list.columns = [
+          { header: '문서 번호', key: 'docNumber', width: 16 },
+          { header: '종류', key: 'kind', width: 12 },
+          { header: '제목', key: 'title', width: 40 },
+          { header: '올린 사람', key: 'author', width: 12 },
+          { header: '상태', key: 'status', width: 8 },
+          { header: '올린 시각', key: 'createdAt', width: 18 },
+          { header: '끝난 시각', key: 'decidedAt', width: 18 },
+          { header: '걸린 시간(시간)', key: 'hours', width: 14 },
+        ];
+        const STATUS_LABEL = { pending: '진행 중', approved: '승인', rejected: '반려', withdrawn: '회수', canceled: '취소' };
+        const at = (d) => (d ? `${localDateKey(new Date(d))} ${hmText(Math.round((new Date(d).getHours() * 60 + new Date(d).getMinutes())))}` : '');
+        for (const { doc } of docs) {
+          list.addRow({
+            docNumber: doc.docNumber ?? '',
+            kind: approvalLabelOf(doc),
+            title: doc.title,
+            author: doc.authorName,
+            status: STATUS_LABEL[doc.status] ?? doc.status,
+            createdAt: at(doc.createdAt),
+            decidedAt: at(doc.decidedAt),
+            hours: doc.decidedAt ? Math.round(((new Date(doc.decidedAt) - new Date(doc.createdAt)) / 3_600_000) * 10) / 10 : '',
+          });
+        }
+        for (const sheet of [summary, approvers, list]) sheet.getRow(1).font = { bold: true };
+        const fileName = `결재통계_${ctx.team?.name ?? '회사'}_${from}_${to}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+        await workbook.xlsx.write(res);
+        res.end();
       },
       { managerOnly: true },
     ),

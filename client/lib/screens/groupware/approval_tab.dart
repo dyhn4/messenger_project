@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../../models/groupware.dart';
 import '../../services/download_storage.dart';
@@ -49,6 +50,32 @@ class _ApprovalTabState extends State<ApprovalTab> {
       _box == ApprovalBox.mine ||
       (_box == ApprovalBox.all && widget.ctx.isManager);
 
+  /// 서버가 한 번에 주는 문서 수(listApprovalDocuments limit) — 이만큼 왔으면 "더 보기"로 마지막 문서보다 먼저 올린 것을 더 받는다.
+  static const _pageSize = 50;
+  bool _hasMore = false;
+  bool _loadingMore = false;
+
+  /// 검색 — 제목·문서 번호·올린 사람(서버 ?q=, 100자까지)과 올린 날 기간(?from=&to=), 종류·상태. 보관함에서는 늘 보이고, 다른 함에서는
+  /// 돋보기로 열어 같은 조건으로 거른다(닫으면 조건을 지운다). 입력칸 글은 엔터·검색 단추를 눌러야 [_q]로 들어간다.
+  final _search = TextEditingController();
+  bool _searchOpen = false;
+  String _q = '';
+  DateTime? _from;
+  DateTime? _to;
+  ApprovalKind? _kind;
+  ApprovalStatus? _status;
+
+  /// 검색 줄이 보이는지(보이면 그 조건으로 거른다).
+  bool get _showSearch => _box == ApprovalBox.archive || _searchOpen;
+
+  /// 검색 조건을 하나라도 걸었는지.
+  bool get _hasConditions =>
+      _q.isNotEmpty ||
+      _from != null ||
+      _to != null ||
+      _kind != null ||
+      _status != null;
+
   @override
   void initState() {
     super.initState();
@@ -59,20 +86,121 @@ class _ApprovalTabState extends State<ApprovalTab> {
   @override
   void dispose() {
     widget.changes.removeListener(_load);
+    _search.dispose();
     super.dispose();
+  }
+
+  /// 지금 함·거르기·검색 조건으로 목록을 받는다 — [before]를 주면 그보다 먼저 올린 것(다음 쪽).
+  Future<List<ApprovalDocument>> _fetch({DateTime? before}) {
+    final search = _showSearch;
+    return widget.api.documents(
+      box: _box,
+      unsettled: _unsettled && _canFilterUnsettled,
+      before: before,
+      kind: search ? _kind : null,
+      status: search ? _status : null,
+      q: search && _q.isNotEmpty ? _q : null,
+      from: search && _from != null ? dateKeyOf(_from!) : null,
+      to: search && _to != null ? dateKeyOf(_to!) : null,
+    );
   }
 
   Future<void> _load() async {
     final seq = ++_loadSeq;
     try {
-      final docs = await widget.api.documents(
-        box: _box,
-        unsettled: _unsettled && _canFilterUnsettled,
-      );
-      if (mounted && seq == _loadSeq) setState(() => _docs = docs);
+      final docs = await _fetch();
+      if (mounted && seq == _loadSeq) {
+        setState(() {
+          _docs = docs;
+          _error = null;
+          _hasMore = docs.length >= _pageSize;
+        });
+      }
     } catch (e) {
       if (mounted && seq == _loadSeq) setState(() => _error = e.toString());
     }
+  }
+
+  /// "더 보기" — 지금 목록의 마지막 문서보다 먼저 올린 것을 이어 붙인다(그 사이에 함·조건이 바뀌었으면 버린다).
+  Future<void> _loadMore() async {
+    final docs = _docs;
+    final before = docs == null || docs.isEmpty ? null : docs.last.createdAt;
+    if (before == null || _loadingMore) return;
+    final seq = _loadSeq;
+    setState(() => _loadingMore = true);
+    try {
+      final more = await _fetch(before: before);
+      if (!mounted || seq != _loadSeq) return;
+      final seen = {for (final d in docs!) d.id};
+      setState(() {
+        _docs = [...docs, ...more.where((d) => !seen.contains(d.id))];
+        _hasMore = more.length >= _pageSize;
+      });
+    } catch (e) {
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  /// 조건이 바뀌었다 — 처음부터 다시 받는다.
+  void _reload() {
+    setState(() {
+      _docs = null;
+      _error = null;
+      _hasMore = false;
+    });
+    _load();
+  }
+
+  /// 입력칸 글로 찾는다(엔터·검색 단추).
+  void _submitSearch() {
+    final q = _search.text.trim();
+    if (q == _q && _docs != null) return;
+    _q = q;
+    _reload();
+  }
+
+  /// 기간 끝 하나를 고른다 — 시작이 끝보다 늦어지면 다른 쪽을 지운다(서버는 거꾸로 된 기간을 거절한다).
+  Future<void> _pickDate({required bool from}) async {
+    final now = DateTime.now();
+    final current = from ? _from : _to;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current ?? now,
+      firstDate: DateTime(now.year - 10),
+      lastDate: DateTime(now.year + 1, 12, 31),
+      helpText: from ? tr('언제부터') : tr('언제까지'),
+    );
+    if (picked == null || !mounted) return;
+    if (from) {
+      _from = picked;
+      if (_to != null && _to!.isBefore(picked)) _to = null;
+    } else {
+      _to = picked;
+      if (_from != null && _from!.isAfter(picked)) _from = null;
+    }
+    _reload();
+  }
+
+  /// 검색 조건을 모두 지운다.
+  void _clearSearch() {
+    _search.clear();
+    _q = '';
+    _from = null;
+    _to = null;
+    _kind = null;
+    _status = null;
+  }
+
+  /// 다른 함에서 돋보기 — 열면 검색 줄을 보이고, 닫으면 조건을 지우고 다시 받는다.
+  void _toggleSearch() {
+    final had = _hasConditions;
+    setState(() {
+      _searchOpen = !_searchOpen;
+      if (!_searchOpen) _clearSearch();
+    });
+    if (!_searchOpen && had) _reload();
   }
 
   /// "새 결재" — 휴가·지출과 켜진 양식 중에서 골라 올린다. 올렸으면 "내가 올린 문서"로 옮겨 보여 준다.
@@ -89,23 +217,17 @@ class _ApprovalTabState extends State<ApprovalTab> {
     if (_box != ApprovalBox.mine) _select(ApprovalBox.mine);
   }
 
+  /// 함을 옮긴다 — 걸어 둔 검색 조건은 그대로 따라간다(보관함에서 조건을 건 채 옮기면 검색 줄을 열어 둔다).
   void _select(ApprovalBox box) {
-    setState(() {
-      _box = box;
-      if (!_canFilterUnsettled) _unsettled = false;
-      _docs = null;
-      _error = null;
-    });
-    _load();
+    if (_box == ApprovalBox.archive && _hasConditions) _searchOpen = true;
+    _box = box;
+    if (!_canFilterUnsettled) _unsettled = false;
+    _reload();
   }
 
   void _toggleUnsettled(bool on) {
-    setState(() {
-      _unsettled = on;
-      _docs = null;
-      _error = null;
-    });
-    _load();
+    _unsettled = on;
+    _reload();
   }
 
   Future<void> _open(ApprovalDocument doc) async {
@@ -127,8 +249,12 @@ class _ApprovalTabState extends State<ApprovalTab> {
       ApprovalBox.done,
       ApprovalBox.cc,
       if (widget.ctx.isManager) ApprovalBox.all,
+      ApprovalBox.archive,
     ];
     final docs = _docs;
+    // 보관함이거나 검색 조건을 건 채 비었으면 "찾는 문서가 없다".
+    final searchEmpty =
+        _box == ApprovalBox.archive || (_showSearch && _hasConditions);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -197,9 +323,20 @@ class _ApprovalTabState extends State<ApprovalTab> {
                   onSelected: _toggleUnsettled,
                 ),
               ],
+              // 보관함 밖에서도 같은 조건으로 찾을 수 있게(보관함은 검색 줄이 늘 보인다).
+              if (_box != ApprovalBox.archive)
+                IconButton(
+                  key: const ValueKey('approval-search-toggle'),
+                  tooltip: _searchOpen ? tr('검색 닫기') : tr('검색'),
+                  isSelected: _searchOpen,
+                  icon: const Icon(Icons.search),
+                  selectedIcon: const Icon(Icons.search_off),
+                  onPressed: _toggleSearch,
+                ),
             ],
           ),
         ),
+        if (_showSearch) _buildSearchBar(context),
         Expanded(
           child: _error != null
               ? GroupwareEmpty(_error!)
@@ -207,7 +344,9 @@ class _ApprovalTabState extends State<ApprovalTab> {
               ? const Center(child: CircularProgressIndicator())
               : docs.isEmpty
               ? GroupwareEmpty(
-                  _box == ApprovalBox.inbox
+                  searchEmpty
+                      ? tr('찾는 결재 문서가 없습니다.')
+                      : _box == ApprovalBox.inbox
                       ? tr('지금 결재할 문서가 없습니다.')
                       : _unsettled && _canFilterUnsettled
                       ? tr('정산할 구매·출장 결재가 없습니다.')
@@ -216,17 +355,135 @@ class _ApprovalTabState extends State<ApprovalTab> {
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView.separated(
-                    itemCount: docs.length,
+                    itemCount: docs.length + (_hasMore ? 1 : 0),
                     separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (_, i) => ApprovalDocumentTile(
-                      doc: docs[i],
-                      ctx: widget.ctx,
-                      onTap: () => _open(docs[i]),
-                    ),
+                    itemBuilder: (_, i) => i == docs.length
+                        ? Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Center(
+                              child: _loadingMore
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : TextButton(
+                                      key: const ValueKey('approval-more'),
+                                      onPressed: _loadMore,
+                                      child: Text(tr('더 보기')),
+                                    ),
+                            ),
+                          )
+                        : ApprovalDocumentTile(
+                            doc: docs[i],
+                            ctx: widget.ctx,
+                            onTap: () => _open(docs[i]),
+                          ),
                   ),
                 ),
         ),
       ],
+    );
+  }
+
+  /// 검색 줄 — 글(엔터·돋보기), 올린 날 기간(시작·끝 날짜 고르기), 종류·상태, 조건 지우기. 줄이 좁으면 다음 줄로 넘어간다.
+  Widget _buildSearchBar(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    // 보관함은 끝난 문서만이라 "진행 중"은 고를 것이 없다.
+    final statuses = [
+      for (final s in ApprovalStatus.values)
+        if (_box != ApprovalBox.archive || s != ApprovalStatus.pending) s,
+    ];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SizedBox(
+            width: 260,
+            child: TextField(
+              key: const ValueKey('approval-search'),
+              controller: _search,
+              maxLength: 100,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _submitSearch(),
+              decoration: InputDecoration(
+                isDense: true,
+                counterText: '',
+                hintText: tr('제목·문서 번호·올린 사람'),
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  key: const ValueKey('approval-search-go'),
+                  tooltip: tr('찾기'),
+                  icon: const Icon(Icons.search, size: 20),
+                  onPressed: _submitSearch,
+                ),
+              ),
+            ),
+          ),
+          OutlinedButton.icon(
+            key: const ValueKey('approval-search-from'),
+            onPressed: () => _pickDate(from: true),
+            icon: const Icon(Icons.event, size: 16),
+            label: Text(_from == null ? tr('시작일') : dateKeyOf(_from!)),
+          ),
+          Text('~', style: TextStyle(color: hint)),
+          OutlinedButton.icon(
+            key: const ValueKey('approval-search-to'),
+            onPressed: () => _pickDate(from: false),
+            icon: const Icon(Icons.event, size: 16),
+            label: Text(_to == null ? tr('종료일') : dateKeyOf(_to!)),
+          ),
+          // 종류·상태 — 'all'은 모두(PopupMenuButton은 null 값을 고른 것으로 보지 않아 따로 둔다).
+          PopupMenuButton<String>(
+            key: const ValueKey('approval-search-kind'),
+            tooltip: tr('결재 종류'),
+            onSelected: (v) {
+              _kind = v == 'all' ? null : ApprovalKind.fromWire(v);
+              _reload();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'all', child: Text(tr('모든 종류'))),
+              for (final k in ApprovalKind.values)
+                PopupMenuItem(value: k.wire, child: Text(k.label)),
+            ],
+            child: Chip(
+              avatar: const Icon(Icons.category_outlined, size: 16),
+              label: Text(_kind?.label ?? tr('모든 종류')),
+            ),
+          ),
+          PopupMenuButton<String>(
+            key: const ValueKey('approval-search-status'),
+            tooltip: tr('결재 상태'),
+            onSelected: (v) {
+              _status = v == 'all' ? null : ApprovalStatus.fromWire(v);
+              _reload();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'all', child: Text(tr('모든 상태'))),
+              for (final s in statuses)
+                PopupMenuItem(value: s.wire, child: Text(s.label)),
+            ],
+            child: Chip(
+              avatar: const Icon(Icons.flag_outlined, size: 16),
+              label: Text(_status?.label ?? tr('모든 상태')),
+            ),
+          ),
+          if (_hasConditions || _search.text.isNotEmpty)
+            TextButton(
+              key: const ValueKey('approval-search-clear'),
+              onPressed: () {
+                _clearSearch();
+                _reload();
+              },
+              child: Text(tr('조건 지우기')),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -291,21 +548,29 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
     }
   }
 
-  /// [action]: approve | reject | withdraw | cancel. 반려·취소는 사유를, 승인은 의견(선택)을 받는다.
+  /// [action]: approve | reject | disagree | withdraw | cancel. 반려·취소는 사유를, 합의의 "반대 의견으로 진행"은 반대 의견을(꼭),
+  /// 승인은 의견(선택)을 받는다. 내 차례가 후결이면 승인은 "후결 확인"(이미 승인된 문서에 확인 기록과 의견을 남긴다).
   Future<void> _act(String action) async {
     String? comment;
+    final post = _doc?.postForMe == true;
     if (action != 'withdraw') {
       final result = await showDialog<String>(
         context: context,
         builder: (_) => _CommentDialog(
           title: switch (action) {
+            'approve' when post => tr('후결 확인'),
             'approve' => _doc?.finalForMe == true ? tr('전결 승인') : tr('승인'),
             'reject' => tr('반려'),
+            'disagree' => tr('반대 의견으로 진행'),
             _ => tr('결재 취소'),
           },
           note: [
-            if (action == 'approve' && _doc?.finalForMe == true)
+            if (action == 'approve' && post)
+              tr('이미 승인된 결재입니다. 확인한 기록과 의견이 남습니다.'),
+            if (action == 'approve' && !post && _doc?.finalForMe == true)
               tr('전결 — 승인하면 남은 결재는 생략되고 바로 결재가 끝납니다.'),
+            if (action == 'disagree')
+              tr('반대 의견을 남기고 결재를 다음으로 넘깁니다. 막으려면 반려하세요.'),
             if (action != 'cancel' && _doc?.actingFor != null)
               tr('{p0}님 대신(대결) 결정합니다. 대결한 사람으로 함께 남습니다.', {
                 'p0': _doc!.actingFor,
@@ -314,6 +579,7 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
           label: switch (action) {
             'approve' => tr('의견 (선택)'),
             'reject' => tr('반려 사유'),
+            'disagree' => tr('반대 의견'),
             _ => tr('취소 사유'),
           },
           required: action != 'approve',
@@ -353,17 +619,23 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
         _doc = doc;
         _changed = true;
       });
+      // 지금 차례인 칸들의 이름(승인 뒤 다음 차례 — 승인된 문서면 남은 후결 칸).
+      final pendingNames = doc.steps
+          .where((s) => s.status == ApprovalStepStatus.pending)
+          .map((s) => s.approverName)
+          .join(', ');
       showAppToast(context, switch (action) {
+        'approve' when post => tr('후결을 확인했습니다.'),
         'approve' =>
           doc.status == ApprovalStatus.approved
-              ? tr('승인했습니다. 결재가 끝났습니다.')
-              : tr('승인했습니다. {p0}님 차례입니다.', {
-                  'p0': doc.steps
-                      .where((s) => s.status == ApprovalStepStatus.pending)
-                      .map((s) => s.approverName)
-                      .join(', '),
-                }),
+              ? (pendingNames.isEmpty
+                    ? tr('승인했습니다. 결재가 끝났습니다.')
+                    : tr('승인했습니다. 결재가 끝났고 {names}님이 후결로 확인합니다.', {
+                        'names': pendingNames,
+                      }))
+              : tr('승인했습니다. {p0}님 차례입니다.', {'p0': pendingNames}),
         'reject' => tr('반려했습니다.'),
+        'disagree' => tr('반대 의견을 남겼습니다. 결재는 계속 진행됩니다.'),
         'withdraw' => tr('회수했습니다.'),
         _ => tr('취소했습니다.'),
       });
@@ -445,13 +717,38 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
             key: const ValueKey('approval-print'),
             tooltip: tr('인쇄·PDF'),
             icon: const Icon(Icons.print_outlined),
+            // 인쇄·PDF에는 전자서명 검증 결과도 같이(못 받으면 빼고 인쇄한다).
             onSelected: (v) => v == 'print'
-                ? printApproval(context, doc, widget.ctx, widget.session)
-                : saveApprovalPdf(context, doc, widget.ctx, widget.session),
+                ? printApproval(
+                    context,
+                    doc,
+                    widget.ctx,
+                    widget.session,
+                    api: widget.api,
+                  )
+                : saveApprovalPdf(
+                    context,
+                    doc,
+                    widget.ctx,
+                    widget.session,
+                    api: widget.api,
+                  ),
             itemBuilder: (_) => [
               PopupMenuItem(value: 'print', child: Text(tr('인쇄'))),
               PopupMenuItem(value: 'pdf', child: Text(tr('PDF로 저장'))),
             ],
+          ),
+        // 전자서명 검증 — 결정한 칸마다 서버가 남긴 서명이 지금 내용과 맞는지(위변조 확인).
+        if (doc != null)
+          IconButton(
+            key: const ValueKey('approval-verify'),
+            tooltip: tr('전자서명 검증'),
+            icon: const Icon(Icons.verified_user_outlined),
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (_) =>
+                  ApprovalVerifyDialog(api: widget.api, documentId: doc.id),
+            ),
           ),
         // 승인된 내 구매 요청·출장 신청에 살아 있는 정산이 없으면(서버 canSettle) — 쓴 돈을 지출 결재로 정산한다.
         if (doc != null && doc.canSettle)
@@ -473,16 +770,24 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
             onPressed: _busy ? null : () => _act('cancel'),
             child: Text(tr('결재 취소')),
           ),
+        // 내 차례 — 합의 칸이면 "반대 의견으로 진행"(결재는 이어진다), 후결 칸이면 반려 없이 "후결 확인"만.
         if (doc != null && doc.myTurn) ...[
-          OutlinedButton(
-            key: const ValueKey('approval-reject'),
-            onPressed: _busy ? null : () => _act('reject'),
-            child: Text(tr('반려')),
-          ),
+          if (doc.canDisagree)
+            OutlinedButton(
+              key: const ValueKey('approval-disagree'),
+              onPressed: _busy ? null : () => _act('disagree'),
+              child: Text(tr('반대 의견으로 진행')),
+            ),
+          if (!doc.postForMe)
+            OutlinedButton(
+              key: const ValueKey('approval-reject'),
+              onPressed: _busy ? null : () => _act('reject'),
+              child: Text(tr('반려')),
+            ),
           FilledButton(
             key: const ValueKey('approval-approve'),
             onPressed: _busy ? null : () => _act('approve'),
-            child: Text(tr('승인')),
+            child: Text(doc.postForMe ? tr('후결 확인') : tr('승인')),
           ),
         ],
       ],
@@ -550,6 +855,19 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
         const SizedBox(height: 12),
         ApprovalStampBox(doc: doc, resolveUrl: widget.session.resolveUrl),
         const SizedBox(height: 12),
+        // 올릴 때 맞은 전결 규정 — 어느 직책 이상이 전결했는지, 결재선에 그런 사람이 없었으면 끝까지 결재한다는 것.
+        if (doc.finalRule case final rule?)
+          KeyedSubtree(
+            key: const ValueKey('approval-final-rule'),
+            child: row(
+              tr('전결 규정'),
+              rule.applied
+                  ? '${tr('{position} 이상 전결', {'position': rule.positionLabel})}${rule.minAmount == null ? '' : tr(' ({won} 이상 문서)', {'won': wonText(rule.minAmount!)})}'
+                  : tr('{position} 이상 전결 — 결재선에 해당하는 사람이 없어 끝까지 결재', {
+                      'position': rule.positionLabel,
+                    }),
+            ),
+          ),
         if (doc.kind == ApprovalKind.leave) ...[
           row(
             tr('종류'),
@@ -621,6 +939,8 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
               backgroundColor: switch (s.status) {
                 ApprovalStepStatus.approved => Colors.green.shade100,
                 ApprovalStepStatus.rejected => theme.colorScheme.errorContainer,
+                // 합의 반대 — 결재는 이어졌지만 눈에 띄게(반려의 빨강과 다른 주황).
+                ApprovalStepStatus.disagreed => Colors.orange.shade100,
                 ApprovalStepStatus.pending =>
                   theme.colorScheme.primaryContainer,
                 ApprovalStepStatus.waiting || ApprovalStepStatus.skipped =>
@@ -633,7 +953,22 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
             ),
             title: Text(
               '${s.approverName} · ${s.role.label} · ${s.status.label}',
+              style: s.status == ApprovalStepStatus.disagreed
+                  ? TextStyle(color: Colors.orange.shade900)
+                  : null,
             ),
+            // 결정할 때 서버가 전자서명한 칸(맞는지는 "전자서명 검증").
+            trailing: s.sealed
+                ? Tooltip(
+                    message: tr('전자서명됨'),
+                    child: Icon(
+                      Icons.verified_outlined,
+                      key: ValueKey('approval-step-sealed-${s.order}'),
+                      size: 16,
+                      color: hint,
+                    ),
+                  )
+                : null,
             subtitle:
                 s.comment == null &&
                     s.decidedAt == null &&
@@ -796,6 +1131,168 @@ String _signedWon(int diff) =>
         : diff < 0
         ? '-'
         : ''}${wonText(diff.abs())}';
+
+/// 전자서명 검증 창 — 서버(GET /groupware/documents/:id/verify)에 물어 전체 결과(위변조 없음 · 바뀐 곳이 있음 · 검증할 서명 없음),
+/// 칸마다 결과, 문서 지문(SHA-256 — 고를 수 있고 복사 단추)과 서버 키 지문을 보인다. 인쇄한 종이의 지문과 견줘 볼 수 있다.
+class ApprovalVerifyDialog extends StatefulWidget {
+  final GroupwareApi api;
+  final String documentId;
+  const ApprovalVerifyDialog({
+    super.key,
+    required this.api,
+    required this.documentId,
+  });
+
+  @override
+  State<ApprovalVerifyDialog> createState() => _ApprovalVerifyDialogState();
+}
+
+class _ApprovalVerifyDialogState extends State<ApprovalVerifyDialog> {
+  ApprovalVerification? _result;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final result = await widget.api.verifyDocument(widget.documentId);
+      if (mounted) setState(() => _result = result);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  /// 긴 지문 한 덩어리 — 이름, 고정폭 글(골라 복사할 수 있게)과 복사 단추.
+  Widget _fingerprint(String label, String value, Key key) {
+    final hint = Theme.of(context).hintColor;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 84,
+            child: Text(label, style: TextStyle(color: hint, fontSize: 12)),
+          ),
+          Expanded(
+            child: SelectableText(
+              value,
+              key: key,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
+          ),
+          IconButton(
+            tooltip: tr('복사'),
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.copy, size: 16),
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: value));
+              if (mounted) showAppToast(context, tr('복사했습니다.'));
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    final v = _result;
+    Widget body;
+    if (v == null) {
+      body = _error != null
+          ? Text(_error!, style: TextStyle(color: theme.colorScheme.error))
+          : const SizedBox(
+              height: 80,
+              child: Center(child: CircularProgressIndicator()),
+            );
+    } else {
+      final none = v.steps.every((s) => s.result == 'unsealed');
+      final (IconData icon, Color color) = v.tampered
+          ? (Icons.gpp_bad_outlined, theme.colorScheme.error)
+          : none
+          ? (Icons.help_outline, hint)
+          : (Icons.verified_user, Colors.green.shade700);
+      body = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  sealSummaryText(v),
+                  key: const ValueKey('approval-verify-summary'),
+                  style: TextStyle(color: color, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          for (final s in v.steps)
+            Padding(
+              key: ValueKey('approval-verify-step-${s.order}'),
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text('${s.approverName} · ${s.status.label}'),
+                  ),
+                  Text(
+                    sealResultText(s.result),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: switch (s.result) {
+                        'valid' => Colors.green.shade700,
+                        'unsealed' => hint,
+                        _ => theme.colorScheme.error,
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const Divider(height: 20),
+          _fingerprint(
+            tr('문서 지문'),
+            v.digest,
+            const ValueKey('approval-verify-digest'),
+          ),
+          _fingerprint(
+            tr('서버 키 지문'),
+            v.fingerprint,
+            const ValueKey('approval-verify-fingerprint'),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            tr(
+              '문서 지문은 문서 내용과 결재 기록으로 만든 값이고, 서버 키 지문은 서명한 서버의 열쇠입니다. 인쇄한 문서의 값과 견줘 볼 수 있습니다.',
+            ),
+            style: TextStyle(fontSize: 11, color: hint),
+          ),
+        ],
+      );
+    }
+    return AlertDialog(
+      title: Text(tr('전자서명 검증')),
+      content: SizedBox(width: 440, child: SingleChildScrollView(child: body)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(tr('닫기')),
+        ),
+      ],
+    );
+  }
+}
 
 class _CommentDialog extends StatefulWidget {
   final String title;

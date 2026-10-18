@@ -379,8 +379,11 @@ enum ApprovalStepStatus {
   approved('approved', '승인'),
   rejected('rejected', '반려'),
 
-  /// 전결로 생략된 칸.
-  skipped('skipped', '생략');
+  /// 전결로 생략된 칸(또는 취소된 문서의 확인하지 않은 후결).
+  skipped('skipped', '생략'),
+
+  /// 합의 칸이 반대 의견을 남기고 넘긴 칸(결재는 이어진다).
+  disagreed('disagreed', '반대');
 
   final String wire;
   final String _labelKo;
@@ -394,10 +397,12 @@ enum ApprovalStepStatus {
 }
 
 /// 결재선 칸의 역할 — 서버 approvalRules.js LINE_ROLES. 이어진 합의 칸은 한 단계(동시에 차례), 전결은 승인하면 남은 칸을 생략한다.
+/// 후결은 결재선 맨 뒤에만 — 앞의 결재가 끝나 문서가 승인된 뒤에 확인한다(이어진 후결 칸은 한 단계).
 enum LineRole {
   approve('approve', '결재'),
   agree('agree', '합의'),
-  finalApprove('final', '전결');
+  finalApprove('final', '전결'),
+  post('post', '후결');
 
   final String wire;
   final String _labelKo;
@@ -409,7 +414,7 @@ enum LineRole {
   static LineRole fromWire(String? value) =>
       values.firstWhere((r) => r.wire == value, orElse: () => approve);
 
-  /// 결재선에서 눌러 바꿀 때의 다음 역할(결재 → 합의 → 전결 → 결재).
+  /// 결재선에서 눌러 바꿀 때의 다음 역할(결재 → 합의 → 전결 → 후결 → 결재).
   LineRole get next => values[(index + 1) % values.length];
 }
 
@@ -506,6 +511,9 @@ class ApproverStatsRow {
   final int decided;
   final int approved;
   final int rejected;
+
+  /// 합의에서 반대 의견을 남긴 수.
+  final int disagreed;
   final int proxied;
   final int waiting;
   final double? avgHours;
@@ -515,6 +523,7 @@ class ApproverStatsRow {
     this.decided = 0,
     this.approved = 0,
     this.rejected = 0,
+    this.disagreed = 0,
     this.proxied = 0,
     this.waiting = 0,
     this.avgHours,
@@ -528,6 +537,7 @@ class ApproverStatsRow {
       decided: n('decided'),
       approved: n('approved'),
       rejected: n('rejected'),
+      disagreed: n('disagreed'),
       proxied: n('proxied'),
       waiting: n('waiting'),
       avgHours: (j['avgHours'] as num?)?.toDouble(),
@@ -589,7 +599,10 @@ enum ApprovalBox {
   mine('mine', '내가 올린 문서'),
   done('done', '결재한 문서'),
   cc('cc', '참조 문서'),
-  all('all', '전체 문서');
+  all('all', '전체 문서'),
+
+  /// 보관함 — 끝난 문서 중 내가 볼 수 있는 것(관리자는 범위 전부). 기간·문서 번호·제목으로 찾는다.
+  archive('archive', '보관함');
 
   final String wire;
   final String _labelKo;
@@ -972,6 +985,12 @@ class ApprovalLines {
   /// 양식의 기본 결재선·참조자를 썼으면 그 양식 이름("양식 기본 결재선: 구매 요청" — 참조자만 더했을 때도).
   final String? suggestedFormName;
 
+  /// 이 문서(종류·양식·금액)에 맞는 전결 규정(없으면 null) — 올리면 서버가 결재선에서 그 직책 이상인 첫 결재자를 전결로 정한다.
+  final ApprovalFinalRule? finalRule;
+
+  /// 미리 채운 결재선에서 전결 규정으로 정해진 사람(없으면 null).
+  final String? suggestedFinalUserId;
+
   /// 추천에 쓴 결재선 규칙('rule'일 때 — "규칙: 지출 100만 원 이상 — 본부장까지"로 보인다).
   final ApprovalLineRule? suggestedRule;
 
@@ -985,6 +1004,8 @@ class ApprovalLines {
     this.suggestedRoles = const {},
     this.suggestedRule,
     this.suggestedFormName,
+    this.finalRule,
+    this.suggestedFinalUserId,
   });
 
   factory ApprovalLines.fromJson(Map<String, dynamic> json) {
@@ -1005,6 +1026,12 @@ class ApprovalLines {
             )
           : null,
       suggestedFormName: (suggested?['form'] as Map?)?['name'] as String?,
+      finalRule: json['finalRule'] is Map
+          ? ApprovalFinalRule.fromJson(
+              (json['finalRule'] as Map).cast<String, dynamic>(),
+            )
+          : null,
+      suggestedFinalUserId: suggested?['finalUserId'] as String?,
     );
   }
 }
@@ -1027,6 +1054,9 @@ class ApprovalStep {
 
   /// 승인할 때의 서명·도장(서명 링크).
   final String? signatureUrl;
+
+  /// 전자서명이 있는지(결정할 때 서버가 서명 — 맞는지는 [GroupwareApi.verifyDocument]).
+  final bool sealed;
   const ApprovalStep({
     required this.id,
     required this.order,
@@ -1039,6 +1069,7 @@ class ApprovalStep {
     this.decidedAt,
     this.actedByName,
     this.signatureUrl,
+    this.sealed = false,
   }) : stage = stage ?? order;
 
   factory ApprovalStep.fromJson(Map<String, dynamic> json) => ApprovalStep(
@@ -1053,6 +1084,7 @@ class ApprovalStep {
     decidedAt: _time(json['decidedAt']),
     actedByName: json['actedByName'] as String?,
     signatureUrl: json['signatureUrl'] as String?,
+    sealed: json['sealed'] == true,
   );
 }
 
@@ -1111,6 +1143,12 @@ class ApprovalDocument {
   final ApprovalSettlement? settlement;
   final bool canSettle;
 
+  /// 내 차례 칸이 합의면 "반대 의견으로 진행"을 할 수 있다.
+  final bool canDisagree;
+
+  /// 내 차례 칸이 후결이면(문서는 이미 승인됨) 확인만 한다.
+  final bool postForMe;
+
   /// 대결로 내 차례면 누구 대신인지.
   final String? actingFor;
 
@@ -1141,6 +1179,8 @@ class ApprovalDocument {
     this.canCancel = false,
     this.settlement,
     this.canSettle = false,
+    this.canDisagree = false,
+    this.postForMe = false,
   });
 
   factory ApprovalDocument.fromJson(Map<String, dynamic> json) =>
@@ -1182,7 +1222,20 @@ class ApprovalDocument {
               )
             : null,
         canSettle: json['canSettle'] == true,
+        canDisagree: json['canDisagree'] == true,
+        postForMe: json['postForMe'] == true,
       );
+
+  /// 올릴 때 맞은 전결 규정(payload.finalRule — 없으면 null): 직책·금액 기준과 전결권자를 찾았는지.
+  ({String positionLabel, int? minAmount, bool applied})? get finalRule {
+    final m = payload['finalRule'];
+    if (m is! Map) return null;
+    return (
+      positionLabel: m['positionLabel'] as String? ?? '',
+      minAmount: (m['minAmount'] as num?)?.toInt(),
+      applied: m['applied'] == true,
+    );
+  }
 
   /// 지출 결재가 정산하는 원래 결재(구매·출장 — 없으면 null).
   ApprovalSettles? get settles => payload['settles'] is Map
@@ -1712,6 +1765,9 @@ enum ApprovalNotificationKind {
   rejected('rejected'),
   withdrawn('withdrawn'),
   canceled('canceled'),
+
+  /// 합의에서 반대 의견이 남음(결재는 계속 — 올린 사람에게).
+  disagreed('disagreed'),
   other('other');
 
   final String wire;
@@ -1857,4 +1913,89 @@ class ApprovalLineRule {
     'extraApproverIds': extraApproverIds,
     'ccIds': ccIds,
   };
+}
+
+/// 전결 규정 — 결재 종류(와 양식·금액)마다 전결하는 직책(서버 approvalFinalRules.js). [kind]는 결재 종류 또는 'any', 관리자가 만든 양식은
+/// 'form'에 [templateId]로 한 양식만. 결재를 올리면 결재선에서 직책이 [positionLabel] 이상인 첫 결재자가 저절로 전결이 된다.
+class ApprovalFinalRule {
+  final String id;
+  final String kind;
+  final String? templateId;
+  final String? templateName;
+
+  /// 이 금액(원) 이상일 때만 — null이면 금액과 상관없이.
+  final int? minAmount;
+  final String positionLabel;
+  const ApprovalFinalRule({
+    required this.id,
+    required this.kind,
+    this.templateId,
+    this.templateName,
+    this.minAmount,
+    required this.positionLabel,
+  });
+
+  factory ApprovalFinalRule.fromJson(Map<String, dynamic> json) =>
+      ApprovalFinalRule(
+        id: json['id'] as String? ?? '',
+        kind: json['kind'] as String? ?? 'any',
+        templateId: json['templateId'] as String?,
+        templateName: json['templateName'] as String?,
+        minAmount: (json['minAmount'] as num?)?.toInt(),
+        positionLabel: json['positionLabel'] as String? ?? '',
+      );
+
+  Map<String, dynamic> toJson() => {
+    'kind': kind,
+    'templateId': templateId,
+    'minAmount': minAmount,
+    'positionLabel': positionLabel,
+  };
+}
+
+/// 전자서명 검증 결과의 칸 하나 — [result]: 'valid'(맞음) | 'invalid'(내용·결정 기록이 바뀜) | 'signatureChanged'(서명 그림 파일이
+/// 바뀜) | 'signatureMissing'(서명 그림 파일이 없음) | 'unsealed'(이 기능 전에 결정해 서명 없음).
+typedef ApprovalSealCheck = ({
+  String id,
+  int order,
+  String approverName,
+  ApprovalStepStatus status,
+  String result,
+});
+
+/// 결재 문서 전자서명 검증(서버 GET /groupware/documents/:id/verify — approvalSeal.js). [digest]는 문서 지문(SHA-256),
+/// [fingerprint]는 서버 서명 키의 지문. [ok]는 서명한 칸이 하나 이상이고 모두 맞을 때.
+class ApprovalVerification {
+  final String digest;
+  final String fingerprint;
+  final bool ok;
+  final List<ApprovalSealCheck> steps;
+  const ApprovalVerification({
+    required this.digest,
+    required this.fingerprint,
+    required this.ok,
+    this.steps = const [],
+  });
+
+  factory ApprovalVerification.fromJson(Map<String, dynamic> json) =>
+      ApprovalVerification(
+        digest: json['digest'] as String? ?? '',
+        fingerprint: json['fingerprint'] as String? ?? '',
+        ok: json['ok'] == true,
+        steps: [
+          for (final s in json['steps'] as List? ?? const [])
+            if (s is Map)
+              (
+                id: s['id'] as String? ?? '',
+                order: (s['order'] as num?)?.toInt() ?? 0,
+                approverName: s['approverName'] as String? ?? '',
+                status: ApprovalStepStatus.fromWire(s['status'] as String?),
+                result: s['result'] as String? ?? 'invalid',
+              ),
+        ],
+      );
+
+  /// 바뀐 칸이 있는지(서명 없는 옛 칸은 빼고).
+  bool get tampered =>
+      steps.any((s) => s.result != 'valid' && s.result != 'unsealed');
 }

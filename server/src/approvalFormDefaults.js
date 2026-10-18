@@ -28,6 +28,10 @@ export function parseFormDefaults(body, { isCandidate }) {
   }
   if (line.length > APPROVERS_MAX) return { error: `기본 결재선은 ${APPROVERS_MAX}명까지입니다.` };
   if (line.filter((e) => e.role === 'final').length > 1) return { error: '전결은 한 명만 정할 수 있습니다.' };
+  // 후결은 맨 뒤에만, 앞에 결재할 사람이 있어야(approvalRules.js validateApprovalLine과 같은 규칙).
+  const firstPost = line.findIndex((e) => e.role === 'post');
+  if (firstPost === 0) return { error: '후결 앞에 결재할 사람이 한 명 이상 있어야 합니다.' };
+  if (firstPost > 0 && line.slice(firstPost).some((e) => e.role !== 'post')) return { error: '후결은 결재선 맨 뒤에만 둘 수 있습니다.' };
   const cc = [...new Set(ccIn ?? [])];
   if (cc.length > CC_MAX) return { error: `기본 참조자는 ${CC_MAX}명까지입니다.` };
   if (cc.some((id) => typeof id !== 'string' || !isCandidate(id))) return { error: '기본 참조자에 고를 수 없는 사람이 있습니다.' };

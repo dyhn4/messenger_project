@@ -189,7 +189,7 @@ test('결재 통계 — 종류별 건수·상태·평균 시간, 결재자별 �
   assert.deepEqual(s.totals, { total: 3, pending: 1, approved: 1, rejected: 1, withdrawn: 0, canceled: 0, avgHours: 7 });
   assert.deepEqual(s.byKind.map((k) => [k.label, k.total, k.avgHours]), [['휴가', 2, 7], ['지출', 1, null]]);
   const lead = s.byApprover.find((r) => r.userId === 'lead');
-  assert.deepEqual({ ...lead }, { userId: 'lead', name: 'lead', decided: 2, approved: 1, rejected: 1, proxied: 0, waiting: 1, avgHours: 3 });
+  assert.deepEqual({ ...lead }, { userId: 'lead', name: 'lead', decided: 2, approved: 1, rejected: 1, disagreed: 0, proxied: 0, waiting: 1, avgHours: 3 });
   const boss = s.byApprover.find((r) => r.userId === 'boss');
   assert.equal(boss.proxied, 1);
   assert.equal(boss.avgHours, 8, '앞 단계가 결정한 때(2시)부터 10시까지');

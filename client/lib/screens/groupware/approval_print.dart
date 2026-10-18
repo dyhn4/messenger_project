@@ -7,6 +7,7 @@ import 'package:printing/printing.dart';
 
 import '../../models/groupware.dart';
 import '../../services/download_storage.dart';
+import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../services/time_format.dart';
 import '../../widgets/app_toast.dart';
@@ -18,16 +19,48 @@ import '../../l10n/tr.dart';
 
 // ── 결재란(화면) ──────────────────────────────────────────────────────────
 
-/// 칸 하나의 도장 글자 — 서명 그림이 없을 때 승인·반려·생략을 도장처럼 보인다.
+/// 칸 하나의 도장 글자 — 서명 그림이 없을 때 승인·반려·생략·반대(합의 반대 의견)를 도장처럼 보인다. 후결 칸은 확인했으면 "확인".
 String? stampTextOf(ApprovalStep s) => switch (s.status) {
-  ApprovalStepStatus.approved =>
-    s.role == LineRole.finalApprove
-        ? tr('전결')
-        : (s.role == LineRole.agree ? tr('합의') : tr('승인')),
+  ApprovalStepStatus.approved => switch (s.role) {
+    LineRole.finalApprove => tr('전결'),
+    LineRole.agree => tr('합의'),
+    LineRole.post => tr('확인'),
+    LineRole.approve => tr('승인'),
+  },
   ApprovalStepStatus.rejected => tr('반려'),
   ApprovalStepStatus.skipped => tr('생략'),
+  ApprovalStepStatus.disagreed => tr('반대'),
   _ => null,
 };
+
+/// 결재란에 놓을 칸 순서 — 결재선 순서 그대로, 다만 후결 칸은 맨 뒤(서버도 맨 뒤에만 두지만 예전 문서·순서가 섞여도).
+List<ApprovalStep> stampOrderOf(ApprovalDocument doc) => [
+  ...doc.steps.where((s) => s.role != LineRole.post),
+  ...doc.steps.where((s) => s.role == LineRole.post),
+];
+
+/// 반대 의견 도장 색(주황 — 반려의 빨강과 구분).
+const _disagreedColor = Color(0xFFE65100);
+
+/// 전자서명 검증 결과 한 칸의 글(상세의 검증 창과 인쇄가 같이 쓴다).
+String sealResultText(String result) => switch (result) {
+  'valid' => tr('맞음'),
+  'invalid' => tr('내용 또는 결정 기록이 바뀜'),
+  'signatureChanged' => tr('서명 그림 파일이 바뀜'),
+  'signatureMissing' => tr('서명 그림 파일이 없음'),
+  'unsealed' => tr('서명 없음(이전 결재)'),
+  _ => result,
+};
+
+/// 전자서명 검증 전체 결과 한 줄 — 바뀐 칸이 있으면 "바뀐 곳이 있습니다", 서명한 칸이 하나도 없으면 "검증할 전자서명이 없음",
+/// 모두 맞으면 "위변조 없음".
+String sealSummaryText(ApprovalVerification v) {
+  if (v.tampered) return tr('바뀐 곳이 있습니다');
+  if (v.steps.every((s) => s.result == 'unsealed')) {
+    return tr('검증할 전자서명이 없습니다(이 기능 전에 결정한 결재).');
+  }
+  return tr('위변조 없음 — 모든 결재가 서명한 그대로입니다.');
+}
 
 /// 결재란 — 결재선 칸들을 가로로(좁으면 줄바꿈). 위에 역할(합의는 같은 단계끼리 같은 번호), 가운데 서명·도장, 아래 이름·날짜·대결.
 class ApprovalStampBox extends StatelessWidget {
@@ -48,7 +81,7 @@ class ApprovalStampBox extends StatelessWidget {
       spacing: 0,
       runSpacing: 6,
       children: [
-        for (final s in doc.steps)
+        for (final s in stampOrderOf(doc))
           Container(
             key: ValueKey('approval-stamp-${s.order}'),
             width: 86,
@@ -87,13 +120,18 @@ class ApprovalStampBox extends StatelessWidget {
                         : stampTextOf(s) == null
                         ? Text(
                             s.status == ApprovalStepStatus.pending
-                                ? tr('결재 차례')
+                                ? (s.role == LineRole.post
+                                      ? tr('확인 차례')
+                                      : tr('결재 차례'))
                                 : '',
                             style: TextStyle(fontSize: 11, color: hint),
                           )
                         : _Stamp(
                             text: stampTextOf(s)!,
                             faded: s.status == ApprovalStepStatus.skipped,
+                            color: s.status == ApprovalStepStatus.disagreed
+                                ? _disagreedColor
+                                : null,
                           ),
                   ),
                 ),
@@ -139,11 +177,16 @@ class ApprovalStampBox extends StatelessWidget {
 class _Stamp extends StatelessWidget {
   final String text;
   final bool faded;
-  const _Stamp({required this.text, this.faded = false});
+
+  /// 도장 색(없으면 빨강 — 반대 의견은 주황).
+  final Color? color;
+  const _Stamp({required this.text, this.faded = false, this.color});
 
   @override
   Widget build(BuildContext context) {
-    final color = faded ? Theme.of(context).hintColor : Colors.red.shade700;
+    final color = faded
+        ? Theme.of(context).hintColor
+        : this.color ?? Colors.red.shade700;
     return Container(
       width: 40,
       height: 40,
@@ -295,11 +338,14 @@ Future<pw.Font> _koreanFont() async => _font ??= pw.Font.ttf(
   await rootBundle.load('assets/fonts/NanumBarunGothic-YetHangul.ttf'),
 );
 
-/// 결재 문서 PDF(A4) — 머리(문서 번호·종류·올린 사람·날짜·상태), 결재란, 내용, 결재 이력, 첨부 이름. [signatures]는 칸 id → 서명 그림.
+/// 결재 문서 PDF(A4) — 머리(문서 번호·종류·올린 사람·날짜·상태), 결재란, 내용, 결재 이력, 첨부 이름, 그리고 [verification]을 주면
+/// 맨 끝에 "전자서명"(문서 지문·서버 키 지문·칸마다 검증 결과 — 인쇄한 종이를 나중에 맞춰 볼 수 있게). [signatures]는 칸 id →
+/// 서명 그림.
 Future<Uint8List> buildApprovalPdf(
   ApprovalDocument doc,
   GroupwareContext ctx, {
   Map<String, Uint8List> signatures = const {},
+  ApprovalVerification? verification,
   PdfPageFormat format = PdfPageFormat.a4,
   pw.Font? font,
 }) async {
@@ -324,7 +370,13 @@ Future<Uint8List> buildApprovalPdf(
     }
     final text = stampTextOf(s);
     if (text == null) return pw.SizedBox(height: 36);
-    final c = s.status == ApprovalStepStatus.skipped ? grey : red;
+    final c = switch (s.status) {
+      ApprovalStepStatus.skipped => grey,
+      ApprovalStepStatus.disagreed => PdfColor.fromInt(
+        _disagreedColor.toARGB32(),
+      ),
+      _ => red,
+    };
     return pw.Container(
       width: 36,
       height: 36,
@@ -383,7 +435,7 @@ Future<Uint8List> buildApprovalPdf(
         // 결재란
         pw.Wrap(
           children: [
-            for (final s in doc.steps)
+            for (final s in stampOrderOf(doc))
               pw.Container(
                 width: 74,
                 decoration: pw.BoxDecoration(
@@ -545,6 +597,39 @@ Future<Uint8List> buildApprovalPdf(
               style: pw.TextStyle(fontSize: 9, color: red),
             ),
           ),
+        // 전자서명 — 문서 지문(SHA-256)과 서버 서명 키 지문, 칸마다 검증 결과(인쇄할 때 서버에 물어본 것).
+        if (verification != null) ...[
+          pw.SizedBox(height: 14),
+          pw.Text(tr('전자서명'), style: pw.TextStyle(fontSize: 9, color: grey)),
+          pw.SizedBox(height: 3),
+          pw.Text(
+            sealSummaryText(verification),
+            style: pw.TextStyle(
+              fontSize: 9,
+              color: verification.tampered ? red : null,
+            ),
+          ),
+          pw.Text(
+            tr('문서 지문 {digest}', {'digest': verification.digest}),
+            style: const pw.TextStyle(fontSize: 7),
+          ),
+          pw.Text(
+            tr('서버 키 지문 {fingerprint}', {
+              'fingerprint': verification.fingerprint,
+            }),
+            style: const pw.TextStyle(fontSize: 7),
+          ),
+          for (final s in verification.steps)
+            pw.Text(
+              '${s.approverName} · ${s.status.label} · ${sealResultText(s.result)}',
+              style: pw.TextStyle(
+                fontSize: 8,
+                color: s.result == 'valid' || s.result == 'unsealed'
+                    ? null
+                    : red,
+              ),
+            ),
+        ],
       ],
       footer: (context) => pw.Align(
         alignment: pw.Alignment.centerRight,
@@ -585,37 +670,59 @@ String _pdfFileName(ApprovalDocument doc) =>
       '_',
     );
 
-/// 인쇄(미리보기 창 — 프린터 고르기·PDF로 저장).
+/// 인쇄 전에 전자서명 검증을 받아 둔다 — [api]가 없거나 못 받으면 null(전자서명 칸 없이 인쇄한다 — 인쇄를 막지 않는다).
+Future<ApprovalVerification?> _verificationOf(
+  ApprovalDocument doc,
+  GroupwareApi? api,
+) async {
+  if (api == null) return null;
+  try {
+    return await api.verifyDocument(doc.id);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 인쇄(미리보기 창 — 프린터 고르기·PDF로 저장). [api]를 주면 전자서명 검증 결과를 맨 끝에 같이 찍는다.
 Future<void> printApproval(
   BuildContext context,
   ApprovalDocument doc,
   GroupwareContext ctx,
-  Session session,
-) async {
+  Session session, {
+  GroupwareApi? api,
+}) async {
   try {
     final signatures = await _signatureBytes(doc, session);
+    final verification = await _verificationOf(doc, api);
     await Printing.layoutPdf(
       name: _pdfFileName(doc),
-      onLayout: (format) =>
-          buildApprovalPdf(doc, ctx, signatures: signatures, format: format),
+      onLayout: (format) => buildApprovalPdf(
+        doc,
+        ctx,
+        signatures: signatures,
+        verification: verification,
+        format: format,
+      ),
     );
   } catch (e) {
     if (context.mounted) showAppToast(context, tr('인쇄하지 못했습니다: {e}', {'e': e}));
   }
 }
 
-/// PDF를 다운로드 폴더에 저장한다.
+/// PDF를 다운로드 폴더에 저장한다. [api]를 주면 전자서명 검증 결과를 맨 끝에 같이 넣는다.
 Future<void> saveApprovalPdf(
   BuildContext context,
   ApprovalDocument doc,
   GroupwareContext ctx,
-  Session session,
-) async {
+  Session session, {
+  GroupwareApi? api,
+}) async {
   try {
     final bytes = await buildApprovalPdf(
       doc,
       ctx,
       signatures: await _signatureBytes(doc, session),
+      verification: await _verificationOf(doc, api),
     );
     final path = await writeDownloadFile(
       folder: session.settings.downloadFolder,

@@ -172,7 +172,9 @@ void main() {
         3,
       );
       expect(LineRole.approve.next, LineRole.agree);
-      expect(LineRole.finalApprove.next, LineRole.approve);
+      // 후결이 생겨 전결 다음은 후결, 후결 다음이 결재(서버 LINE_ROLES 순서).
+      expect(LineRole.finalApprove.next, LineRole.post);
+      expect(LineRole.post.next, LineRole.approve);
       expect(
         rolesToJson({
           'a': LineRole.approve,
@@ -249,7 +251,10 @@ void main() {
     expect(c.roleOf('d'), LineRole.approve);
     c.removeApprover('b');
     expect(c.roles.containsKey('b'), isFalse);
-    c.cycleRole('a'); // 전결 → 결재
+    c.cycleRole('a'); // 전결 → 후결(맨 뒤로 옮긴다)
+    expect(c.roleOf('a'), LineRole.post);
+    expect(c.approverIds.last, 'a');
+    c.cycleRole('a'); // 후결 → 결재
     expect(c.roles.containsKey('a'), isFalse);
   });
 

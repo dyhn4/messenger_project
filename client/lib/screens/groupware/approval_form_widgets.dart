@@ -57,6 +57,45 @@ class FormValues extends ChangeNotifier {
     return null;
   }
 
+  /// 문서 금액(원) — 결재선 규칙의 금액 기준을 고를 때 쓴다(서버 approvalLineRules.js documentAmountOf와 같은 규칙): 기안은 예산,
+  /// 출장은 예상 경비, 구매는 품목 합계, 관리자가 만든 양식은 금액 칸·품목 칸 합계의 합. 금액이 없는 양식(연장근무)이나 비었으면 null.
+  int? get documentAmount {
+    int? money(String key) =>
+        int.tryParse('${_values[key] ?? ''}'.replaceAll(',', '').trim());
+    int? items(String key) {
+      final rows = _values[key];
+      if (rows is! List) return null;
+      final total = rows.fold<int>(
+        0,
+        (sum, r) =>
+            sum + _parseInt((r as Map)['qty']) * _parseInt(r['unitPrice']),
+      );
+      return total > 0 ? total : null;
+    }
+
+    switch (form.kind) {
+      case ApprovalKind.draft:
+        return money('budget');
+      case ApprovalKind.trip:
+        return money('cost');
+      case ApprovalKind.purchase:
+        return items('items');
+      case ApprovalKind.form:
+        int? sum;
+        for (final f in form.fields) {
+          final v = switch (f.type) {
+            FormFieldType.money => money(f.key),
+            FormFieldType.items => items(f.key),
+            _ => null,
+          };
+          if (v != null) sum = (sum ?? 0) + v;
+        }
+        return sum;
+      default:
+        return null;
+    }
+  }
+
   /// 서버에 보낼 값.
   Map<String, dynamic> toJson() => {
     for (final f in form.fields)
@@ -135,6 +174,11 @@ class _FormRequestDialogState extends State<FormRequestDialog> {
       api: widget.api,
       ctx: widget.ctx,
       showBody: false,
+      // 결재선 규칙 — 양식 종류(관리자가 만든 양식이면 그 양식)와 금액(예산·경비·품목 합계)이 바뀌면 다시 추천받는다.
+      lineKind: form.kind.wire,
+      lineTemplateId: form.kind == ApprovalKind.form ? form.id : null,
+      lineAmountOf: () => _values.documentAmount,
+      lineAmountChanges: _values,
       fields: (setState) => [
         if (form.description != null) ...[
           Text(

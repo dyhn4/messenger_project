@@ -49,6 +49,7 @@ import { ldapConfigProblem } from './ldapRules.js';
 import { ldapConnectionChanged, loginSecurityView, parseLoginSecurityInput } from './loginSecurityRules.js';
 import { ssoRedirectUri } from './sso.js';
 import { ensureSpKeys } from './saml.js';
+import { syncDirectoryOrgAll } from './orgDirectorySync.js';
 import { parseIdpMetadata } from './samlRules.js';
 import { GROUP_MAPPINGS_MAX, parseGroupMapping } from './groupSyncRules.js';
 import { countGroupMappings, deleteGroupMapping, insertGroupMapping, listGroupMappings } from './db/queries/loginSecurityExtras.js';
@@ -591,6 +592,26 @@ export function createAdminRouter(io) {
       detail: detail.join(' · '),
     });
     res.json(await securityView());
+  });
+
+  /**
+   * 지금 디렉터리와 조직도 맞추기 — 디렉터리의 사람을 모두 읽어 이 앱 계정이 있는 사람의 부서(OU 경로)·상위자(manager)를 맞춘다
+   * (orgDirectorySync.js — 켜 둔 것만, 계정 단위 조직도에서만). 결과 숫자.
+   */
+  router.post('/admin/login-security/ldap-org-sync', async (req, res) => {
+    const settings = await getServerSettings();
+    if (!settings.ldapEnabled) return res.status(400).json({ error: '사내 디렉터리 로그인을 먼저 켜세요.' });
+    const result = await syncDirectoryOrgAll(io, settings);
+    if (result.error) return res.status(400).json({ error: result.error });
+    recordAudit({
+      ...actorOf(req),
+      action: AUDIT.orgTree,
+      targetType: 'server',
+      targetId: null,
+      targetLabel: '조직도',
+      detail: `디렉터리와 맞추기 — ${result.linked}명 중 부서 ${result.moved}명·상위자 ${result.managersSet}명, 부서 ${result.departmentsCreated}개 만듦`,
+    });
+    res.json(result);
   });
 
   /** SAML — IdP 메타데이터 XML `{ xml }`을 읽어 칸에 채울 값(저장하지 않는다 — 관리자가 보고 저장). */

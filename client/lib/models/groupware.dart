@@ -771,8 +771,11 @@ class ApprovalLines {
   final List<String> suggestedApproverIds;
   final List<String> suggestedCcIds;
 
-  /// 추천이 어디서 왔는지 — 'org'(조직도의 상위자 사슬) | 'saved'(가장 최근에 저장한 결재선) | null(추천 없음).
+  /// 추천이 어디서 왔는지 — 'rule'(결재선 규칙) | 'org'(조직도의 상위자 사슬) | 'saved'(가장 최근에 저장한 결재선) | null(추천 없음).
   final String? suggestedSource;
+
+  /// 추천에 쓴 결재선 규칙('rule'일 때 — "규칙: 지출 100만 원 이상 — 본부장까지"로 보인다).
+  final ApprovalLineRule? suggestedRule;
 
   /// 추천 결재선의 역할(저장한 결재선에서 온 경우).
   final Map<String, LineRole> suggestedRoles;
@@ -782,6 +785,7 @@ class ApprovalLines {
     this.suggestedCcIds = const [],
     this.suggestedSource,
     this.suggestedRoles = const {},
+    this.suggestedRule,
   });
 
   factory ApprovalLines.fromJson(Map<String, dynamic> json) {
@@ -796,6 +800,11 @@ class ApprovalLines {
       suggestedCcIds: (suggested?['ccIds'] as List? ?? const []).cast<String>(),
       suggestedSource: suggested?['source'] as String?,
       suggestedRoles: rolesFromJson(suggested?['roles']),
+      suggestedRule: suggested?['rule'] is Map
+          ? ApprovalLineRule.fromJson(
+              (suggested!['rule'] as Map).cast<String, dynamic>(),
+            )
+          : null,
     );
   }
 }
@@ -1566,4 +1575,66 @@ class ApprovalNotification {
           createdAt: createdAt,
           read: true,
         );
+}
+
+/// 결재선 규칙 — 결재 종류(와 금액)마다 조직도 상위자 사슬을 어디까지 채울지(서버 approvalLineRules.js). [kind]는 결재 종류
+/// ('leave'·'expense'·'attendance'·'draft'·'trip'·'purchase'·'overtime'·'form') 또는 'any'(모든 종류), 관리자가 만든 양식은 'form'에
+/// [templateId]로 한 양식만. [mode] 'levels'(상위자 [levels]명까지) | 'position'(직책이 [positionLabel] 이상인 상위자가 나올 때까지).
+class ApprovalLineRule {
+  final String id;
+  final String kind;
+  final String? templateId;
+  final String? templateName;
+
+  /// 이 금액(원) 이상일 때만 — null이면 금액과 상관없이.
+  final int? minAmount;
+  final String mode;
+  final int? levels;
+  final String? positionLabel;
+
+  /// 사슬 뒤에 늘 붙일 결재자·늘 넣을 참조자.
+  final List<String> extraApproverIds;
+  final List<String> ccIds;
+
+  const ApprovalLineRule({
+    required this.id,
+    required this.kind,
+    this.templateId,
+    this.templateName,
+    this.minAmount,
+    this.mode = 'levels',
+    this.levels,
+    this.positionLabel,
+    this.extraApproverIds = const [],
+    this.ccIds = const [],
+  });
+
+  factory ApprovalLineRule.fromJson(Map<String, dynamic> json) =>
+      ApprovalLineRule(
+        id: json['id'] as String? ?? '',
+        kind: json['kind'] as String? ?? 'any',
+        templateId: json['templateId'] as String?,
+        templateName: json['templateName'] as String?,
+        minAmount: (json['minAmount'] as num?)?.toInt(),
+        mode: json['mode'] as String? ?? 'levels',
+        levels: (json['levels'] as num?)?.toInt(),
+        positionLabel: json['positionLabel'] as String?,
+        extraApproverIds: (json['extraApproverIds'] as List? ?? const [])
+            .whereType<String>()
+            .toList(),
+        ccIds: (json['ccIds'] as List? ?? const [])
+            .whereType<String>()
+            .toList(),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'kind': kind,
+    'templateId': templateId,
+    'minAmount': minAmount,
+    'mode': mode,
+    'levels': levels,
+    'positionLabel': positionLabel,
+    'extraApproverIds': extraApproverIds,
+    'ccIds': ccIds,
+  };
 }

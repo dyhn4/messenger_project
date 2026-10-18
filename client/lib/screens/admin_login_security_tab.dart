@@ -8,6 +8,7 @@ import '../widgets/app_toast.dart';
 import '../widgets/integration_widgets.dart';
 import '../l10n/tr.dart';
 import 'admin_group_mappings.dart';
+import 'admin_ldap_org_sync.dart';
 import 'admin_login_security_saml.dart';
 
 /// 관리자 콘솔 "로그인 보안" 탭 — 2단계 인증 정책, 회사 계정 로그인(Google·Microsoft — OIDC, 그리고 SAML 2.0), 사내 디렉터리
@@ -16,7 +17,8 @@ import 'admin_login_security_saml.dart';
 ///
 /// 비밀값(클라이언트 보안 비밀·서비스 계정 비밀번호)은 서버가 다시 내려주지 않아 "설정됨"으로만 보이고 바꿀 때만 넣는다. 디렉터리는
 /// 값을 저장 → "연결 시험" 통과 → 켜기 순서다(연결 값을 바꾸면 서버가 다시 끈다 — 메일 설정과 같다). SAML 칸은
-/// [AdminSamlSection], 그룹 규칙 목록은 [AdminGroupMappingsSection](따로 파일) — 켜기·끄기 스위치는 모두 바로 저장한다.
+/// [AdminSamlSection], 그룹 규칙 목록은 [AdminGroupMappingsSection], 디렉터리 칸 아래의 조직도 맞추기(부서 OU·상위자 manager)는
+/// [AdminLdapOrgSyncSection](따로 파일) — 켜기·끄기 스위치는 모두 바로 저장한다.
 class AdminLoginSecurityTab extends StatefulWidget {
   final Session session;
   const AdminLoginSecurityTab({super.key, required this.session});
@@ -639,6 +641,14 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
                 const ValueKey('admin-ldap-role'),
               ),
             ],
+          ),
+          const SizedBox(height: 16),
+          // ── 조직도 맞추기(admin_ldap_org_sync.dart — server/src/orgDirectorySync.js) ──
+          AdminLdapOrgSyncSection(
+            session: widget.session,
+            ldap: s.ldap,
+            busy: _busy,
+            onPatch: _patch,
           ),
           const Divider(height: 32),
 

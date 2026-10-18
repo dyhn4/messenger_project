@@ -1,10 +1,17 @@
-import { Router } from 'express';
+import ExcelJS from 'exceljs';
+import express, { Router } from 'express';
 import { teamAccess, userAccess } from './access.js';
 import { AUDIT, recordAudit } from './audit.js';
 import { safeAvatarColor } from './avatarRules.js';
 import {
   clearManagerReferences,
   countDepartments,
+  dropConcurrentSameAsPrimary,
+  listConcurrent,
+  moveConcurrentOnDelete,
+  removeConcurrent,
+  replaceConcurrent,
+  upsertConcurrent,
   deleteDepartment,
   findDepartment,
   findDepartmentByName,
@@ -20,14 +27,27 @@ import {
   updateDepartment,
 } from './db/queries/orgTree.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
+import { listPositionOptions } from './db/queries/positionOptions.js';
 import { findTeamById, listCoTeamMemberIds, listTeamMemberIds } from './db/queries/teams.js';
 import { isUuid } from './favoritesRules.js';
 import {
+  buildOrgExport,
   canEditOrgTree,
   canViewOrgTree,
+  checkConcurrent,
   checkDepartmentParent,
   checkManager,
+  CONCURRENT_MAX,
+  CONCURRENT_POSITION_MAX,
   DEPARTMENTS_MAX,
+  DEPT_COLUMNS,
+  departmentByPath,
+  importSummary,
+  MEMBER_COLUMNS,
+  ORG_SHEETS,
+  parseDepartmentPath,
+  planOrgImport,
+  reorderSiblings,
   directManagerOf,
   managerChain,
   orgScopeKey,
@@ -103,10 +123,18 @@ export async function backfillOrgTrees() {
  * 정할 수 없으면(팀 단위인데 팀이 없음) 빈 목록.
  */
 export async function managerChainFor({ settings, teamId, userId, isEligible, max }) {
+  return (await managerChainWithPositions({ settings, teamId, userId, isEligible, max })).chain;
+}
+
+/** 상위자 사슬과 그 사람들의 직책(결재선 규칙의 "직책 ○○ 이상까지" — approvalLineRules.js). `{ chain, positionOf(id) }`. */
+export async function managerChainWithPositions({ settings, teamId, userId, isEligible, max }) {
   const scopeKey = orgScopeKey(settings, teamId);
-  if (!scopeKey) return [];
+  if (!scopeKey) return { chain: [], positionOf: () => null };
   const { departments, members } = await loadOrgTree(scopeKey);
-  return managerChain(userId, { members, departments, isEligible, max });
+  return {
+    chain: managerChain(userId, { members, departments, isEligible, max }),
+    positionOf: (id) => members.get(id)?.position ?? null,
+  };
 }
 
 /** 이 요청의 조직도 범위와 권한 — `{ scopeKey, scope, teamId, team, canView, canEdit, viewer }` | `{ error, status }`. */
@@ -214,7 +242,7 @@ export function createOrgTreeRouter(io) {
   router.get('/org-tree', async (req, res) => {
     const ctx = await context(req, res, { teamId: req.query.teamId });
     if (!ctx) return;
-    const { departments, members } = await loadOrgTree(ctx.scopeKey);
+    const [{ departments, members }, concurrent] = await Promise.all([loadOrgTree(ctx.scopeKey), listConcurrent(ctx.scopeKey)]);
     const visibleIds = seesWholeDirectory(ctx.viewer)
       ? null
       : new Set([req.user.sub, ...(await listCoTeamMemberIds(req.user.sub))]);
@@ -242,6 +270,10 @@ export function createOrgTreeRouter(io) {
           effectiveManagerId: directManagerOf(m.id, { members, departments }),
         }))
         .sort((a, b) => a.name.localeCompare(b.name, 'ko')),
+      // 겸직 — 주 부서 말고 다른 부서에도 속한 사람(그 부서에서의 직책). 정지된 계정은 뺀다.
+      concurrent: concurrent
+        .filter((c) => members.get(c.userId) && !members.get(c.userId).suspendedAt)
+        .map((c) => ({ userId: c.userId, departmentId: c.departmentId, position: c.position ?? null })),
     });
   });
 
@@ -354,6 +386,8 @@ export function createOrgTreeRouter(io) {
     if (!ctx) return;
     const parent = dept.parentId ? await findDepartment(dept.parentId) : null;
     const moved = await moveDepartmentMembers(ctx.scopeKey, dept.id, parent ? { id: parent.id, name: parent.name } : null);
+    const { members } = await loadOrgTree(ctx.scopeKey);
+    await moveConcurrentOnDelete(ctx.scopeKey, dept.id, parent?.id ?? null, (userId) => members.get(userId)?.departmentId ?? null);
     await deleteDepartment(dept.id, parent?.id ?? null);
     audit(req, ctx, `부서 지우기${parent ? ` — 구성원·하위 부서는 ${parent.name}(으)로` : ''}`, dept.name);
     await notifyChanged(ctx, moved);
@@ -390,6 +424,7 @@ export function createOrgTreeRouter(io) {
     }
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
     await setMemberOrg(ctx.scopeKey, target.id, patch);
+    if (patch.departmentId) await dropConcurrentSameAsPrimary(target.id, patch.departmentId);
     recordAudit({
       actorId: req.user.sub,
       actorName: ctx.viewer?.name ?? ctx.viewer?.username ?? '알 수 없음',
@@ -405,7 +440,230 @@ export function createOrgTreeRouter(io) {
     res.json({ ok: true });
   });
 
+  // ── 겸직 ──
+
+  /** 겸직 넣기 `{ teamId?, departmentId, position? }` — 주 부서 말고 다른 부서에도(그 부서에서의 직책은 비우면 주 직책). */
+  router.post('/org-tree/members/:userId/concurrent', async (req, res) => {
+    const ctx = await context(req, res, { edit: true, teamId: req.body?.teamId });
+    if (!ctx) return;
+    const [{ departments, members }, concurrent] = await Promise.all([loadOrgTree(ctx.scopeKey), listConcurrent(ctx.scopeKey)]);
+    const target = members.get(req.params.userId);
+    if (!target || target.suspendedAt) return res.status(404).json({ error: '이 조직도에 없는 사람입니다.' });
+    const departmentId = isUuid(req.body?.departmentId) ? req.body.departmentId : null;
+    const current = concurrent.filter((c) => c.userId === target.id).map((c) => c.departmentId);
+    const check = checkConcurrent({ departments, member: target, departmentId, current });
+    if (check.error) return res.status(400).json({ error: check.error });
+    const position = typeof req.body?.position === 'string' ? req.body.position.trim().slice(0, CONCURRENT_POSITION_MAX) || null : null;
+    await upsertConcurrent({ scopeKey: ctx.scopeKey, userId: target.id, departmentId, position });
+    const dept = departments.find((d) => d.id === departmentId);
+    audit(req, ctx, `겸직 넣기 — ${target.name}${position ? `(${position})` : ''}`, dept.name);
+    await notifyChanged(ctx);
+    res.status(201).json({ ok: true });
+  });
+
+  /** 겸직 빼기 `?teamId=`. */
+  router.delete('/org-tree/members/:userId/concurrent/:departmentId', async (req, res) => {
+    const ctx = await context(req, res, { edit: true, teamId: req.query.teamId });
+    if (!ctx) return;
+    const dept = isUuid(req.params.departmentId) ? await findDepartment(req.params.departmentId) : null;
+    if (!dept || dept.scopeKey !== ctx.scopeKey || !isUuid(req.params.userId) || !(await removeConcurrent(req.params.userId, dept.id))) {
+      return res.status(404).json({ error: '겸직을 찾을 수 없습니다.' });
+    }
+    audit(req, ctx, '겸직 빼기', dept.name);
+    await notifyChanged(ctx);
+    res.json({ ok: true });
+  });
+
+  // ── 끌어다 놓아 옮기기 ──
+
+  /**
+   * 부서를 [parentId] 아래 [index]번째(0부터)로 `{ parentId, index }` — 조직도 그림·목록에서 끌어다 놓기. 자기 아래로는 못 옮기고(10단계까지),
+   * 같은 위 부서 안의 순서를 0부터 다시 매긴다.
+   */
+  router.post('/org-tree/departments/:id/place', async (req, res) => {
+    const dept = isUuid(req.params.id) ? await findDepartment(req.params.id) : null;
+    if (!dept) return res.status(404).json({ error: '부서를 찾을 수 없습니다.' });
+    const ctx = await context(req, res, { edit: true, scopeKey: dept.scopeKey });
+    if (!ctx) return;
+    const parentId = req.body?.parentId ?? null;
+    if (parentId !== null && !isUuid(parentId)) return res.status(400).json({ error: '위 부서를 찾을 수 없습니다.' });
+    const index = Number.isInteger(req.body?.index) ? req.body.index : null;
+    const departments = await listDepartments(ctx.scopeKey);
+    const check = checkDepartmentParent(departments, dept.id, parentId);
+    if (check.error) return res.status(400).json({ error: check.error });
+    const moved = (dept.parentId ?? null) !== parentId;
+    if (moved && departments.some((d) => d.id !== dept.id && (d.parentId ?? null) === parentId && d.name === dept.name)) {
+      return res.status(409).json({ error: '옮길 곳에 같은 이름의 부서가 있습니다.' });
+    }
+    const order = reorderSiblings(departments, dept.id, parentId, index);
+    for (let i = 0; i < order.length; i += 1) {
+      const d = departments.find((x) => x.id === order[i]);
+      const patch = {};
+      if ((d.sortOrder ?? 0) !== i) patch.sortOrder = i;
+      if (d.id === dept.id && moved) patch.parentId = parentId;
+      if (Object.keys(patch).length) await updateDepartment(d.id, patch);
+    }
+    if (moved) {
+      const parent = parentId ? departments.find((d) => d.id === parentId) : null;
+      audit(req, ctx, `위치 옮김 — ${parent ? `${parent.name} 아래로` : '맨 위로'}`, dept.name);
+    }
+    await notifyChanged(ctx);
+    res.json({ ok: true });
+  });
+
+  // ── 엑셀 내보내기·가져오기 ──
+
+  /** 조직도 엑셀 `?teamId=` — "부서"(경로·부서장 아이디·순서)·"구성원"(아이디·이름·부서 경로·직책·상위자 아이디·겸직) 시트. 고칠 수 있는 사람만. */
+  router.get('/org-tree/export', async (req, res) => {
+    const ctx = await context(req, res, { edit: true, teamId: req.query.teamId });
+    if (!ctx) return;
+    const [{ departments, members }, concurrentRows] = await Promise.all([loadOrgTree(ctx.scopeKey), listConcurrent(ctx.scopeKey)]);
+    const concurrent = new Map();
+    for (const c of concurrentRows) concurrent.set(c.userId, [...(concurrent.get(c.userId) ?? []), c.departmentId]);
+    const rows = buildOrgExport({ departments, members, concurrent });
+    const wb = new ExcelJS.Workbook();
+    const sheet = (name, columns, data) => {
+      const ws = wb.addWorksheet(name);
+      ws.addRow(columns);
+      ws.getRow(1).font = { bold: true };
+      for (const r of data) ws.addRow(r);
+      ws.columns.forEach((col, i) => {
+        col.width = Math.min(60, Math.max(10, ...[columns[i], ...data.map((r) => r[i])].map((v) => String(v ?? '').length * 1.6)));
+      });
+    };
+    sheet(ORG_SHEETS.departments, DEPT_COLUMNS, rows.departments);
+    sheet(ORG_SHEETS.members, MEMBER_COLUMNS, rows.members);
+    const buffer = await wb.xlsx.writeBuffer();
+    const name = `조직도-${ctx.team?.name ?? '회사'}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res
+      .set({
+        'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'content-disposition': `attachment; filename="orgchart.xlsx"; filename*=UTF-8''${encodeURIComponent(name)}`,
+      })
+      .send(Buffer.from(buffer));
+  });
+
+  /**
+   * 조직도 엑셀 가져오기 `?teamId=&dryRun=1`(본문은 xlsx 그대로, 5MB까지) — 내보낸 것과 같은 모양. 미리 보기(dryRun)면 바꿀 수와 오류만,
+   * 아니면 오류가 없을 때만 바꾼다(부서는 경로로 찾고 없으면 만들고, 사람은 아이디로 — 파일에 없는 것은 그대로 둔다). 상위자가 서로 물리는
+   * 줄은 건너뛰고 `skipped`로 알린다.
+   */
+  router.post(
+    '/org-tree/import',
+    express.raw({ type: () => true, limit: '5mb' }),
+    async (req, res) => {
+      const ctx = await context(req, res, { edit: true, teamId: req.query.teamId });
+      if (!ctx) return;
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: '엑셀 파일(.xlsx)을 보내세요.' });
+      const wb = new ExcelJS.Workbook();
+      try {
+        await wb.xlsx.load(req.body);
+      } catch {
+        return res.status(400).json({ error: '엑셀 파일(.xlsx)을 읽지 못했습니다.' });
+      }
+      const rowsOf = (name) => {
+        const ws = wb.getWorksheet(name);
+        if (!ws) return [];
+        const out = [];
+        ws.eachRow({ includeEmpty: false }, (row, n) => {
+          if (n === 1) return;
+          out.push((row.values ?? []).slice(1));
+        });
+        return out;
+      };
+      if (!wb.getWorksheet(ORG_SHEETS.departments) && !wb.getWorksheet(ORG_SHEETS.members)) {
+        return res.status(400).json({ error: `"${ORG_SHEETS.departments}"·"${ORG_SHEETS.members}" 시트가 없습니다. 내보낸 엑셀을 고쳐서 가져오세요.` });
+      }
+      const [{ departments, members }, positions] = await Promise.all([loadOrgTree(ctx.scopeKey), listPositionOptions()]);
+      const { plan, errors } = planOrgImport({
+        departments,
+        members,
+        deptRows: rowsOf(ORG_SHEETS.departments),
+        memberRows: rowsOf(ORG_SHEETS.members),
+        positionLabels: positions.length ? positions.map((p) => p.label) : null,
+      });
+      const summary = importSummary(plan);
+      if (req.query.dryRun === '1' || errors.length > 0) {
+        return res.status(errors.length > 0 && req.query.dryRun !== '1' ? 400 : 200).json({ summary, errors: errors.slice(0, 200), applied: false });
+      }
+      const result = await applyOrgImport(ctx, plan);
+      audit(req, ctx, `엑셀 가져오기 — 부서 ${summary.createDepartments}개 만듦, 사람 ${summary.memberChanges}명`, '조직도');
+      await notifyChanged(ctx, result.changedUserIds);
+      res.json({ summary, errors: [], applied: true, skipped: result.skipped });
+    },
+  );
+
   return router;
+}
+
+/**
+ * 엑셀 가져오기의 할 일([plan] — orgTreeRules.js planOrgImport)을 실제로 — 없는 부서를 위에서부터 만들고, 부서장·순서, 사람의 부서·직책·겸직을
+ * 바꾼 뒤, 상위자는 모든 부서가 정해진 다음에 정한다(서로가 서로의 상위자가 되는 줄은 건너뛰고 [skipped]로). `{ changedUserIds, skipped }`.
+ */
+async function applyOrgImport(ctx, plan) {
+  const scopeKey = ctx.scopeKey;
+  const departments = await listDepartments(scopeKey);
+  for (const names of plan.createPaths) {
+    if (departmentByPath(departments, names)) continue;
+    const parent = names.length > 1 ? departmentByPath(departments, names.slice(0, -1)) : null;
+    if (names.length > 1 && !parent) continue;
+    if (departments.length >= DEPARTMENTS_MAX) break;
+    const parentId = parent?.id ?? null;
+    const siblings = departments.filter((d) => (d.parentId ?? null) === parentId);
+    const row = await insertDepartment({
+      scopeKey,
+      parentId,
+      name: names[names.length - 1],
+      sortOrder: siblings.reduce((max, d) => Math.max(max, d.sortOrder ?? 0), -1) + 1,
+    });
+    departments.push(row);
+  }
+  const byPath = (path) => departmentByPath(departments, parseDepartmentPath(path));
+  const { members } = await loadOrgTree(scopeKey);
+  for (const h of plan.heads) {
+    const dept = byPath(h.path);
+    if (dept && (h.headId === null || members.has(h.headId))) await updateDepartment(dept.id, { headId: h.headId });
+  }
+  for (const o of plan.orders) {
+    const dept = byPath(o.path);
+    if (dept) await updateDepartment(dept.id, { sortOrder: o.sortOrder });
+  }
+  const changedUserIds = [];
+  for (const m of plan.members) {
+    const member = members.get(m.userId);
+    if (!member) continue;
+    const patch = {};
+    if ('departmentPath' in m) {
+      const dept = m.departmentPath === null ? null : byPath(m.departmentPath);
+      patch.departmentId = dept?.id ?? null;
+      patch.department = dept?.name ?? null;
+    }
+    if ('position' in m) patch.position = m.position;
+    if (Object.keys(patch).length) {
+      await setMemberOrg(scopeKey, m.userId, patch);
+      members.set(m.userId, { ...member, ...patch });
+      if (patch.departmentId) await dropConcurrentSameAsPrimary(m.userId, patch.departmentId);
+      changedUserIds.push(m.userId);
+    }
+    if ('concurrentPaths' in m) {
+      const primary = members.get(m.userId).departmentId ?? null;
+      const ids = [...new Set(m.concurrentPaths.map(byPath).filter(Boolean).map((d) => d.id))].filter((id) => id !== primary);
+      await replaceConcurrent(scopeKey, m.userId, ids.slice(0, CONCURRENT_MAX));
+    }
+  }
+  // 상위자 — 모든 부서가 정해진 뒤에, 하나씩 서로 물리는지 보면서.
+  const skipped = [];
+  for (const m of plan.members) {
+    if (!('managerId' in m)) continue;
+    const check = checkManager(m.userId, m.managerId, { members, departments });
+    if (check.error) {
+      skipped.push({ userId: m.userId, name: members.get(m.userId)?.name ?? null, error: check.error });
+      continue;
+    }
+    await setMemberOrg(scopeKey, m.userId, { managerId: m.managerId });
+    members.set(m.userId, { ...members.get(m.userId), managerId: m.managerId });
+  }
+  return { changedUserIds, skipped };
 }
 
 /** 팀에서 빠진 사람 — 그 팀 조직도에서 그 사람을 상위자로 정해 둔 칸을 비운다(teams.js가 부른다). */

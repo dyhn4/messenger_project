@@ -22,6 +22,14 @@ export async function findIdentityForUser(userId, provider) {
   return row ?? null;
 }
 
+/** [provider]에 연결된 것 전부 `[{ userId, subject }]` — 디렉터리로 조직도를 한꺼번에 맞출 때(orgDirectorySync.js). */
+export function listIdentitiesByProvider(provider) {
+  return db
+    .select({ userId: userIdentities.userId, subject: userIdentities.subject })
+    .from(userIdentities)
+    .where(eq(userIdentities.provider, provider));
+}
+
 export function listIdentitiesForUser(userId) {
   return db.select().from(userIdentities).where(eq(userIdentities.userId, userId)).orderBy(asc(userIdentities.createdAt));
 }

@@ -95,6 +95,25 @@ class OrgMember {
   );
 }
 
+/// 겸직 — [userId]가 주 부서 말고 [departmentId] 부서에도 속한다([position]은 그 부서에서의 직책, 없으면 주 직책). 그 사람의 상위자·
+/// 결재선은 주 부서를 따른다.
+class OrgConcurrent {
+  final String userId;
+  final String departmentId;
+  final String? position;
+  const OrgConcurrent({
+    required this.userId,
+    required this.departmentId,
+    this.position,
+  });
+
+  factory OrgConcurrent.fromJson(Map<String, dynamic> json) => OrgConcurrent(
+    userId: json['userId'] as String,
+    departmentId: json['departmentId'] as String,
+    position: json['position'] as String?,
+  );
+}
+
 class OrgTree {
   /// 'server'(회사 하나) | 'team'(팀마다).
   final String scope;
@@ -105,6 +124,9 @@ class OrgTree {
   final List<OrgDepartment> departments;
   final List<OrgMember> members;
 
+  /// 겸직(한 사람이 다른 부서에도 속함).
+  final List<OrgConcurrent> concurrent;
+
   OrgTree({
     required this.scope,
     required this.scopeKey,
@@ -113,6 +135,7 @@ class OrgTree {
     this.canEdit = false,
     this.departments = const [],
     this.members = const [],
+    this.concurrent = const [],
   });
 
   factory OrgTree.fromJson(Map<String, dynamic> json) => OrgTree(
@@ -128,6 +151,10 @@ class OrgTree {
     members: [
       for (final m in json['members'] as List? ?? const [])
         OrgMember.fromJson((m as Map).cast<String, dynamic>()),
+    ],
+    concurrent: [
+      for (final c in json['concurrent'] as List? ?? const [])
+        OrgConcurrent.fromJson((c as Map).cast<String, dynamic>()),
     ],
   );
 
@@ -166,6 +193,25 @@ class OrgTree {
     list.sort((a, b) => (a.id == head ? 0 : 1) - (b.id == head ? 0 : 1));
     return list;
   }
+
+  /// [departmentId] 부서에 겸직으로 속한 사람들(그 부서에서의 직책과 함께 — 이름순).
+  List<({OrgMember member, String? position})> concurrentMembersOf(
+    String departmentId,
+  ) {
+    final list = [
+      for (final c in concurrent)
+        if (c.departmentId == departmentId && member(c.userId) != null)
+          (member: member(c.userId)!, position: c.position),
+    ];
+    list.sort((a, b) => a.member.name.compareTo(b.member.name));
+    return list;
+  }
+
+  /// [userId]의 겸직 부서들.
+  List<OrgConcurrent> concurrentOf(String userId) => [
+    for (final c in concurrent)
+      if (c.userId == userId && department(c.departmentId) != null) c,
+  ];
 
   /// [id] 아래 모든 부서 id(자기 빼고).
   Set<String> descendantsOf(String id) {
@@ -213,5 +259,86 @@ class OrgTree {
 
     walk(null, 0);
     return out;
+  }
+}
+
+/// 조직도 엑셀 가져오기의 결과(미리 보기 또는 실제로 바꾼 뒤) — 서버 orgTree.js POST /org-tree/import.
+class OrgImportResult {
+  final int createDepartments;
+  final int headChanges;
+  final int orderChanges;
+  final int memberChanges;
+
+  /// 줄마다의 오류(시트·줄 번호·까닭) — 하나라도 있으면 바꾸지 않는다.
+  final List<({String? sheet, int? row, String message})> errors;
+
+  /// 바꿨는지(미리 보기면 false).
+  final bool applied;
+
+  /// 상위자가 서로 물려 건너뛴 사람들(바꾼 뒤에만).
+  final List<({String? name, String error})> skipped;
+
+  const OrgImportResult({
+    this.createDepartments = 0,
+    this.headChanges = 0,
+    this.orderChanges = 0,
+    this.memberChanges = 0,
+    this.errors = const [],
+    this.applied = false,
+    this.skipped = const [],
+  });
+
+  factory OrgImportResult.fromJson(Map<String, dynamic> json) {
+    final summary = (json['summary'] as Map? ?? const {})
+        .cast<String, dynamic>();
+    int n(String key) => (summary[key] as num?)?.toInt() ?? 0;
+    return OrgImportResult(
+      createDepartments: n('createDepartments'),
+      headChanges: n('headChanges'),
+      orderChanges: n('orderChanges'),
+      memberChanges: n('memberChanges'),
+      errors: [
+        for (final e in json['errors'] as List? ?? const [])
+          if (e is Map)
+            (
+              sheet: e['sheet'] as String?,
+              row: (e['row'] as num?)?.toInt(),
+              message: e['message'] as String? ?? '',
+            ),
+      ],
+      applied: json['applied'] == true,
+      skipped: [
+        for (final e in json['skipped'] as List? ?? const [])
+          if (e is Map)
+            (name: e['name'] as String?, error: e['error'] as String? ?? ''),
+      ],
+    );
+  }
+}
+
+/// 사내 디렉터리와 조직도 맞추기 결과(관리자 콘솔 — 서버 orgDirectorySync.js).
+class DirectoryOrgSyncResult {
+  final int scanned;
+  final int linked;
+  final int moved;
+  final int managersSet;
+  final int departmentsCreated;
+  const DirectoryOrgSyncResult({
+    this.scanned = 0,
+    this.linked = 0,
+    this.moved = 0,
+    this.managersSet = 0,
+    this.departmentsCreated = 0,
+  });
+
+  factory DirectoryOrgSyncResult.fromJson(Map<String, dynamic> json) {
+    int n(String key) => (json[key] as num?)?.toInt() ?? 0;
+    return DirectoryOrgSyncResult(
+      scanned: n('scanned'),
+      linked: n('linked'),
+      moved: n('moved'),
+      managersSet: n('managersSet'),
+      departmentsCreated: n('departmentsCreated'),
+    );
   }
 }

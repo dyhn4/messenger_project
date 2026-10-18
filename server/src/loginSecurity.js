@@ -331,7 +331,10 @@ export async function resolveDirectoryLogin({ localUser, typedUsername, profile,
     await touchIdentity(identity.id);
     const patch = {};
     if (profile.name && profile.name !== user.name) patch.name = profile.name.slice(0, 40);
-    if (profile.department && profile.department !== user.department) patch.department = profile.department.slice(0, 60);
+    // 부서 속성 글자는 'attribute' 방식일 때만(OU 경로 방식은 orgDirectorySync.js가 트리로 맞춘다, 'off'면 그대로).
+    if ((settings.ldapOrgSource ?? 'attribute') === 'attribute' && profile.department && profile.department !== user.department) {
+      patch.department = profile.department.slice(0, 60);
+    }
     if (profile.title && profile.title !== user.position) patch.position = profile.title.slice(0, 40);
     if (user.authSource !== 'ldap') patch.authSource = 'ldap';
     if ('department' in patch) Object.assign(patch, await directoryDepartmentFields(patch.department));
@@ -364,7 +367,7 @@ export async function resolveDirectoryLogin({ localUser, typedUsername, profile,
     name: profile.name,
     role: settings.ldapDefaultRole ?? 'member',
     authSource: 'ldap',
-    department: profile.department,
+    department: (settings.ldapOrgSource ?? 'attribute') === 'attribute' ? profile.department : null,
     position: profile.title,
   });
   if (made.error) return { status: 409, error: made.error };
@@ -403,6 +406,10 @@ export async function directoryAccountActive(user, { stillActive = ldapStillActi
   if (r.active && r.profile && io) {
     import('./groupSync.js')
       .then(({ syncDirectoryGroups }) => syncDirectoryGroups(io, user, { source: 'ldap', groups: r.profile.groups }))
+      .catch(() => {});
+    // 부서(OU)·상위자(manager)도 디렉터리대로(orgDirectorySync.js — 켰을 때만).
+    import('./orgDirectorySync.js')
+      .then(({ syncDirectoryOrgForUser }) => syncDirectoryOrgForUser(io, user.id, r.profile, settings))
       .catch(() => {});
   }
   return r.active;

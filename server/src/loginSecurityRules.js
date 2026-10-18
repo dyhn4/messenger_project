@@ -10,6 +10,8 @@ import { enabledSsoProviders, isDomainName, isTenantId, parseDomainList, ssoConf
 export const OTP_POLICIES = Object.freeze(['optional', 'admins', 'all']);
 export const AUTO_CREATE_ROLES = Object.freeze(['guest', 'member']);
 export const AUTH_SOURCES = Object.freeze(['local', 'ldap', 'sso']);
+/** 디렉터리로 부서를 맞출 방식 — 부서 속성 글자(맨 위 부서로)·OU 경로(트리로)·안 맞춤. */
+export const LDAP_ORG_SOURCES = Object.freeze(['attribute', 'ou', 'off']);
 
 /** 이 사람이 2단계 인증을 꼭 써야 하는지 — 'admins'는 계정 등급 관리자와 서버 운영자. */
 export function otpRequiredFor(policy, user) {
@@ -135,7 +137,21 @@ export function parseLoginSecurityInput(body) {
     if (problem) return fail(problem);
     fields.ldapUserFilter = r.value;
   }
-  for (const key of ['ldapNameAttr', 'ldapEmailAttr', 'ldapDepartmentAttr', 'ldapTitleAttr']) {
+  // 사내 디렉터리로 조직도 맞추기(orgDirectorySync.js).
+  if ('ldapOrgSource' in b) {
+    if (!LDAP_ORG_SOURCES.includes(b.ldapOrgSource)) return fail('부서를 맞출 방식이 올바르지 않습니다.');
+    fields.ldapOrgSource = b.ldapOrgSource;
+  }
+  if ('ldapOrgBaseDn' in b) {
+    const r = textField(b, 'ldapOrgBaseDn');
+    if (r.error) return fail('부서 트리의 시작 위치(DN)가 올바르지 않습니다.');
+    fields.ldapOrgBaseDn = r.value;
+  }
+  if ('ldapManagerSync' in b) {
+    if (typeof b.ldapManagerSync !== 'boolean') return fail('ldapManagerSync는 참/거짓이어야 합니다.');
+    fields.ldapManagerSync = b.ldapManagerSync;
+  }
+  for (const key of ['ldapNameAttr', 'ldapEmailAttr', 'ldapDepartmentAttr', 'ldapTitleAttr', 'ldapManagerAttr']) {
     if (key in b) {
       const r = textField(b, key, { max: 60, required: true });
       if (r.error || !/^[A-Za-z][A-Za-z0-9-]*$/.test(r.value ?? '')) return fail('속성 이름은 영문·숫자(예: displayName)로 넣으세요.');
@@ -216,6 +232,12 @@ export function loginSecurityView(settings, { redirectUri = null, webBase = null
       autoCreate: settings.ldapAutoCreate !== false,
       defaultRole: settings.ldapDefaultRole ?? 'member',
       testedAt: settings.ldapTestedAt ? new Date(settings.ldapTestedAt).getTime() : null,
+      // 조직도 맞추기 — 부서 방식·부서 트리의 시작 OU·상위자(manager) 맞추기와 그 속성. 계정 단위 조직도에서만 쓴다([orgSyncAvailable]).
+      orgSource: settings.ldapOrgSource ?? 'attribute',
+      orgBaseDn: settings.ldapOrgBaseDn ?? '',
+      managerSync: !!settings.ldapManagerSync,
+      managerAttr: settings.ldapManagerAttr ?? 'manager',
+      orgSyncAvailable: settings.orgScope === 'account',
       problem: ldapConfigProblem(settings),
     },
   };

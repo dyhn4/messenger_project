@@ -363,6 +363,14 @@ class LdapSettings {
   final DateTime? testedAt;
   final String? problem;
 
+  /// 조직도 맞추기 — 부서 방식('attribute' 부서 속성 글자 | 'ou' OU 경로를 트리로 | 'off'), 부서 트리의 시작 OU, 상위자(manager)
+  /// 맞추기와 그 속성. [orgSyncAvailable]은 계정 단위 조직도인지(팀 단위면 쓸 수 없다).
+  final String orgSource;
+  final String orgBaseDn;
+  final bool managerSync;
+  final String managerAttr;
+  final bool orgSyncAvailable;
+
   const LdapSettings({
     required this.enabled,
     required this.url,
@@ -379,6 +387,11 @@ class LdapSettings {
     required this.defaultRole,
     this.testedAt,
     this.problem,
+    this.orgSource = 'attribute',
+    this.orgBaseDn = '',
+    this.managerSync = false,
+    this.managerAttr = 'manager',
+    this.orgSyncAvailable = false,
   });
 
   factory LdapSettings.fromJson(Map<String, dynamic> j) => LdapSettings(
@@ -399,6 +412,11 @@ class LdapSettings {
         ? DateTime.fromMillisecondsSinceEpoch((j['testedAt'] as num).toInt())
         : null,
     problem: j['problem'] as String?,
+    orgSource: j['orgSource'] as String? ?? 'attribute',
+    orgBaseDn: j['orgBaseDn'] as String? ?? '',
+    managerSync: j['managerSync'] == true,
+    managerAttr: j['managerAttr'] as String? ?? 'manager',
+    orgSyncAvailable: j['orgSyncAvailable'] == true,
   );
 }
 

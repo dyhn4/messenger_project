@@ -443,6 +443,31 @@ export const departments = pgTable(
 );
 
 /**
+ * 겸직 — 한 사람이 주 부서(users·team_members의 department_id) 말고 다른 부서에도 속한다. [position]은 그 부서에서의 직책(비우면 주
+ * 직책). 조직도에서 그 부서 구성원으로 "겸직"과 함께 보이고 부서장으로 정할 수도 있지만, 그 사람의 상위자·결재선은 주 부서를 따른다.
+ * 부서가 지워지면 위 부서로 올라가고(주 부서와 같아지면 지움), 범위([scopeKey])는 부서의 범위와 같다. 한 사람에 5개까지.
+ */
+export const departmentMemberships = pgTable(
+  'department_memberships',
+  {
+    scopeKey: text('scope_key').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    departmentId: uuid('department_id')
+      .notNull()
+      .references(() => departments.id, { onDelete: 'cascade' }),
+    position: text('position'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.departmentId] }),
+    index('department_memberships_scope_idx').on(t.scopeKey),
+    index('department_memberships_department_idx').on(t.departmentId),
+  ],
+);
+
+/**
  * 서버 운영자가 관리하는 "직책 목록" — 관리자 콘솔 "회원" 탭, 팀 설정의 "직책 수정", 프로필
  * 카드의 직책 수정, "팀 초대 링크"의 "부여할 직책"이 전부 이 목록에서 고르게 한다(자유 입력
  * 대신, 오탈자/표기 불일치 방지). orgScope(팀/계정 단위)와 무관하게 항상 이 목록을 쓴다 —
@@ -583,6 +608,13 @@ export const serverSettings = pgTable('server_settings', {
   ldapDefaultRole: text('ldap_default_role').notNull().default('member'),
   // 연결 시험을 통과한 시각 — 연결 값을 바꾸면 지워지고 꺼진다(메일 설정과 같은 규칙).
   ldapTestedAt: timestamp('ldap_tested_at', { withTimezone: true }),
+  // 사내 디렉터리로 조직도 맞추기(orgDirectorySync.js) — [ldapOrgSource] 'attribute'(부서 속성 글자 — 맨 위 부서로, 예전 방식) | 'ou'(그
+  // 사람 DN의 OU 경로를 부서 트리로 — [ldapOrgBaseDn] 아래부터) | 'off'. [ldapManagerSync]면 [ldapManagerAttr](AD는 manager — 상위자의 DN)로
+  // 상위자를 정한다. 계정 단위 조직도에서만 쓴다(팀 단위면 어느 팀 조직도인지 알 수 없다).
+  ldapOrgSource: text('ldap_org_source').notNull().default('attribute'),
+  ldapOrgBaseDn: text('ldap_org_base_dn'),
+  ldapManagerSync: boolean('ldap_manager_sync').notNull().default(false),
+  ldapManagerAttr: text('ldap_manager_attr').notNull().default('manager'),
   // 회사 계정 로그인(SAML 2.0 — OIDC를 못 쓰는 IdP: ADFS·Okta·OneLogin·Keycloak 등, saml.js). [samlLabel]은 로그인 단추 글,
   // IdP 쪽 값은 로그인 주소([samlEntryPoint] — HTTP-Redirect), 발급자(entityID), 서명 인증서(PEM — 여럿이면 이어 붙임), 로그아웃
   // 주소(SLO), 받을 속성 이름(이메일·이름·그룹). 이 서버(SP)의 서명 키·인증서는 처음 켤 때 서버가 만든다(키는 암호화).
@@ -3154,6 +3186,33 @@ export const approvalLines = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('approval_lines_owner_idx').on(t.ownerId, t.scopeKey)],
+);
+
+/**
+ * 결재선 규칙(approvalLineRules.js) — 결재 종류(와 금액)마다 상위자 사슬을 어디까지 채울지. 예: 휴가는 상위자 1명(팀장까지), 지출은
+ * 100만 원 미만이면 2명·이상이면 직책 '본부장' 이상이 나올 때까지. 그룹웨어 범위([scopeKey] — 회사 하나 'server' 또는 팀 id)마다 따로.
+ *  - [kind]: 결재 종류(approvalRules.js APPROVAL_KINDS) 또는 'any'(모든 종류). 관리자가 만든 양식은 'form'이고 [templateId]로 한 양식만.
+ *  - [minAmount]: 이 금액(원) 이상일 때만(null이면 금액과 상관없이) — 같은 종류에서 문서 금액 이하인 것 중 가장 큰 것을 고른다.
+ *  - [mode] 'levels'(상위자 [levels]명까지) | 'position'(직책 서열이 [positionLabel] 이상인 상위자가 나올 때까지 — 그 사람 포함).
+ *  - [extraApproverIds]: 사슬 뒤에 늘 붙일 결재자(예: 재무팀장·대표), [ccIds]: 늘 넣을 참조자.
+ * 규칙은 결재선을 **미리 채울 때만** 쓴다 — 올리는 사람이 고칠 수 있다.
+ */
+export const approvalLineRules = pgTable(
+  'approval_line_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    kind: text('kind').notNull(),
+    templateId: uuid('template_id').references(() => approvalTemplates.id, { onDelete: 'cascade' }),
+    minAmount: bigint('min_amount', { mode: 'number' }),
+    mode: text('mode').notNull().default('levels'),
+    levels: integer('levels'),
+    positionLabel: text('position_label'),
+    extraApproverIds: jsonb('extra_approver_ids').notNull().default([]),
+    ccIds: jsonb('cc_ids').notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('approval_line_rules_scope_idx').on(t.scopeKey, t.kind)],
 );
 
 /**

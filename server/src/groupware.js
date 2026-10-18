@@ -111,7 +111,10 @@ import { HOLIDAYS } from './holidays.js';
 import { fileFieldsDenial, sanitizeFileSize } from './messageLimits.js';
 import { updateUser } from './db/queries/users.js';
 import { optionsView } from './groupwareOptions.js';
-import { managerChainFor } from './orgTree.js';
+import { managerChainWithPositions } from './orgTree.js';
+import { applyLineRule, LINE_RULES_MAX, lineRuleDto, parseLineRule, pickLineRule, RULE_CHAIN_MAX } from './approvalLineRules.js';
+import { countLineRules, deleteLineRule, insertLineRule, listLineRules, updateLineRule } from './db/queries/approvalLineRules.js';
+import { listPositionOptions } from './db/queries/positionOptions.js';
 import {
   CLOCK_IN_MODES,
   effectiveHours,
@@ -604,19 +607,53 @@ export function createGroupwareRouter(io) {
 
   // ── 저장한 결재선 ──
 
+  /**
+   * 저장한 결재선과 새 결재에 미리 채울 결재선 `?kind=&templateId=&amount=` — [kind]·[amount](원)를 주면 그 문서에 맞는 결재선 규칙
+   * (approvalLineRules.js)대로 상위자 사슬을 자르고(직책 기준이면 그 직책 이상까지) 늘 붙일 결재자·참조자를 더한다(`source: 'rule'`, `rule`).
+   * 규칙이 없거나 종류를 안 주면 예전처럼 사슬 5명, 사슬도 없으면 가장 최근에 저장한 결재선.
+   */
   router.get(
     '/groupware/approval-lines',
     withContext(async (req, res, ctx) => {
-      const [lines, candidates] = await Promise.all([listApprovalLines(ctx.user.id, ctx.scopeKey), approverCandidates(ctx)]);
+      const [lines, candidates, rules] = await Promise.all([
+        listApprovalLines(ctx.user.id, ctx.scopeKey),
+        approverCandidates(ctx),
+        listLineRules(ctx.scopeKey),
+      ]);
+      const kind = typeof req.query.kind === 'string' ? req.query.kind : null;
+      const amount = Number.isFinite(Number(req.query.amount)) && req.query.amount !== '' ? Number(req.query.amount) : null;
+      const rule = kind
+        ? pickLineRule(
+            rules.map((r) => r.rule),
+            { kind, templateId: isUuid(req.query.templateId) ? req.query.templateId : null, amount },
+          )
+        : null;
       // 조직도의 상위자 사슬(orgTree.js) — 결재자로 고를 수 있는 사람만, 가까운 상위자부터. 조직도는 부서·직책 설정을 따르므로
-      // 그룹웨어가 회사 전체여도 팀 단위 조직도면 지금 고른 팀의 조직도를 쓴다.
-      const managerChain = await managerChainFor({
+      // 그룹웨어가 회사 전체여도 팀 단위 조직도면 지금 고른 팀의 조직도를 쓴다. 규칙이 있으면 더 길게 읽어 규칙이 자른다.
+      const { chain: managerChain, positionOf } = await managerChainWithPositions({
         settings: ctx.settings,
         teamId: ctx.teamId ?? (isUuid(req.query.teamId) ? req.query.teamId : null),
         userId: ctx.user.id,
         isEligible: (id) => candidates.has(id),
-        max: ORG_CHAIN_MAX,
-      }).catch(() => []);
+        max: rule ? RULE_CHAIN_MAX : ORG_CHAIN_MAX,
+      }).catch(() => ({ chain: [], positionOf: () => null }));
+      let suggested = suggestApprovalLine({ savedLines: lines, managerChain });
+      if (rule) {
+        const ranks = new Map((await listPositionOptions()).map((o) => [o.label, o.sortOrder ?? 0]));
+        const applied = applyLineRule(rule, {
+          chain: managerChain,
+          authorId: ctx.user.id,
+          rankOf: (id) => ranks.get(positionOf(id)) ?? null,
+          rankOfLabel: (label) => ranks.get(label) ?? null,
+        });
+        const keep = (id) => candidates.has(id);
+        suggested = {
+          approverIds: applied.approverIds.filter(keep),
+          ccIds: applied.ccIds.filter(keep),
+          source: 'rule',
+          rule: lineRuleDto(rule, { templateName: rules.find((r) => r.rule.id === rule.id)?.templateName ?? null }),
+        };
+      }
       res.json({
         lines: lines.map((l) => ({
           id: l.id,
@@ -626,11 +663,67 @@ export function createGroupwareRouter(io) {
           roles: rolesOfLine(l.line),
           createdAt: ms(l.createdAt),
         })),
-        // 새 결재를 올릴 때 미리 채울 결재선 — 조직도 상위자 사슬, 없으면 가장 최근에 저장한 결재선(approvalRules.js suggestApprovalLine).
-        suggested: suggestApprovalLine({ savedLines: lines, managerChain }),
+        // 새 결재를 올릴 때 미리 채울 결재선 — 결재선 규칙, 조직도 상위자 사슬, 가장 최근에 저장한 결재선 순서(approvalRules.js suggestApprovalLine).
+        suggested,
       });
     }),
   );
+
+  // ── 결재선 규칙(approvalLineRules.js) ──
+
+  /** 이 범위의 결재선 규칙 — 누구나 본다(결재를 올릴 때 "규칙: 휴가 — 상위자 1명까지"로 보인다). */
+  router.get(
+    '/groupware/line-rules',
+    withContext(async (req, res, ctx) => {
+      res.json((await listLineRules(ctx.scopeKey)).map((r) => lineRuleDto(r.rule, { templateName: r.templateName ?? null })));
+    }),
+  );
+
+  /** 규칙 입력 검사 — 직책 목록과 결재자 후보로. */
+  async function parsedRule(ctx, body) {
+    const [positions, candidates] = await Promise.all([listPositionOptions(), approverCandidates(ctx)]);
+    return parseLineRule(body, { positionLabels: positions.map((o) => o.label), isCandidate: (id) => candidates.has(id) });
+  }
+
+  /** 규칙 만들기(그룹웨어 관리자) `{ kind, templateId?, minAmount?, mode, levels?, positionLabel?, extraApproverIds?, ccIds? }`. */
+  router.post(
+    '/groupware/line-rules',
+    withContext(async (req, res, ctx) => {
+      if (!ctx.isManager) return fail(res, { error: '결재선 규칙은 그룹웨어 관리자만 정할 수 있습니다.', status: 403 });
+      const parsed = await parsedRule(ctx, req.body);
+      if (parsed.error) return fail(res, parsed);
+      if ((await countLineRules(ctx.scopeKey)) >= LINE_RULES_MAX) {
+        return fail(res, { error: `결재선 규칙은 ${LINE_RULES_MAX}개까지입니다.` });
+      }
+      const row = await insertLineRule({ scopeKey: ctx.scopeKey, ...parsed.fields });
+      res.status(201).json(lineRuleDto(row));
+    }),
+  );
+
+  router.put(
+    '/groupware/line-rules/:id',
+    withContext(async (req, res, ctx) => {
+      if (!ctx.isManager) return fail(res, { error: '결재선 규칙은 그룹웨어 관리자만 정할 수 있습니다.', status: 403 });
+      if (!isUuid(req.params.id)) return fail(res, { error: '규칙을 찾을 수 없습니다.', status: 404 });
+      const parsed = await parsedRule(ctx, req.body);
+      if (parsed.error) return fail(res, parsed);
+      const row = await updateLineRule(req.params.id, ctx.scopeKey, parsed.fields);
+      if (!row) return fail(res, { error: '규칙을 찾을 수 없습니다.', status: 404 });
+      res.json(lineRuleDto(row));
+    }),
+  );
+
+  router.delete(
+    '/groupware/line-rules/:id',
+    withContext(async (req, res, ctx) => {
+      if (!ctx.isManager) return fail(res, { error: '결재선 규칙은 그룹웨어 관리자만 정할 수 있습니다.', status: 403 });
+      if (!isUuid(req.params.id) || !(await deleteLineRule(req.params.id, ctx.scopeKey))) {
+        return fail(res, { error: '규칙을 찾을 수 없습니다.', status: 404 });
+      }
+      res.json({ ok: true });
+    }),
+  );
+
 
   router.post(
     '/groupware/approval-lines',

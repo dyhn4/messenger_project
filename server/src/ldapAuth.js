@@ -174,3 +174,34 @@ export async function ldapCheckPasswordBySubject({ settings, subject, password, 
     await closeQuietly(client);
   }
 }
+
+/** [dn]의 사람 정보(서비스 계정으로) — 상위자(manager 속성의 DN)를 이 앱 계정으로 바꿀 때. 못 찾으면 null. */
+export async function ldapProfileByDn({ settings, dn, clientFactory = defaultLdapClient }) {
+  if (!dn) return null;
+  const found = await searchOne(settings, { base: dn, scope: 'base', filter: '(objectClass=*)' }, clientFactory);
+  return found.entry ? entryToProfile(found.entry, settings) : null;
+}
+
+/**
+ * 디렉터리의 사람 전부(조직도 한꺼번에 맞추기 — 관리자 콘솔) — 사용자 검색 조건의 {username}을 *로 바꿔 Base DN 아래를 쪽 단위로 읽는다
+ * ([max]명까지). 사람 정보 목록 | `{ error }`.
+ */
+export async function ldapListProfiles({ settings, max = 20_000, clientFactory = defaultLdapClient }) {
+  const client = clientFactory(settings);
+  try {
+    if (settings.ldapBindDn) await client.bind(settings.ldapBindDn, decryptField(settings.ldapBindPasswordEnc) ?? '');
+    const filter = String(settings.ldapUserFilter || '(objectClass=user)').split('{username}').join('*');
+    const { searchEntries } = await client.search(String(settings.ldapBaseDn).trim(), {
+      scope: 'sub',
+      filter: filter.startsWith('(') ? filter : `(${filter})`,
+      attributes: ldapAttributes(settings),
+      paged: { pageSize: 500 },
+      sizeLimit: max,
+    });
+    return searchEntries.slice(0, max).map((e) => entryToProfile(e, settings));
+  } catch (err) {
+    return { error: err?.message ?? String(err) };
+  } finally {
+    await closeQuietly(client);
+  }
+}

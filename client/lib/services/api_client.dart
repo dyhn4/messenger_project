@@ -1219,6 +1219,89 @@ class ApiClient {
     await _put('/api/org-tree/members/$userId', {'teamId': ?teamId, ...patch});
   }
 
+  /// 겸직 넣기 — 주 부서 말고 [departmentId] 부서에도([position]은 그 부서에서의 직책, 비우면 주 직책).
+  Future<void> addConcurrentDepartment(
+    String userId, {
+    String? teamId,
+    required String departmentId,
+    String? position,
+  }) async {
+    await _post('/api/org-tree/members/$userId/concurrent', {
+      'teamId': ?teamId,
+      'departmentId': departmentId,
+      'position': ?position,
+    });
+  }
+
+  Future<void> removeConcurrentDepartment(
+    String userId,
+    String departmentId, {
+    String? teamId,
+  }) async {
+    await _delete(
+      '/api/org-tree/members/$userId/concurrent/$departmentId'
+      '${teamId == null ? '' : '?teamId=${Uri.encodeQueryComponent(teamId)}'}',
+    );
+  }
+
+  /// 끌어다 놓기 — [id] 부서를 [parentId](null이면 맨 위) 아래 [index]번째(0부터)로.
+  Future<void> placeDepartment(
+    String id, {
+    required String? parentId,
+    required int index,
+  }) async {
+    await _post('/api/org-tree/departments/$id/place', {
+      'parentId': parentId,
+      'index': index,
+    });
+  }
+
+  /// 조직도 엑셀 내려받기 경로(Session.downloadAuthedFile에 넘긴다).
+  String orgTreeExportPath({String? teamId}) => teamId == null
+      ? '/api/org-tree/export'
+      : '/api/org-tree/export?teamId=${Uri.encodeQueryComponent(teamId)}';
+
+  /// 조직도 엑셀 가져오기 — [dryRun]이면 바꾸지 않고 미리 보기만. 오류가 있어도(400) 결과로 돌려준다(줄마다의 오류).
+  Future<OrgImportResult> importOrgTree(
+    List<int> bytes, {
+    String? teamId,
+    bool dryRun = false,
+  }) async {
+    final params = <String, String>{
+      'teamId': ?teamId,
+      if (dryRun) 'dryRun': '1',
+    };
+    final res = await _send(
+      () => _client.post(
+        _uri(
+          '/api/org-tree/import',
+        ).replace(queryParameters: params.isEmpty ? null : params),
+        headers: {
+          ..._authHeaders,
+          'Content-Type':
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+        body: bytes,
+      ),
+    );
+    final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+    if (decoded is Map && decoded['summary'] is Map) {
+      return OrgImportResult.fromJson(decoded.cast<String, dynamic>());
+    }
+    throw ApiException(
+      (decoded is Map ? decoded['error'] as String? : null) ??
+          tr('요청이 실패했습니다.'),
+      statusCode: res.statusCode,
+    );
+  }
+
+  /// 관리자 콘솔 — 지금 사내 디렉터리와 조직도 맞추기(부서 OU·상위자 manager).
+  Future<DirectoryOrgSyncResult> syncDirectoryOrg() async =>
+      DirectoryOrgSyncResult.fromJson(
+        (await _post('/api/admin/login-security/ldap-org-sync', {}) as Map)
+            .cast<String, dynamic>(),
+      );
+
   // ── 외부 연동(웹훅·슬래시 명령·개인 API 토큰 — 서버 integrations.js) ──
 
   Map<String, dynamic> _map(Object? json) =>

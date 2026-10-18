@@ -40,9 +40,44 @@ class GroupwareApi {
       ApprovalCandidate.fromJson(c),
   ];
 
-  Future<ApprovalLines> approvalLines() async => ApprovalLines.fromJson(
-    await _getMap('/api/groupware/approval-lines${_query()}'),
+  /// 저장한 결재선과 미리 채울 결재선 — [kind]·[amount](원)·[templateId]를 주면 그 문서에 맞는 결재선 규칙대로(서버
+  /// approvalLineRules.js). 금액을 바꾸면 다시 부른다.
+  Future<ApprovalLines> approvalLines({
+    String? kind,
+    String? templateId,
+    int? amount,
+  }) async => ApprovalLines.fromJson(
+    await _getMap(
+      '/api/groupware/approval-lines${_query({'kind': kind, 'templateId': templateId, 'amount': amount?.toString()})}',
+    ),
   );
+
+  /// 이 범위의 결재선 규칙.
+  Future<List<ApprovalLineRule>> lineRules() async => [
+    for (final r in await _getList('/api/groupware/line-rules${_query()}'))
+      ApprovalLineRule.fromJson(r),
+  ];
+
+  /// 규칙 만들기·바꾸기(그룹웨어 관리자) — [rule.id]가 비어 있으면 새로.
+  Future<ApprovalLineRule> saveLineRule(ApprovalLineRule rule) async =>
+      ApprovalLineRule.fromJson(
+        (await _api.requestJson(
+                  rule.id.isEmpty ? 'POST' : 'PUT',
+                  rule.id.isEmpty
+                      ? '/api/groupware/line-rules'
+                      : '/api/groupware/line-rules/${rule.id}',
+                  body: _body(rule.toJson()),
+                )
+                as Map)
+            .cast<String, dynamic>(),
+      );
+
+  Future<void> deleteLineRule(String id) async {
+    await _api.requestJson(
+      'DELETE',
+      '/api/groupware/line-rules/$id${_query()}',
+    );
+  }
 
   Future<ApprovalLine> saveApprovalLine({
     required String name,

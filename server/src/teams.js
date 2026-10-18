@@ -68,7 +68,7 @@ import {
   teamMemberCandidates,
 } from './userDirectory.js';
 import { checkIconRef } from './fileRefs.js';
-import { deleteDepartmentsOfScope } from './db/queries/orgTree.js';
+import { clearConcurrentForScopeUser, deleteDepartmentsOfScope } from './db/queries/orgTree.js';
 import { departmentForText, forgetTeamManager } from './orgTree.js';
 import { orgScopeKey } from './orgTreeRules.js';
 import { signFileUrl } from './upload.js';
@@ -689,6 +689,8 @@ export async function removeUserFromTeam(io, team, targetId, { actorId = null, u
   const roomRemovals = await removeTeamMember(team.id, targetId, { departedName: targetName });
   await forgetTeamManager(team.id, targetId).catch((err) => console.error('[orgTree] 상위자 정리 실패:', err?.message ?? err));
   await removeGroupSyncGrant(targetId, team.id).catch(() => {});
+  // 팀 조직도의 겸직도 지운다(팀 단위 조직도 — 계정 단위면 범위가 'server'라 해당이 없다).
+  await clearConcurrentForScopeUser(team.id, targetId).catch(() => {});
   io.to(`user:${targetId}`).emit('team:left', { teamId: team.id, teamName: team.name });
   await notifyRemovedFromTeamRooms(io, { userId: targetId, userName: targetName, actorId, removals: roomRemovals });
   return roomRemovals;

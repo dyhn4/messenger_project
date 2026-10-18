@@ -686,6 +686,22 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   만듦 — 여러 번 돌아도 같음). 팀 설정·관리자 콘솔이 글자로 부서를 보내거나 사내 디렉터리(LDAP)가 부서 속성을 알려 줘도 같은 방식으로
   트리에 이어지고, 지우면 부서도 비웁니다. 팀에서 빠진 사람을 상위자·부서장으로 정해 둔 칸은 그 팀 조직도에서 비우고, 팀을 지우면 그
   팀의 부서도 지웁니다.
+- **겸직** — 사람 ⋯ 메뉴의 **겸직 추가**로 주 부서 말고 다른 부서에도 넣습니다(5개 부서까지, 그 부서에서의 직책을 따로 정할 수 있음 —
+  `department_memberships`). 그 부서 구성원 목록에 "겸직"과 함께 보이고 부서장으로 정할 수도 있지만, 그 사람의 상위자·결재선은 **주 부서**를
+  따릅니다. 겸직하던 부서를 지우면 위 부서로 올라가고(주 부서와 같아지면 빠짐), 주 부서를 그 부서로 옮기면 겸직에서 빠집니다
+- **끌어다 놓아 옮기기** — 고칠 수 있는 사람은 부서를 길게 눌러(마우스는 끌어서) 다른 부서 위에 놓으면 그 아래로, 위쪽 "맨 위로" 띠에 놓으면
+  맨 위로 옮깁니다(자기 아래로는 못 옮김). 사람을 부서 위에 놓으면 그 부서로 옮깁니다. 조직도 그림에서도 같습니다
+- **조직도 그림** — **그림** 보기로 바꾸면 맨 위 부서부터 오른쪽으로 펼쳐지는 가로 트리(부서마다 부서장·인원)를 확대·축소·끌어 보며 볼
+  수 있습니다(`client/lib/widgets/org_chart_diagram.dart`)
+- **엑셀 내보내기·가져오기** — 고칠 수 있는 사람의 **엑셀로 내보내기**는 "부서"(부서 경로 `본부 > 팀`·부서장 아이디·순서)와 "구성원"(아이디·이름·
+  부서 경로·직책·상위자 아이디·겸직 부서 — 여럿은 `;`) 시트입니다. 그 파일을 고쳐 **엑셀에서 가져오기**하면 먼저 바뀔 수(만들 부서·부서장·순서·
+  사람)와 줄마다의 오류를 보여 주고, 오류가 없을 때만 바꿉니다. 사람은 아이디로, 부서는 경로로 찾고(없는 부서는 위에서부터 만듦), **빈칸은 그대로,
+  `-`는 비우기**, 파일에 없는 부서·사람은 그대로 둡니다(지우지 않음). 상위자가 서로 물리는 줄은 건너뛰고 알려 줍니다. 5MB·5,000줄까지
+- **사내 디렉터리로 맞추기** — 관리자 콘솔 → 로그인 보안 → 사내 디렉터리의 **조직도 맞추기**에서 부서를 "부서 속성 글자(맨 위 부서로 — 예전
+  방식) / **OU 경로를 부서 트리로** / 맞추지 않음" 중에 고르고(OU 경로는 정한 시작 위치 아래부터 — `CN=김철수,OU=1팀,OU=영업본부,OU=Users,…` →
+  영업본부 > 1팀, 없는 부서는 만듦), **상위자를 디렉터리의 manager 속성으로** 맞출 수 있습니다(상위자가 한 번이라도 디렉터리로 들어와 계정이 있어야
+  하고, 서로 물리면 건너뜀). 디렉터리 로그인 때·10분마다 다시 볼 때 그 사람을, **지금 디렉터리와 맞추기**로 계정이 있는 모두를 맞춥니다. 계정 단위
+  조직도에서만 됩니다(`server/src/orgDirectorySync.js`)
 
 **직책 목록** — 서버 운영자가 관리하는 직책 후보 목록(`position_options` 테이블, 설치 직후
 사원/주임/대리/과장/차장/부장/이사/대표가 이 순서로 기본 들어있습니다 — `sort_order`는
@@ -1179,6 +1195,14 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 채워집니다(`groupware.js` → `orgTree.js` `managerChainFor` → `approvalRules.js` `suggestApprovalLine`). 조직도는 부서·직책 설정을 따르므로
 그룹웨어가 회사 전체여도 팀 단위 조직도면 지금 고른 팀의 조직도를 씁니다. 결재선을 저장하면 결재자마다의 역할(합의·전결)도 함께 저장됩니다.
 
+**결재선 규칙** — 그룹웨어 관리자가 결재 종류(휴가·지출·근태 수정·기안·출장·구매·연장근무·관리자가 만든 양식 — 양식 하나만도, 또는 모든 종류)와
+금액마다 상위자 사슬을 **어디까지** 채울지 정합니다(`approval_line_rules`, 규칙은 `server/src/approvalLineRules.js`). "상위자 n명까지"(예: 휴가 1명 =
+팀장까지) 또는 "직책 ○○ 이상이 나올 때까지"(직책 목록의 서열 — 예: 지출 100만 원 이상은 본부장까지), 그 뒤에 늘 붙일 결재자(예: 재무팀장·대표)와
+늘 넣을 참조자도 정합니다. 결재를 쓰는 동안 종류와 금액(지출 금액·기안 예산·출장 경비·구매 합계·양식의 금액·품목 칸)이 바뀌면 그에 맞는 규칙으로
+다시 채우고 "규칙: …" 안내를 붙입니다(직접 고친 결재선은 덮어쓰지 않고 "다시 채우기"만 보임). 같은 종류에서는 문서 금액 이하인 가장 큰 금액 기준이,
+양식 하나를 정한 규칙이 그 종류 전체 규칙보다, 종류를 정한 규칙이 "모든 종류"보다 먼저입니다. 규칙은 미리 채울 때만 쓰고 올리는 사람이 고칠 수
+있습니다. 규칙이 없으면 예전처럼 5명까지 채웁니다.
+
 #### 합의·전결·대결
 
 - **합의**(동시 결재) — 결재선에서 이름 옆 역할 칩을 누르면 **결재 → 합의 → 전결**로 바뀝니다. 이어진 합의 칸은 한 단계(번호가 같음)로 **함께
@@ -1384,10 +1408,6 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메�
 
 ### 2순위 — 그룹웨어로서 부족한 것
 
-- **조직도 후속** — 부서 트리·부서장·상위자와 그것으로 채우는 결재선은 들어갔습니다([부서 트리와 상위자](#부서-트리와-상위자조직도)). 남은 것:
-  **겸직**(한 사람이 두 부서), 결재 종류마다 다른 결재선 규칙(예: 휴가는 팀장까지, 지출은 금액에 따라 본부장까지 — 지금은 상위자 사슬 전체를
-  5명까지 채우고 사람이 뺌), 끌어다 놓아 부서 옮기기, 조직도 엑셀 가져오기·내보내기, 사내 디렉터리(LDAP)의 OU·관리자(manager) 속성으로 트리·상위자
-  맞추기, 조직도 그림(가로 트리) 보기.
 - **결재 양식 후속** — 일반 기안서·출장·구매·연장근무 양식과 관리자가 만드는 양식은 들어갔습니다([결재 양식](#결재-양식)). 남은 것: 양식마다의
   기본 결재선·참조자, 칸 순서 끌어 옮기기·칸 설명, 사람 고르기·표(임의 열) 칸, 승인된 지출성 결재(구매·출장 경비)의 정산 연결, 출장의
   캘린더 표시.
@@ -1560,7 +1580,9 @@ messenger_project/
 │  │  ├─ emailCodes.js            메일 확인 코드 보내기·확인(가입·이메일 확인·변경·비밀번호 재설정) / emailCodeRules.js(순수 규칙)
 │  │  ├─ inviteMail.js            초대 링크를 메일로 보내기(설치 초대·팀 초대 공용)
 │  │  ├─ mentionDigest.js         오래 접속하지 않은 사람에게 안 읽은 멘션 요약 메일(매일 9시) / mentionDigestRules.js(순수 규칙)
-│  │  ├─ orgTree.js               조직도 — 부서 트리·부서장·상위자, 결재선 추천의 상위자 사슬(규칙은 orgTreeRules.js)
+│  │  ├─ orgTree.js               조직도 — 부서 트리·부서장·상위자·겸직·끌어 옮기기·엑셀 내보내기/가져오기, 결재선 추천의 상위자 사슬(규칙은 orgTreeRules.js)
+│  │  ├─ orgDirectorySync.js      사내 디렉터리(LDAP)의 OU 경로·manager 속성으로 부서·상위자 맞추기
+│  │  ├─ approvalLineRules.js     결재선 규칙(종류·금액마다 상위자 사슬을 어디까지) — 순수 규칙
 │  │  ├─ groupware.js             그룹웨어 API(전자결재·연차·출퇴근) — approvalRules.js·annualLeave.js(법정 연차)·attendanceRules.js·
 │  │  │                           groupwareScope.js(팀마다/회사 전체)·approvalForms.js(결재 양식)가 순수 규칙(단위 테스트 대상)
 │  │  ├─ backup.js                서버 전체 백업(DB를 모름 — 만들기·보관·외부 위치·첨부파일 미러·예약) — backupService.js가 DB·pg_dump와 잇고,
@@ -2242,6 +2264,11 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | PATCH / DELETE | `/api/org-tree/departments/:id` | 바꾸기 `{ name?, parentId?(null이면 맨 위), headId?(null이면 없음) }` — 이름을 바꾸면 구성원 부서 글자도, 자기 아래로 옮기기 400 / 지우기(하위 부서·구성원은 위 부서로). 지금 쓰지 않는 범위(설정이 바뀜)의 부서는 409 |
 | POST | `/api/org-tree/departments/:id/move` | 같은 위 부서 안에서 순서 `{ direction: 'up' \| 'down' }` |
 | PUT | `/api/org-tree/members/:userId` | 사람의 부서·상위자 `{ teamId?, departmentId?, managerId? }`(null이면 비움 — 상위자는 부서장으로). 자기 자신·서로가 서로의 상위자 400. 바뀌면 `org:updated`(부서 글자)·`org:tree-changed` |
+| POST / DELETE | `/api/org-tree/members/:userId/concurrent` · `/:departmentId` | 조직도를 고칠 수 있는 사람 | 겸직 넣기 `{ teamId?, departmentId, position? }`(5개까지) / 빼기 |
+| POST | `/api/org-tree/departments/:id/place` | 위와 같음 | 끌어다 놓기 `{ parentId, index }` — 그 위 부서 아래 index번째로(자기 아래·10단계 넘으면 400, 같은 이름 409) |
+| GET / POST | `/api/org-tree/export` · `/api/org-tree/import?dryRun=1` | 위와 같음 | 조직도 엑셀(부서·구성원 시트) / 가져오기(본문은 xlsx, 5MB) → `{ summary, errors, applied, skipped }` — 오류가 있으면 바꾸지 않음 |
+| GET / POST / PUT / DELETE | `/api/groupware/line-rules` · `/:id` | 보기는 그룹웨어 사용자, 고치기는 그룹웨어 관리자 | 결재선 규칙 목록 / 만들기·바꾸기 `{ kind, templateId?, minAmount?, mode, levels? \| positionLabel?, extraApproverIds?, ccIds? }` / 지우기(100개까지) |
+| POST | `/api/admin/login-security/ldap-org-sync` | 서버 운영자 | 지금 사내 디렉터리와 조직도 맞추기 → `{ scanned, linked, moved, managersSet, departmentsCreated }` |
 | GET | `/api/org-chart/teams` | **조직도** — 서버 전체 팀 + 각 팀의 멤버 id 목록·소유자 id(`ownerId`, 조직도 "멤버" 탭의 "소유자" 배지가 쓴다)(내가 속하지 않은 팀도 포함). 계정 등급 관리자 이상 또는 서버 운영자만(403) |
 | POST | `/api/teams` | 팀 생성(만든 사람이 소유자) |
 | PATCH | `/api/teams/:id` | 팀 이름/아이콘/토픽 생성 권한/메시지 설정 변경(소유자·관리자). `topicCreationPolicy`를 `designated`로 정할 때는 `topicCreatorIds`(정회원 이상인 팀원 id 배열, 1개 이상)를 함께 보낸다 |
@@ -2450,7 +2477,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 |---|---|---|
 | GET | `/api/groupware/context` | 범위(`scope`·`scopeSetting`), `isManager`, 근무 시간(`workStart`·`workEnd` — 하루 중 분), `today`, 내 `hireDate`, `pendingForMe`(내가 결재할 수 — 대결을 맡은 것 포함), `leaveTypes`, `expenseCategories`, `limits`, `inLan`, `signatureUrl`(내 서명·도장) |
 | GET | `/api/groupware/candidates` | 결재자·참조자 후보(이 범위의 정회원 이상, 나 빼고) |
-| GET/POST | `/api/groupware/approval-lines` | 저장한 결재선 `{ lines, suggested }`(줄마다·추천에 `roles`) / 저장 `{ name, approverIds, ccIds, roles? }`(20개까지) |
+| GET/POST | `/api/groupware/approval-lines` | 저장한 결재선 `{ lines, suggested }`(줄마다·추천에 `roles` — `?kind=&templateId=&amount=`면 결재선 규칙대로, 그때 `suggested.source`는 `rule`·`suggested.rule`) / 저장 `{ name, approverIds, ccIds, roles? }`(20개까지) |
 | DELETE | `/api/groupware/approval-lines/:id` | 내 결재선 지우기 |
 | GET | `/api/groupware/documents` | 결재함 `?box=inbox\|mine\|done\|cc\|all`(all은 관리자) `&kind=&status=&before=`(만든 시각 ms) |
 | GET | `/api/groupware/documents/:id` | 문서 상세(`docNumber`, 결재선 — 칸마다 `stage`·`role`·`actedByName`(대결)·`signatureUrl`, 참조자 `cc`, `myTurn`·`actingFor`(대결로 누구 대신인지)·`finalForMe`(내 칸이 전결)·`canWithdraw`·`canCancel`) — 올린 사람·결재자·참조자·관리자·대결한 사람, 지금 차례인 결재자의 대결을 맡은 사람만 |
@@ -2663,13 +2690,15 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `sso_sessions` | 회사 계정 로그인 세션(토큰의 `ssid`) — `provider`, `idp_session_id`(SAML SessionIndex·OIDC sid), `name_id`·`name_id_format`, `ended_at`·`end_reason`(`app_logout`·`idp_logout`) |
 | `directory_group_mappings` | 디렉터리 그룹 규칙 — `source`(`any`|`ldap`|`saml`|`microsoft`), `group`, `team_id`(팀이 지워지면 같이), `account_role` |
 | `group_sync_grants` | 그룹 규칙으로 넣은 팀 멤버십(`user_id`, `team_id`) — 그룹에서 빠지면 이것만 뺀다 |
-| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기), `otp_policy`(2단계 인증 정책), `sso_google_*`·`sso_microsoft_*`(회사 계정 로그인 — 클라이언트 보안 비밀은 암호화, Google 허용 도메인, Microsoft 테넌트), `sso_auto_create`·`sso_default_role`·`sso_session_days`, `ldap_*`(사내 디렉터리 — 서비스 계정 비밀번호는 암호화, 검색 조건·속성, `ldap_tested_at`은 지금 값으로 연결 시험을 통과한 시각), `saml_*`(SAML IdP 주소·발급자·서명 인증서·속성 이름, 이 서버의 서명 키(암호화)·인증서), `group_sync_enabled`·`group_sync_remove`(디렉터리 그룹 규칙), `passkey_login_enabled`(보안 키로 비밀번호 없이 로그인), `sso_idp_logout`(회사 계정에서도 로그아웃) |
+| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기), `otp_policy`(2단계 인증 정책), `sso_google_*`·`sso_microsoft_*`(회사 계정 로그인 — 클라이언트 보안 비밀은 암호화, Google 허용 도메인, Microsoft 테넌트), `sso_auto_create`·`sso_default_role`·`sso_session_days`, `ldap_*`(사내 디렉터리 — 서비스 계정 비밀번호는 암호화, 검색 조건·속성, `ldap_tested_at`은 지금 값으로 연결 시험을 통과한 시각), `saml_*`(SAML IdP 주소·발급자·서명 인증서·속성 이름, 이 서버의 서명 키(암호화)·인증서), `group_sync_enabled`·`group_sync_remove`(디렉터리 그룹 규칙), `passkey_login_enabled`(보안 키로 비밀번호 없이 로그인), `sso_idp_logout`(회사 계정에서도 로그아웃), `ldap_org_source`(디렉터리로 부서 맞추기 — `attribute`·`ou`·`off`)·`ldap_org_base_dn`(OU 경로의 시작 위치)·`ldap_manager_sync`·`ldap_manager_attr`(상위자 맞추기) |
 | `approval_documents` | 결재 문서(`doc_number` 문서 번호 — 범위마다 unique, 휴가·지출·근태 수정·양식 — 양식이면 `payload`가 `{ templateId, templateName, fields, values, …}`, 출장은 `startDate`·`endDate`, 연장근무는 `workDate`·`minutes`를 따로 둠). `scope_key`(팀 id 또는 `server`)·`team_id`, `kind`, `author_id`·`author_name`, `title`·`body`, `payload`(종류별 내용 jsonb — 휴가 양은 반일 단위 `halfDays`), `attachments`, `status`(`pending`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `current_step`, `cancel_reason`·`canceled_by_name` |
 | `approval_steps` | 결재선 한 칸 — `step_order` 순서, `stage`(같은 단계 = 합의로 동시에 차례, null이면 순서가 곧 단계 — 이 기능 전 문서), `role`(`approve`\|`agree`\|`final`), `approver_id`·`approver_name`, `status`(`waiting`\|`pending`\|`approved`\|`rejected`\|`skipped` — 전결로 생략), `comment`, `decided_at`, `acted_by_id`·`acted_by_name`(대결로 대신 결정한 사람), `signature_path`(승인할 때의 서명 그림) |
 | `approval_delegations` | 대결(부재 중 대신 결재) — `scope_key`, `user_id`(자리를 비우는 사람)·`delegate_id`(대신할 사람), `start_date`·`end_date`('YYYY-MM-DD', 둘 다 포함), `reason`, `created_by_id` |
 | `approval_counters` | 문서 번호 — (`scope_key`, `year`)마다 `last_seq`(올리는 트랜잭션에서 하나씩 올림) |
 | `approval_cc` | 참조자(문서 × 사람) |
 | `departments` | 조직도 부서 트리 — `scope_key`(`server` 회사 하나 \| 팀 id — 부서·직책 설정을 따름), `parent_id`(위 부서, 지우면 하위 부서는 위로), `name`, `head_id`(부서장 — 그 부서 사람의 기본 상위자), `sort_order`(같은 위 부서 안 순서). 팀을 지우면 그 팀의 부서도 지운다 |
+| `department_memberships` | 겸직 — (`user_id`, `department_id`) PK, `scope_key`(부서의 범위), `position`(그 부서에서의 직책). 부서가 지워지면 같이(앱은 위 부서로 옮긴 뒤 지움) |
+| `approval_line_rules` | 결재선 규칙 — `scope_key`(그룹웨어 범위), `kind`(결재 종류 또는 `any`)·`template_id`(양식 하나만), `min_amount`(이 금액 이상일 때), `mode`(`levels`·`position`)·`levels`·`position_label`, `extra_approver_ids`·`cc_ids` |
 | `approval_templates` | 결재 양식 — `scope_key`(그룹웨어 범위), `builtin_key`(기본 양식을 켜고 끈 줄이면 그 종류 — 이때는 `enabled`·`sort_order`만 씀, 관리자가 만든 양식이면 null), `name`·`description`, `fields` jsonb(칸 정의), `allow_attachments`, `enabled`, `created_by_name`. unique(`scope_key`, `builtin_key`) |
 | `approval_lines` | 저장한 결재선(사람 × 범위) — `approver_ids`·`cc_ids` jsonb, `line`(결재자마다의 역할 `[{ userId, role }]`, null이면 모두 결재) |
 | `approval_notifications` | 결재 알림함(받는 사람마다 한 줄 — 알림 센터 `결재` 탭). `document_id`, `team_id`(회사 전체 범위면 null — 그래서 `team_id`가 필수인 `notifications`와 따로 둠), `kind`(`request`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `title`·`body`, `actor_id`·`actor_name`, `read_at`. 90일 지나면 지움 |

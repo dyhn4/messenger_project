@@ -9,6 +9,7 @@ import 'approval_form_widgets.dart' show ApprovalFormsAdminSection;
 import 'approval_forms.dart' show isHmText;
 import 'approval_settings.dart' show ApprovalStatsSection;
 import 'groupware_work_admin.dart';
+import 'line_rules_section.dart';
 import 'resource_tab.dart' show ResourcesAdminSection;
 import 'groupware_screen.dart';
 import '../../l10n/tr.dart';
@@ -256,6 +257,13 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
           onChanged: widget.onContextChanged,
         ),
         ApprovalFormsAdminSection(api: widget.api, changes: widget.changes),
+        // 결재선 규칙 — 종류·금액마다 상위자를 어디까지 채울지(신청 창이 결재선을 미리 채울 때 쓴다).
+        LineRulesAdminSection(
+          api: widget.api,
+          ctx: widget.ctx,
+          changes: widget.changes,
+          session: widget.session,
+        ),
         ApprovalStatsSection(api: widget.api, ctx: widget.ctx),
         LeavePromotionSection(
           api: widget.api,

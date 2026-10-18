@@ -1,3 +1,5 @@
+import 'dart:async' show Timer;
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
@@ -6,6 +8,7 @@ import '../../models/groupware.dart';
 import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
+import 'line_rule_text.dart';
 import '../../l10n/tr.dart';
 
 /// 결재선 — 결재자(순서대로)·결재자마다의 역할(결재·합의·전결)과 참조자. 신청 창과 결재선 선택기([ApprovalLinePicker])가 같이 본다.
@@ -97,16 +100,34 @@ class ApprovalLineController extends ChangeNotifier {
 }
 
 /// 결재선 고르기 — 저장한 결재선 불러오기, 결재자 추가·순서 바꾸기·빼기, 참조자, "이 결재선 저장". 처음에는 서버가 추천한 결재선
-/// (최근에 저장한 것 — 나중에 조직도 상위자)을 채운다.
+/// (결재선 규칙 → 최근에 저장한 것 → 조직도 상위자, 서버 suggestApprovalLine)을 채운다. [kind]·[templateId]·금액([amountOf])을 주면
+/// 그 문서에 맞는 결재선 규칙(서버 approvalLineRules.js)대로 추천받고, 금액이 바뀌면([amountChanges]) 잠시 뒤 다시 받는다 — 결재선을
+/// 손으로 고치지 않았으면 새 추천으로 바꾸고, 고쳤으면 고친 것을 지키고 "다시 채우기"만 보인다.
 class ApprovalLinePicker extends StatefulWidget {
   final GroupwareApi api;
   final GroupwareContext ctx;
   final ApprovalLineController controller;
+
+  /// 결재 종류([ApprovalKind.wire]) — 주면 서버가 그 종류의 결재선 규칙으로 추천한다(없으면 예전처럼 규칙 없이).
+  final String? kind;
+
+  /// 관리자가 만든 양식(종류 'form')의 양식 id — 그 양식에만 건 규칙을 고르게.
+  final String? templateId;
+
+  /// 지금 문서 금액(원, 모르거나 비었으면 null) — 지출은 금액, 기안은 예산, 출장은 예상 경비, 구매는 품목 합계, 양식은 금액·품목 칸의 합.
+  final int? Function()? amountOf;
+
+  /// 금액이 바뀌었을 수 있을 때 알린다(입력칸 컨트롤러·양식 값) — 실제 금액이 바뀌었을 때만 다시 받는다.
+  final Listenable? amountChanges;
   const ApprovalLinePicker({
     super.key,
     required this.api,
     required this.ctx,
     required this.controller,
+    this.kind,
+    this.templateId,
+    this.amountOf,
+    this.amountChanges,
   });
 
   @override
@@ -114,6 +135,9 @@ class ApprovalLinePicker extends StatefulWidget {
 }
 
 class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
+  /// 금액을 바꾼 뒤 이만큼 더 안 바뀌면 추천을 다시 받는다(글자마다 부르지 않게).
+  static const _refetchDelay = Duration(milliseconds: 600);
+
   List<ApprovalCandidate>? _candidates;
   List<ApprovalLine> _lines = const [];
 
@@ -121,59 +145,172 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
   List<String>? _orgPrefill;
   String? _error;
 
+  /// 마지막으로 받은 추천(규칙 안내·"다시 채우기"에 쓴다).
+  ApprovalLines? _suggestion;
+
+  /// 마지막 추천을 채운 뒤 결재선을 손으로 고쳤는지 — 고쳤으면 새 추천이 와도 덮어쓰지 않는다.
+  bool _touched = false;
+
+  /// 추천을 채우는 중(controller.setLine) — 이때 바뀐 것은 손으로 고친 것이 아니다.
+  bool _applying = false;
+
+  /// 손으로 고친 뒤 추천이 바뀌었다 — "규칙이 바뀌었습니다 — 다시 채우기"를 보인다.
+  bool _stale = false;
+
+  /// 마지막으로 추천을 부탁한 금액 — 같은 금액이면 다시 부르지 않는다.
+  int? _requestedAmount;
+  Timer? _debounce;
+
+  /// 다시 받기가 겹치면 마지막 것만 쓴다.
+  int _fetchSeq = 0;
+  late final Future<void> _initialLoad;
+
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(_refresh);
-    _load();
+    widget.controller.addListener(_onLineChanged);
+    widget.amountChanges?.addListener(_onAmountChanged);
+    _requestedAmount = widget.amountOf?.call();
+    _initialLoad = _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant ApprovalLinePicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onLineChanged);
+      widget.controller.addListener(_onLineChanged);
+    }
+    if (oldWidget.amountChanges != widget.amountChanges) {
+      oldWidget.amountChanges?.removeListener(_onAmountChanged);
+      widget.amountChanges?.addListener(_onAmountChanged);
+    }
   }
 
   @override
   void dispose() {
-    widget.controller.removeListener(_refresh);
+    _debounce?.cancel();
+    widget.controller.removeListener(_onLineChanged);
+    widget.amountChanges?.removeListener(_onAmountChanged);
     super.dispose();
   }
 
-  void _refresh() => setState(() {});
+  void _onLineChanged() {
+    if (!_applying) _touched = true;
+    setState(() {});
+  }
+
+  void _onAmountChanged() {
+    final amount = widget.amountOf?.call();
+    if (amount == _requestedAmount) return;
+    _requestedAmount = amount;
+    _debounce?.cancel();
+    _debounce = Timer(_refetchDelay, _refetch);
+  }
+
+  Future<ApprovalLines> _fetchLines() => widget.api.approvalLines(
+    kind: widget.kind,
+    templateId: widget.templateId,
+    amount: _requestedAmount,
+  );
 
   Future<void> _load() async {
     try {
       final results = await Future.wait([
         widget.api.candidates(),
-        widget.api.approvalLines(),
+        _fetchLines(),
       ]);
       if (!mounted) return;
       final candidates = results[0] as List<ApprovalCandidate>;
       final lines = results[1] as ApprovalLines;
-      final known = {for (final c in candidates) c.id};
       setState(() {
         _candidates = candidates;
         _lines = lines.lines;
+        _suggestion = lines;
       });
       if (widget.controller.approverIds.isEmpty) {
-        final approvers = lines.suggestedApproverIds
-            .where(known.contains)
-            .toList();
-        widget.controller.setLine(
-          approvers,
-          lines.suggestedCcIds.where(known.contains).toList(),
-          lines.suggestedRoles,
-        );
-        // 조직도 상위자로 채웠으면 그 사실을 알려 준다 — 결재선을 손으로 바꾸면 안내는 사라진다.
-        if (lines.suggestedSource == 'org' && approvers.isNotEmpty) {
-          setState(() => _orgPrefill = List.of(approvers));
-        }
+        _apply(lines);
+      } else {
+        // 이미 결재선이 있으면(다시 연 창 등) 그대로 둔다 — 고친 것으로 본다.
+        _touched = true;
       }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
   }
 
+  /// 금액이 바뀐 뒤 추천을 다시 받는다 — 손으로 고치지 않았으면 새 추천으로 채우고, 고쳤으면 추천이 바뀌었을 때만 "다시 채우기"를 보인다.
+  Future<void> _refetch() async {
+    await _initialLoad;
+    if (!mounted || _candidates == null) return;
+    final seq = ++_fetchSeq;
+    try {
+      final lines = await _fetchLines();
+      if (!mounted || seq != _fetchSeq) return;
+      final previous = _suggestion;
+      setState(() {
+        _suggestion = lines;
+        _lines = lines.lines;
+      });
+      if (!_touched) {
+        _apply(lines);
+      } else if (!_sameSuggestion(previous, lines)) {
+        setState(() => _stale = true);
+      }
+    } catch (_) {
+      // 다시 받기가 안 되면 지금 결재선을 그대로 쓴다(올릴 때 서버가 결재선을 다시 본다).
+    }
+  }
+
+  /// 추천을 결재선에 채운다 — 고를 수 있는 사람만, 채운 뒤에는 "손대지 않음".
+  void _apply(ApprovalLines lines) {
+    final known = {for (final c in _candidates ?? const []) c.id};
+    final approvers = lines.suggestedApproverIds.where(known.contains).toList();
+    _applying = true;
+    try {
+      widget.controller.setLine(
+        approvers,
+        lines.suggestedCcIds.where(known.contains).toList(),
+        lines.suggestedRoles,
+      );
+    } finally {
+      _applying = false;
+    }
+    setState(() {
+      _touched = false;
+      _stale = false;
+      // 조직도 상위자로 채웠으면 그 사실을 알려 준다 — 결재선을 손으로 바꾸면 안내는 사라진다.
+      _orgPrefill = lines.suggestedSource == 'org' && approvers.isNotEmpty
+          ? List.of(approvers)
+          : null;
+    });
+  }
+
+  static bool _sameSuggestion(ApprovalLines? a, ApprovalLines b) =>
+      a != null &&
+      a.suggestedSource == b.suggestedSource &&
+      a.suggestedRule?.id == b.suggestedRule?.id &&
+      listEquals(a.suggestedApproverIds, b.suggestedApproverIds) &&
+      listEquals(a.suggestedCcIds, b.suggestedCcIds);
+
   String _nameOf(String id) {
     for (final c in _candidates ?? const <ApprovalCandidate>[]) {
       if (c.id == id) return c.name;
     }
     return tr('(알 수 없음)');
+  }
+
+  /// 지금 결재선이 추천과 같은지(고를 수 있는 사람만 견준다) — 같으면 "다시 채우기"는 필요 없다.
+  bool _lineMatches(ApprovalLines lines) {
+    final known = {for (final c in _candidates ?? const []) c.id};
+    return listEquals(
+          widget.controller.approverIds,
+          lines.suggestedApproverIds.where(known.contains).toList(),
+        ) &&
+        listEquals(
+          widget.controller.ccIds,
+          lines.suggestedCcIds.where(known.contains).toList(),
+        );
   }
 
   Future<String?> _pickPerson({
@@ -250,6 +387,10 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
       );
     }
     final taken = {...c.approverIds, ...c.ccIds};
+    final suggestion = _suggestion;
+    final rule = suggestion?.suggestedSource == 'rule'
+        ? suggestion?.suggestedRule
+        : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -298,6 +439,36 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
             child: Text(
               tr('조직도의 상위자 순서로 결재자를 채웠습니다. 필요하면 빼거나 바꾸세요.'),
               style: TextStyle(fontSize: 12, color: hint),
+            ),
+          ),
+        // 결재선 규칙으로 채웠으면 어느 규칙인지(관리 탭 목록과 같은 글 — line_rule_text.dart).
+        if (rule != null)
+          Padding(
+            key: const ValueKey('approval-line-rule-hint'),
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Text(
+              tr('규칙: {rule}', {
+                'rule': lineRuleSentence(rule, nameOf: _nameOf),
+              }),
+              style: TextStyle(fontSize: 12, color: hint),
+            ),
+          ),
+        // 손으로 고친 뒤 금액이 바뀌어 추천이 달라졌다 — 덮어쓰지 않고 다시 채울 수 있게만.
+        if (_stale && suggestion != null && !_lineMatches(suggestion))
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const ValueKey('approval-line-refill'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+              ),
+              onPressed: () => _apply(suggestion),
+              icon: const Icon(Icons.refresh, size: 16),
+              label: Text(
+                tr('규칙이 바뀌었습니다 — 다시 채우기'),
+                style: const TextStyle(fontSize: 12),
+              ),
             ),
           ),
         if (c.approverIds.isEmpty)
@@ -550,6 +721,12 @@ class ApprovalRequestDialog extends StatefulWidget {
     required Map<String, LineRole> roles,
   })
   submit;
+
+  /// 결재선 규칙으로 추천받을 결재 종류·양식·금액 — [ApprovalLinePicker]의 kind·templateId·amountOf·amountChanges로 넘긴다.
+  final String? lineKind;
+  final String? lineTemplateId;
+  final int? Function()? lineAmountOf;
+  final Listenable? lineAmountChanges;
   const ApprovalRequestDialog({
     super.key,
     required this.title,
@@ -560,6 +737,10 @@ class ApprovalRequestDialog extends StatefulWidget {
     required this.submit,
     this.bodyLabel = '사유',
     this.showBody = true,
+    this.lineKind,
+    this.lineTemplateId,
+    this.lineAmountOf,
+    this.lineAmountChanges,
   });
 
   @override
@@ -639,6 +820,10 @@ class _ApprovalRequestDialogState extends State<ApprovalRequestDialog> {
                 api: widget.api,
                 ctx: widget.ctx,
                 controller: _line,
+                kind: widget.lineKind,
+                templateId: widget.lineTemplateId,
+                amountOf: widget.lineAmountOf,
+                amountChanges: widget.lineAmountChanges,
               ),
               if (_error != null) ...[
                 const SizedBox(height: 8),
@@ -721,6 +906,7 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
       title: tr('휴가 신청'),
       api: api,
       ctx: ctx,
+      lineKind: ApprovalKind.leave.wire,
       fields: (setState) {
         final info = ctx.leaveType(type);
         return [
@@ -849,6 +1035,10 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
       title: tr('지출 결재'),
       api: api,
       ctx: ctx,
+      // 금액을 바꾸면 그 금액에 맞는 결재선 규칙으로 다시 추천받는다(예: 100만 원 이상은 본부장까지).
+      lineKind: ApprovalKind.expense.wire,
+      lineAmountOf: () => expenseAmountOf(amount.text),
+      lineAmountChanges: amount,
       bodyLabel: tr('내용(어디에 무엇을)'),
       fields: (setState) => [
         TextField(
@@ -1001,6 +1191,12 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
   });
 }
 
+/// 지출 금액 입력칸의 값(원) — 쉼표는 빼고, 비었거나 0 이하·숫자가 아니면 null(결재선 규칙의 금액 기준을 고르지 않는다).
+int? expenseAmountOf(String text) {
+  final value = int.tryParse(text.replaceAll(',', '').trim());
+  return value == null || value <= 0 ? null : value;
+}
+
 /// 'HH:MM'인지.
 bool isHmText(String value) {
   final m = RegExp(r'^(\d{2}):(\d{2})$').firstMatch(value.trim());
@@ -1033,6 +1229,7 @@ Future<ApprovalDocument?> showAttendanceCorrectionDialog(
       title: tr('근태 수정 ({p0})', {'p0': shortDateText(workDate)}),
       api: api,
       ctx: ctx,
+      lineKind: ApprovalKind.attendance.wire,
       fields: (setState) => [
         Text(
           record == null

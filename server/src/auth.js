@@ -29,6 +29,7 @@ import { passwordPolicyError } from "./passwordPolicy.js";
 import { accountState, deviceActive, ssoSessionActive } from "./authState.js";
 import { endSsoLogin } from "./ssoSessions.js";
 import { syncDirectoryGroupsOnLogin } from "./groupSync.js";
+import { syncDirectoryOrgForUser } from "./orgDirectorySync.js";
 import { LDAP_REASON_TEXT, ldapAuthenticate } from "./ldapAuth.js";
 import { completeLogin, directoryAccountActive, ldapUsable, resolveDirectoryLogin } from "./loginSecurity.js";
 import { localPasswordBlockedText, usesLocalPassword } from "./loginSecurityRules.js";
@@ -823,6 +824,8 @@ export function createAuthRouter(io) {
       if (user.suspendedAt) return res.status(403).json({ error: "정지된 계정입니다. 서버 운영자에게 문의하세요." });
       // 디렉터리 그룹으로 팀·등급 맞추기(groupSync.js — 꺼져 있으면 아무것도 안 한다).
       user = await syncDirectoryGroupsOnLogin(io, user, { source: "ldap", groups: directory.profile.groups });
+      // 부서(OU 경로)·상위자(manager)도 디렉터리대로(orgDirectorySync.js — 켰을 때만).
+      await syncDirectoryOrgForUser(io, user.id, directory.profile, settings);
     }
     return completeLogin(res, user, { method: directory.profile ? "ldap" : "password" });
   });

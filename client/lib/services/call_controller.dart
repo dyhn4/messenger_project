@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:livekit_client/livekit_client.dart';
 
+import '../models/call_recording.dart';
 import 'api_client.dart';
 import 'app_platform.dart';
 import 'call_hands.dart';
@@ -232,6 +233,8 @@ class CallController extends ChangeNotifier {
     _whiteboard?.dispose();
     _whiteboard = null;
     _hostId = null;
+    _recording = null;
+    _serverStateSeen = false;
     _micRequested = false;
     _serverTier = null;
     _localTier = CallVideoTier.fhd;
@@ -321,14 +324,58 @@ class CallController extends ChangeNotifier {
   /// 지금 보내는 영상의 화질 단계.
   CallVideoTier get videoTier => lowerCallVideoTier(_localTier, _serverTier);
 
-  /// 서버가 알려준 이 통화의 상태(call:state) — 진행자와 화질 단계. Session이 지금 통화 중인 방의 것만 넘긴다.
-  void applyServerCallState({String? hostId, CallVideoTier? videoTier}) {
+  /// 서버가 알려준 이 통화의 상태(call:state) — 진행자·화질 단계·녹화. Session이 지금 통화 중인 방의 것만 넘긴다.
+  void applyServerCallState({
+    String? hostId,
+    CallVideoTier? videoTier,
+    CallRecordingLive? recording,
+  }) {
     final before = this.videoTier;
     final hostChanged = hostId != _hostId;
     _hostId = hostId;
     _serverTier = videoTier;
+    final recordingChanged = recording?.id != _recording?.id;
+    if (recordingChanged) _announceRecording(_recording, recording);
+    _recording = recording;
+    _serverStateSeen = true;
     if (this.videoTier != before) unawaited(_applyVideoCaps());
-    if (hostChanged || this.videoTier != before) notifyListeners();
+    if (hostChanged || recordingChanged || this.videoTier != before) {
+      notifyListeners();
+    }
+  }
+
+  // ───────────── 녹화 ─────────────
+  //
+  // 녹화는 서버가 LiveKit Egress에 시킨다(server/src/callRecording.js) — Egress는 숨은 참가자라 참가자 목록에 안 보이므로, 녹화 중에는
+  // 모두의 통화 화면에 "녹화 중"을 띄우고 시작·멈춤을 알린다.
+
+  CallRecordingLive? _recording;
+
+  /// 지금 녹화 중인 것(없으면 null).
+  CallRecordingLive? get recording => _recording;
+
+  /// 이 통화에서 서버 상태를 받은 적이 있는지 — 처음 받은 상태가 이미 녹화 중이면 "녹화 중인 회의"로 알린다(들어오자마자).
+  bool _serverStateSeen = false;
+
+  /// 내가 녹화를 멈출 수 있는지 — 진행자나 녹화를 시작한 사람(서버 callRecordingRules.js recordingStopDenial).
+  bool get canStopRecording {
+    final me = _room?.localParticipant?.identity;
+    final r = _recording;
+    return r != null && me != null && (me == r.byId || me == _hostId);
+  }
+
+  void _announceRecording(CallRecordingLive? before, CallRecordingLive? after) {
+    if (after != null) {
+      _notices.add(
+        !_serverStateSeen
+            ? tr('이 화상회의는 녹화되고 있습니다')
+            : after.audioOnly
+            ? tr('{name}님이 녹음을 시작했습니다', {'name': after.byName})
+            : tr('{name}님이 녹화를 시작했습니다', {'name': after.byName}),
+      );
+    } else if (before != null) {
+      _notices.add(before.audioOnly ? tr('녹음을 멈췄습니다') : tr('녹화를 멈췄습니다'));
+    }
   }
 
   void _updateLocalTier() {
@@ -564,6 +611,9 @@ class CallController extends ChangeNotifier {
 
   /// 지금 통화의 화이트보드(통화 중이 아니면 null).
   CallWhiteboard? get whiteboard => _whiteboard;
+
+  /// 통화에 나 말고 아무도 없는지 — 내가 나가면 화이트보드가 사라지므로 Session이 나가기 전에 저절로 저장한다.
+  bool get aloneInCall => _room?.remoteParticipants.isEmpty ?? true;
 
   Timer? _snapshotTimer;
 

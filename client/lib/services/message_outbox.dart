@@ -481,9 +481,11 @@ class MessageOutbox extends ChangeNotifier {
 /// 아니라 메시지의 파일 칸에 저장한다 — sendUploadedAttachment와 같은 모양).
 Map<String, dynamic> sendableOutboxPayload(Map<String, dynamic> payload) {
   final attachments = payload['attachments'];
+  // 게시글(보드 뷰 토픽)은 첨부 목록 그대로 — 파일 칸으로 바꾸면 사진·파일 메시지가 되어 서버가 거절한다.
   if (attachments is! List ||
       attachments.length != 1 ||
-      payload['fileUrl'] != null) {
+      payload['fileUrl'] != null ||
+      payload['type'] == 'post') {
     return payload;
   }
   final a = attachments.first;

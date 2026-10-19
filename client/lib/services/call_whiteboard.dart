@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'dart:ui' show Offset;
 
 import 'package:flutter/foundation.dart';
@@ -269,6 +270,71 @@ double _segmentDistance(Offset a, Offset b, Offset p) {
   return (p - (a + ab * t)).distance;
 }
 
+/// 판을 [canvas]의 [size] 크기에 그린다 — 흰 바탕에 획들(통화 화면의 WhiteboardPainter와 저장할 때의 그림이 같은 그림이 되게).
+void paintWhiteboard(
+  ui.Canvas canvas,
+  ui.Size size,
+  Iterable<WhiteboardStroke> strokes,
+) {
+  canvas.drawRect(
+    Offset.zero & size,
+    ui.Paint()..color = const ui.Color(0xFFFFFFFF),
+  );
+  for (final stroke in strokes) {
+    if (stroke.points.isEmpty) continue;
+    final width = stroke.width * size.width;
+    final paint = ui.Paint()
+      ..color = ui.Color(stroke.color)
+      ..strokeWidth = width
+      ..strokeCap = ui.StrokeCap.round
+      ..strokeJoin = ui.StrokeJoin.round
+      ..style = ui.PaintingStyle.stroke
+      ..isAntiAlias = true;
+    Offset at(Offset p) => Offset(p.dx * size.width, p.dy * size.height);
+    if (stroke.points.length == 1) {
+      canvas.drawCircle(
+        at(stroke.points.first),
+        width / 2,
+        paint..style = ui.PaintingStyle.fill,
+      );
+      continue;
+    }
+    final path = ui.Path()
+      ..moveTo(at(stroke.points.first).dx, at(stroke.points.first).dy);
+    for (final p in stroke.points.skip(1)) {
+      final o = at(p);
+      path.lineTo(o.dx, o.dy);
+    }
+    canvas.drawPath(path, paint);
+  }
+}
+
+/// 저장할 때의 그림 너비(px) — 16:9라 1920×1080.
+const whiteboardExportWidth = 1920;
+
+/// 판을 PNG로 — 대화방에 사진으로 올린다(CallWhiteboard.renderPng).
+Future<Uint8List> renderWhiteboardPng(
+  Iterable<WhiteboardStroke> strokes, {
+  int width = whiteboardExportWidth,
+}) async {
+  final height = (width / whiteboardAspectRatio).round();
+  final recorder = ui.PictureRecorder();
+  paintWhiteboard(
+    ui.Canvas(recorder),
+    ui.Size(width.toDouble(), height.toDouble()),
+    strokes,
+  );
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(width, height);
+  picture.dispose();
+  try {
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    return data!.buffer.asUint8List();
+  } finally {
+    image.dispose();
+  }
+}
+
 /// 늦게 들어온 사람에게 판을 다시 보낼 사람 — 이미 있던 참가자 중 identity가 가장 작은 한 명(모두가 같은 답을 내서 한
 /// 사람만 보낸다). 아무도 없으면 null.
 String? whiteboardSnapshotSender(Iterable<String> existingIdentities) {
@@ -302,6 +368,21 @@ class CallWhiteboard extends ChangeNotifier {
 
   /// 판이 바뀐 횟수 — 그리는 쪽(CustomPainter)이 다시 그릴지 정한다.
   int revision = 0;
+
+  /// 마지막으로 저장한(대화방에 올린) 때의 [revision] — 그 뒤로 바뀐 게 있는지([hasUnsavedChanges]).
+  int _savedRevision = 0;
+
+  /// 저장한 뒤로 판이 바뀌었고 비어 있지 않은지 — 마지막 사람이 통화를 나갈 때 저절로 저장할지(Session.leaveCall).
+  bool get hasUnsavedChanges => !book.isEmpty && revision != _savedRevision;
+
+  /// 지금 판을 PNG로 그리고 저장한 것으로 적는다.
+  Future<Uint8List> renderPng() async {
+    endStroke();
+    final at = revision;
+    final png = await renderWhiteboardPng(List.of(book.strokes));
+    _savedRevision = at;
+    return png;
+  }
 
   String? _drawingId;
   final List<Offset> _pending = [];

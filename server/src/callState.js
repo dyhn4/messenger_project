@@ -55,7 +55,21 @@ function toState(roomId) {
     // 서버가 잃었던 통화를 참가자의 LiveKit 연결로 되살린 것(재시작 뒤 등) — 처음 시작할 때 이미 울렸으니 앱은 이 통화로
     // 다시 울리지 않는다(client session.dart). 보통 통화는 이 칸이 없다.
     ...(call.restored && { restored: true }),
+    // 지금 녹화 중이면 { id, byId, byName, startedAt, audioOnly, minutes } — 참가자 모두의 통화 화면에 "녹화 중"을 띄운다
+    // (callRecording.js setCallRecording). 녹화하지 않으면 칸이 없다.
+    ...(call.recording && { recording: call.recording }),
   };
+}
+
+/**
+ * 이 통화의 녹화 표시를 바꾼다(callRecording.js — 시작하면 정보, 멈추면 null). 통화가 없으면 false. 바뀐 상태는 호출부가 call:state로
+ * 알린다.
+ */
+export function setCallRecording(roomId, recording) {
+  const call = activeCalls.get(roomId);
+  if (!call) return false;
+  call.recording = recording ?? null;
+  return true;
 }
 
 export function callStateFor(roomId) {

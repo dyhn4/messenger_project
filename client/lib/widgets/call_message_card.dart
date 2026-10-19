@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/call_card.dart';
+import '../models/call_recording.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../screens/call_minutes_screen.dart';
 import '../screens/call_screen.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
@@ -168,6 +170,17 @@ class _CallMessageCardState extends State<CallMessageCard> {
                         ),
                       ],
                     ),
+                    // 녹화·회의록 — 접어 둬도 보인다(회의록은 통화가 끝난 뒤에 나온다).
+                    for (final r in card.recordings)
+                      _RecordingRow(
+                        entry: r,
+                        onOpenMinutes: () => showCallMinutesScreen(
+                          context,
+                          widget.session,
+                          widget.room,
+                          r.id,
+                        ),
+                      ),
                     if (_expanded) ...[
                       const SizedBox(height: 8),
                       const Divider(height: 1),
@@ -237,6 +250,89 @@ class _CallMessageCardState extends State<CallMessageCard> {
   static String _elapsedText(CallCard card) {
     final elapsed = DateTime.now().difference(card.startedAt);
     return elapsed.inMinutes < 1 ? tr('방금 시작') : formatCallDuration(elapsed);
+  }
+}
+
+/// 카드의 녹화 한 줄 — "● 녹화 · 홍길동 · 오후 2:03"와 상태(녹화 중·마무리 중·실패), 회의록 단추(만드는 중이면 그 단계).
+class _RecordingRow extends StatelessWidget {
+  final CallRecordingEntry entry;
+  final VoidCallback onOpenMinutes;
+  const _RecordingRow({required this.entry, required this.onOpenMinutes});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final small = theme.textTheme.bodySmall;
+    final what = entry.audioOnly ? tr('녹음') : tr('녹화');
+    final (String state, Color color) = switch (entry.status) {
+      CallRecordingStatus.recording => (
+        entry.audioOnly ? tr('녹음 중') : tr('녹화 중'),
+        Colors.red,
+      ),
+      CallRecordingStatus.processing => (
+        tr('파일 마무리 중'),
+        scheme.onSurfaceVariant,
+      ),
+      CallRecordingStatus.done => ('', scheme.onSurfaceVariant),
+      CallRecordingStatus.failed => (tr('실패'), scheme.error),
+    };
+    final minutes = entry.minutes;
+    return Padding(
+      key: ValueKey('call-card-recording-${entry.id}'),
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          Icon(
+            entry.audioOnly ? Icons.mic : Icons.fiber_manual_record,
+            size: 14,
+            color: entry.status == CallRecordingStatus.recording
+                ? Colors.red
+                : scheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              [
+                what,
+                entry.name,
+                _timeFormat.format(entry.at),
+                if (state.isNotEmpty) state,
+              ].join(' · '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: small?.copyWith(
+                color: state.isNotEmpty ? color : scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          if (minutes != CallMinutesStage.none)
+            TextButton.icon(
+              key: ValueKey('call-card-minutes-${entry.id}'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                foregroundColor: minutes == CallMinutesStage.failed
+                    ? scheme.error
+                    : null,
+              ),
+              onPressed: onOpenMinutes,
+              icon: callMinutesInProgress(minutes)
+                  ? const SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(strokeWidth: 1.5),
+                    )
+                  : Icon(
+                      minutes == CallMinutesStage.failed
+                          ? Icons.error_outline
+                          : Icons.description_outlined,
+                      size: 16,
+                    ),
+              label: Text(callMinutesStageLabel(minutes)),
+            ),
+        ],
+      ),
+    );
   }
 }
 

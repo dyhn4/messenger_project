@@ -25,10 +25,14 @@ enum _Tool { pen, eraser }
 class CallWhiteboardView extends StatefulWidget {
   final CallWhiteboard board;
   final VoidCallback onClose;
+
+  /// [저장] — 지금 판을 그림으로 대화방에 올린다(Session.saveCallWhiteboard). null이면 단추가 없다.
+  final Future<void> Function()? onSave;
   const CallWhiteboardView({
     super.key,
     required this.board,
     required this.onClose,
+    this.onSave,
   });
 
   @override
@@ -99,6 +103,17 @@ class _CallWhiteboardViewState extends State<CallWhiteboardView> {
     _pointer = null;
     _lastErase = null;
     if (!_erasing) widget.board.endStroke();
+  }
+
+  bool _saving = false;
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await widget.onSave!();
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Future<void> _confirmClear() async {
@@ -250,6 +265,14 @@ class _CallWhiteboardViewState extends State<CallWhiteboardView> {
                 false,
                 widget.board.book.isEmpty ? null : _confirmClear,
               ),
+              if (widget.onSave != null)
+                toolButton(
+                  'whiteboard-save',
+                  _saving ? Icons.hourglass_top : Icons.save_alt,
+                  tr('대화방에 그림으로 저장'),
+                  false,
+                  widget.board.book.isEmpty || _saving ? null : _save,
+                ),
               const SizedBox(width: 8),
               toolButton(
                 'whiteboard-close',
@@ -344,36 +367,8 @@ class WhiteboardPainter extends CustomPainter {
   WhiteboardPainter(this.board) : super(repaint: board);
 
   @override
-  void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
-    for (final stroke in board.book.strokes) {
-      if (stroke.points.isEmpty) continue;
-      final width = stroke.width * size.width;
-      final paint = Paint()
-        ..color = Color(stroke.color)
-        ..strokeWidth = width
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..style = PaintingStyle.stroke
-        ..isAntiAlias = true;
-      Offset at(Offset p) => Offset(p.dx * size.width, p.dy * size.height);
-      if (stroke.points.length == 1) {
-        canvas.drawCircle(
-          at(stroke.points.first),
-          width / 2,
-          paint..style = PaintingStyle.fill,
-        );
-        continue;
-      }
-      final path = Path()
-        ..moveTo(at(stroke.points.first).dx, at(stroke.points.first).dy);
-      for (final p in stroke.points.skip(1)) {
-        final o = at(p);
-        path.lineTo(o.dx, o.dy);
-      }
-      canvas.drawPath(path, paint);
-    }
-  }
+  void paint(Canvas canvas, Size size) =>
+      paintWhiteboard(canvas, size, board.book.strokes);
 
   @override
   bool shouldRepaint(WhiteboardPainter old) => old.board != board;

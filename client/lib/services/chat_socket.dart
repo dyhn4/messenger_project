@@ -7,6 +7,7 @@ import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 import '../models/album.dart';
 import '../models/announcement.dart';
 import '../models/call_card.dart';
+import '../models/call_recording.dart';
 import '../models/app_notification.dart';
 import '../models/inquiry.dart';
 import '../models/comment.dart';
@@ -357,6 +358,9 @@ class CallState {
   /// 않는다(Session._applyCallState, server/src/callAccess.js admitCallJoin). 보통 통화와 예전 서버는 false.
   final bool restored;
 
+  /// 지금 녹화 중이면 그 녹화(서버 callRecording.js) — 통화 화면에 "녹화 중"을 띄운다. 녹화하지 않거나 예전 서버면 null.
+  final CallRecordingLive? recording;
+
   const CallState({
     required this.roomId,
     required this.active,
@@ -366,6 +370,7 @@ class CallState {
     this.hostId,
     this.videoTier,
     this.restored = false,
+    this.recording,
   });
 
   factory CallState.fromJson(Map<String, dynamic> json) => CallState(
@@ -382,6 +387,7 @@ class CallState {
     hostId: json['hostId'] as String?,
     videoTier: json['videoTier'] as String?,
     restored: json['restored'] == true,
+    recording: CallRecordingLive.fromJson(json['recording']),
   );
 }
 

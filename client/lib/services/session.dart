@@ -281,6 +281,12 @@ class Session extends ChangeNotifier {
   /// 감춘다(server/src/calls.js의 /calls/config). 지금 진행 중인 통화(callStates)는 방마다
   /// "통화 중" 표시와 수신 화면 판단에 쓴다.
   bool callsEnabled = false;
+
+  /// 통화 녹화(LiveKit Egress)·회의록 받아쓰기·요약을 이 서버가 하는지(server/src/callRecording.js·callMinutes.js) — 통화 화면이
+  /// [녹화]와 "회의록 만들기"를 보여줄지 정한다.
+  bool callRecordingEnabled = false;
+  bool callMinutesEnabled = false;
+  bool callSummaryEnabled = false;
   final Map<String, CallState> callStates = {};
 
   /// 내가 아직 받지 않은(참가자 목록에 내가 없는) 통화가 걸려온 방. 수신 화면을 띄우는 신호.
@@ -2813,6 +2819,9 @@ class Session extends ChangeNotifier {
     try {
       final config = await api!.fetchCallsConfig();
       callsEnabled = config.enabled;
+      callRecordingEnabled = config.recording;
+      callMinutesEnabled = config.minutes;
+      callSummaryEnabled = config.summary;
       notifyListeners();
     } catch (_) {
       // 다음 로그인 때 다시 확인한다.
@@ -2959,6 +2968,82 @@ class Session extends ChangeNotifier {
     callController.applyServerCallState(
       hostId: state.hostId,
       videoTier: callVideoTierFromWire(state.videoTier),
+      recording: state.recording,
+    );
+  }
+
+  /// 지금 통화의 녹화를 시작한다(진행자만 — 서버가 확인한다). 실패하면 서버 문구로 ApiException. "녹화 중" 표시는 서버의
+  /// call:state로 모두에게 같이 뜬다.
+  Future<void> startCallRecording({
+    bool audioOnly = false,
+    bool minutes = false,
+  }) async {
+    final roomId = callController.roomId;
+    if (roomId == null) return;
+    await api!.startCallRecording(
+      roomId,
+      audioOnly: audioOnly,
+      minutes: minutes,
+    );
+  }
+
+  /// 지금 통화의 녹화를 멈춘다 — 파일은 서버가 마무리해 대화방에 올린다.
+  Future<void> stopCallRecording() async {
+    final roomId = callController.roomId;
+    if (roomId == null) return;
+    await api!.stopCallRecording(roomId);
+  }
+
+  /// 지금 통화의 화이트보드를 그림(PNG)으로 그 대화방에 올린다 — 보내기 대기열로 보내서 연결이 끊겨 있어도 잃지 않는다. 보드 뷰
+  /// 토픽은 게시글로. [auto]면 마지막 사람이 나가며 저절로 저장한 것(글에 그렇게 적는다).
+  Future<void> saveCallWhiteboard({bool auto = false}) async {
+    final roomId = callController.roomId;
+    final board = callController.whiteboard;
+    if (roomId == null || board == null || board.book.isEmpty) return;
+    final png = await board.renderPng();
+    await postWhiteboardImage(roomId, png, auto: auto);
+  }
+
+  /// 화이트보드 그림 [png]를 [roomId] 대화방에 올린다([saveCallWhiteboard]).
+  @visibleForTesting
+  Future<void> postWhiteboardImage(
+    String roomId,
+    Uint8List png, {
+    bool auto = false,
+    DateTime? now,
+  }) async {
+    final at = now ?? DateTime.now();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final name =
+        '${tr('화이트보드')} ${at.year}-${two(at.month)}-${two(at.day)} ${two(at.hour)}.${two(at.minute)}.png';
+    final text = auto ? tr('화상회의 화이트보드(통화가 끝나 저절로 저장)') : tr('화상회의 화이트보드');
+    final board = _findRoom(roomId)?.isBoard ?? false;
+    final payload = <String, dynamic>{
+      'type': board ? 'post' : 'image',
+      if (board) 'title': text,
+      'text': text,
+      'attachments': <Map<String, dynamic>>[],
+    };
+    final clientId = newClientId();
+    final files = await stashOutboxFiles(clientId, [
+      (bytes: png, name: name, mimeType: 'image/png', isImage: true),
+    ]);
+    if (files == null) {
+      // 웹 — 앱 폴더가 없어 바로 올린다.
+      final uploaded = await uploadPlainFile(
+        api!,
+        XFile.fromData(png, name: name, mimeType: 'image/png'),
+        isImage: true,
+      );
+      payload['attachments'] = [uploaded.toPayload()];
+      outbox.submit(roomId: roomId, clientId: clientId, payload: payload);
+      return;
+    }
+    outbox.submit(
+      roomId: roomId,
+      clientId: clientId,
+      payload: payload,
+      files: files,
     );
   }
 
@@ -2973,6 +3058,20 @@ class Session extends ChangeNotifier {
     final roomId = callController.roomId;
     // 나간 통화가 계속 진행 중이어도(남은 사람이 있어도) 다시 울리지 않게.
     if (roomId != null) _markCallAnswered(roomId);
+    // 마지막 사람이 나가면 화이트보드가 사라지므로(판은 참가자 기기에만 있다) 저장하지 않은 그림이 있으면 대화방에 올려 둔다.
+    // 남은 사람이 있으면 그 사람들이 판을 이어 쓰고, 마지막에 나가는 사람이 저장한다.
+    final board = callController.whiteboard;
+    if (roomId != null &&
+        board != null &&
+        board.hasUnsavedChanges &&
+        callController.aloneInCall) {
+      try {
+        await saveCallWhiteboard(auto: true);
+        _showToast(tr('화이트보드를 대화방에 그림으로 저장했습니다'));
+      } catch (_) {
+        // 저장하지 못해도 나가기는 그대로.
+      }
+    }
     await callController.leave();
     if (roomId != null) chatSocket.leaveCall(roomId);
     notifyListeners();

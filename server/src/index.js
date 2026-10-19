@@ -56,6 +56,7 @@ import { LIVEKIT_PROXY_PREFIX, attachLivekitUpgradeProxy, livekitHttpProxy } fro
 import { createBookmarksRouter } from './bookmarks.js';
 import { closeStaleCallCards } from './callCards.js';
 import { callsEnabled, createCallsRouter } from './calls.js';
+import { createCallRecordingRouter, resumeCallRecordings } from './callRecording.js';
 import { createCalendarsRouter } from './calendars.js';
 import { createCommentsRouter } from './comments.js';
 import { createFavoritesRouter } from './favorites.js';
@@ -249,6 +250,8 @@ app.use('/api', requireAuth, createOAuthRouter());
 app.use('/api', requireAuth, createOrgTreeRouter(io));
 // 화상회의(LiveKit) 참가 토큰 — LiveKit 비밀값이 없으면 라우트가 503으로 알려준다(calls.js).
 app.use('/api', requireAuth, createCallsRouter());
+// 화상회의 녹화(LiveKit Egress)·자동 회의록 — CALL_RECORDING_DIR이 없으면 시작이 503으로 알려 준다(callRecording.js·callMinutes.js).
+app.use('/api', requireAuth, createCallRecordingRouter(io));
 app.use('/api', requireAuth, createSecretChatsRouter(io));
 app.use('/api', requireAuth, searchRouter);
 app.use('/api', requireAuth, attachmentsRouter);
@@ -391,6 +394,8 @@ startExternalCalendarJob(io);
 await checkPendingMigrations();
 // 지난 실행 중에 "진행 중"으로 남은 화상회의 카드를 닫는다(통화 상태는 메모리에만 있어 재시작하면 사라진다 — callCards.js).
 await closeStaleCallCards().catch((err) => console.error('[call] 화상회의 카드 정리 실패:', err?.message ?? err));
+// 지난 실행 중에 끝내지 못한 녹화(녹화 중·마무리 중)와 회의록을 이어서 마무리한다(callRecording.js).
+await resumeCallRecordings(io).catch((err) => console.error('[call] 녹화 이어서 마무리 실패:', err?.message ?? err));
 // 팀에서 빠졌는데 그 팀 대화방에 남아 있는 멤버십을 뺀다(예전 규칙의 흔적 — teams.js sweepLeftoverTeamRoomMembers).
 // 아직 소켓이 붙기 전이라 DB 정리와 안내 메시지만 남는다.
 await sweepLeftoverTeamRoomMembers(io).catch((err) => console.error('[teams] 팀 밖 대화방 멤버십 정리 실패:', err?.message ?? err));

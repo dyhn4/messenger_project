@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/room.dart';
+import '../services/api_client.dart' show ApiException;
 import '../services/app_platform.dart';
 import '../services/room_chat_controller.dart';
 import '../services/session.dart';
@@ -12,6 +13,7 @@ import '../widgets/screen_share_picker.dart';
 import 'call/call_control_bar.dart';
 import 'call/call_logic.dart';
 import 'call/call_participants_panel.dart';
+import 'call/call_recording_widgets.dart';
 import 'call/call_snapshot.dart';
 import 'call/call_stage.dart';
 import 'call/call_whiteboard_view.dart';
@@ -198,6 +200,58 @@ class _CallScreenState extends State<CallScreen> {
     if (_whiteboardOpen) board.announceOpened();
   }
 
+  /// 화이트보드 [저장] — 지금 판을 그림으로 이 대화방에 올린다(보내기 대기열로 — 연결이 끊겨 있어도 이어서 보낸다).
+  Future<void> _saveWhiteboard() async {
+    try {
+      await widget.session.saveCallWhiteboard();
+      _showToast(tr('화이트보드를 대화방에 그림으로 올렸습니다'));
+    } catch (e) {
+      _showToast(tr('화이트보드를 저장하지 못했습니다: {e}', {'e': e}));
+    }
+  }
+
+  /// [녹화] — 녹화 중이 아니면 어떻게 녹화할지 묻고 시작, 녹화 중이면 멈춘다(진행자·시작한 사람만 — 서버가 확인한다).
+  Future<void> _toggleRecording() async {
+    final session = widget.session;
+    final controller = session.callController;
+    try {
+      if (controller.recording != null) {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(tr('녹화 멈추기')),
+            content: Text(tr('녹화를 멈추면 녹화 파일이 이 대화방에 올라갑니다.')),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: Text(tr('취소')),
+              ),
+              TextButton(
+                key: const ValueKey('call-record-stop-confirm'),
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: Text(tr('멈추기')),
+              ),
+            ],
+          ),
+        );
+        if (ok == true) await session.stopCallRecording();
+        return;
+      }
+      final choice = await showCallRecordingStartDialog(
+        context,
+        minutesAvailable: session.callMinutesEnabled,
+        summaryAvailable: session.callSummaryEnabled,
+      );
+      if (choice == null || !mounted) return;
+      await session.startCallRecording(
+        audioOnly: choice.audioOnly,
+        minutes: choice.minutes,
+      );
+    } catch (e) {
+      _showToast(e is ApiException ? e.message : e.toString());
+    }
+  }
+
   /// 참가자 패널의 마이크 단추 — 내 줄이면 내 마이크, 다른 사람이면(진행자만) 그 사람의 마이크를 켜고 끈다.
   void _toggleParticipantMic(CallPerson person) {
     final controller = widget.session.callController;
@@ -328,6 +382,25 @@ class _CallScreenState extends State<CallScreen> {
             foregroundColor: Colors.white,
             title: Text(widget.room.displayName(session.userId ?? '')),
             actions: [
+              // 녹화 — 서버에 녹화(Egress)가 설정돼 있고, 진행자(시작)·진행자나 시작한 사람(멈춤)일 때만.
+              if (ready &&
+                  session.callRecordingEnabled &&
+                  (controller.recording == null
+                      ? controller.isHost
+                      : controller.canStopRecording))
+                IconButton(
+                  key: const ValueKey('call-record'),
+                  tooltip: controller.recording == null
+                      ? tr('녹화 시작')
+                      : tr('녹화 멈추기'),
+                  icon: Icon(
+                    controller.recording == null
+                        ? Icons.fiber_manual_record_outlined
+                        : Icons.stop_circle_outlined,
+                    color: Colors.redAccent,
+                  ),
+                  onPressed: _toggleRecording,
+                ),
               PopupMenuButton<CallViewMode>(
                 key: const ValueKey('call-view-menu'),
                 tooltip: tr('보기'),
@@ -382,6 +455,9 @@ class _CallScreenState extends State<CallScreen> {
                                     board: whiteboard,
                                     onClose: () =>
                                         setState(() => _whiteboardOpen = false),
+                                    onSave: widget.room.isSecret
+                                        ? null
+                                        : _saveWhiteboard,
                                   )
                                 : CallStage(
                                     tiles: tiles,
@@ -390,6 +466,17 @@ class _CallScreenState extends State<CallScreen> {
                                     resolveUrl: session.resolveUrl,
                                   ),
                           ),
+                          if (ready && controller.recording != null)
+                            Positioned(
+                              left: 12,
+                              top: showWhiteboard ? 56 : 12,
+                              child: CallRecordingPill(
+                                recording: controller.recording!,
+                                onStop: controller.canStopRecording
+                                    ? _toggleRecording
+                                    : null,
+                              ),
+                            ),
                           if (controller.micRequested)
                             Positioned(
                               left: 16,

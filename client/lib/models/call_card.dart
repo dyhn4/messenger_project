@@ -3,6 +3,7 @@
 library;
 
 import '../l10n/tr.dart';
+import 'call_recording.dart';
 
 enum CallCardEventKind { start, join, leave, decline }
 
@@ -56,6 +57,9 @@ class CallCard {
   final bool answered;
   final List<CallCardEvent> events;
 
+  /// 이 통화에서 한 녹화들(시작 순) — 녹화 파일·회의록 상태(서버 callCards.js refreshCallCardRecordings).
+  final List<CallRecordingEntry> recordings;
+
   const CallCard({
     required this.active,
     required this.startedAt,
@@ -63,6 +67,7 @@ class CallCard {
     this.duration,
     this.answered = false,
     this.events = const [],
+    this.recordings = const [],
   });
 
   static CallCard? fromJson(Object? raw) {
@@ -84,6 +89,10 @@ class CallCard {
       events: [
         for (final e in (raw['events'] as List? ?? const []))
           ?CallCardEvent.fromJson(e),
+      ],
+      recordings: [
+        for (final r in (raw['recordings'] as List? ?? const []))
+          ?CallRecordingEntry.fromJson(r),
       ],
     );
   }

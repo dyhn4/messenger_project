@@ -107,3 +107,30 @@ export const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'tangotalk';
 export const LIVEKIT_API_SECRET = optionalSecret('LIVEKIT_API_SECRET', '.livekit-secret');
 export const LIVEKIT_PORT = Number(process.env.LIVEKIT_PORT) || 7880;
 export const LIVEKIT_URL = process.env.LIVEKIT_URL || null;
+
+/**
+ * 화상회의 녹화(LiveKit Egress — callRecording.js). Egress는 Docker 전용이라(Windows 설치 프로그램에 넣을 수 없다) 관리자가 따로
+ * 띄우고(README "화상회의 녹화·회의록") 녹화 파일이 떨어지는 폴더를 이 서버와 함께 쓴다:
+ *  - CALL_RECORDING_DIR: 이 서버에서 본 그 폴더(예: D:\tangotalk\recordings). **이 값이 있어야 녹화가 켜진다**(없으면 단추도 안 보인다).
+ *  - CALL_RECORDING_EGRESS_DIR: Egress 컨테이너 안에서 본 같은 폴더(docker의 -v ...:/out — 기본 /out).
+ *  - CALL_RECORDING_MAX_MINUTES: 한 번 녹화의 최대 길이(분, 기본 240 — 넘으면 저절로 멈춘다).
+ */
+export const CALL_RECORDING_DIR = process.env.CALL_RECORDING_DIR || null;
+export const CALL_RECORDING_EGRESS_DIR = (process.env.CALL_RECORDING_EGRESS_DIR || '/out').replace(/[\\/]+$/, '');
+export const CALL_RECORDING_MAX_MINUTES = Math.max(1, Number(process.env.CALL_RECORDING_MAX_MINUTES) || 240);
+
+/**
+ * 자동 회의록(callMinutes.js) — 녹음을 받아쓰고(음성 인식) 요약한다. 둘 다 바깥 서비스라 관리자가 정했을 때만 켜진다.
+ *  - 받아쓰기: OpenAI 호환 `/audio/transcriptions` API. CALL_TRANSCRIBE_URL은 그 앞까지의 주소(예: https://api.openai.com/v1, 사내에
+ *    띄운 faster-whisper·whisper.cpp 서버의 http://10.0.0.5:8000/v1). 키·모델·언어는 그 서비스에 맞게. **URL이 있어야 회의록이 켜진다.**
+ *  - 요약: CALL_SUMMARY_URL(OpenAI 호환 `/chat/completions` — 사내 LLM 서버 등)이 있으면 그것을, 없고 ANTHROPIC_API_KEY가 있으면 Claude를
+ *    쓴다. 둘 다 없으면 받아쓰기만 남긴다. 모델은 CALL_SUMMARY_MODEL(Claude 기본 claude-opus-5-5).
+ */
+export const CALL_TRANSCRIBE_URL = (process.env.CALL_TRANSCRIBE_URL || '').replace(/\/+$/, '') || null;
+export const CALL_TRANSCRIBE_API_KEY = process.env.CALL_TRANSCRIBE_API_KEY || null;
+export const CALL_TRANSCRIBE_MODEL = process.env.CALL_TRANSCRIBE_MODEL || 'whisper-1';
+export const CALL_TRANSCRIBE_LANGUAGE = process.env.CALL_TRANSCRIBE_LANGUAGE ?? 'ko';
+export const CALL_SUMMARY_URL = (process.env.CALL_SUMMARY_URL || '').replace(/\/+$/, '') || null;
+export const CALL_SUMMARY_API_KEY = process.env.CALL_SUMMARY_API_KEY || null;
+export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
+export const CALL_SUMMARY_MODEL = process.env.CALL_SUMMARY_MODEL || null;

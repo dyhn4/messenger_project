@@ -3709,3 +3709,50 @@ export const wikiPageVersions = pgTable(
   },
   (t) => [index('wiki_page_versions_page_idx').on(t.pageId, t.createdAt)],
 );
+
+/**
+ * 화상회의 녹화 한 번(callRecording.js)과 그 회의록(callMinutes.js). 진행자가 [녹화]를 누르면 한 줄 만들고 LiveKit Egress에 녹화를
+ * 시킨다. 멈추면(또는 통화가 끝나면) Egress가 파일을 다 쓸 때까지 기다렸다 업로드 폴더로 옮겨 대화방에 파일 메시지로 올리고(message_id),
+ * 회의록을 원했으면 녹음을 받아쓰고 요약해 여기에 둔다. 진행 상태를 DB에 두는 것은 서버가 녹화 중에 다시 시작돼도 이어서
+ * 마무리하기 위해서다(서버가 켜질 때 resumeCallRecordings).
+ *
+ * status: 'recording'(녹화 중) → 'processing'(파일 마무리·옮기는 중) → 'done' | 'failed'.
+ * minutes_status: 'none'(회의록 안 함) | 'pending' → 'transcribing' → 'summarizing' → 'done' | 'failed'.
+ */
+export const callRecordings = pgTable(
+  'call_recordings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    // 그 통화의 화상회의 카드(messages.call_card) — 카드에 녹화·회의록 상태를 보여 준다. 카드 없이 되살린 통화면 null일 수 있다.
+    callMessageId: uuid('call_message_id').references(() => messages.id, { onDelete: 'set null' }),
+    startedBy: uuid('started_by').references(() => users.id, { onDelete: 'set null' }),
+    startedByName: text('started_by_name').notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    // true면 음성만(mp3), 아니면 영상(mp4).
+    audioOnly: boolean('audio_only').notNull().default(false),
+    // 녹화 Egress와 그 파일(Egress 쪽에서 본 경로). 영상 녹화에 회의록까지 원하면 받아쓰기용 음성 Egress를 하나 더 돌린다(minutes_*).
+    egressId: text('egress_id'),
+    filePath: text('file_path'),
+    minutesEgressId: text('minutes_egress_id'),
+    minutesFilePath: text('minutes_file_path'),
+    status: text('status').notNull().default('recording'),
+    error: text('error'),
+    durationMs: integer('duration_ms'),
+    // 대화방에 올린 녹화 파일 메시지.
+    messageId: uuid('message_id').references(() => messages.id, { onDelete: 'set null' }),
+    minutesStatus: text('minutes_status').notNull().default('none'),
+    // 받아쓴 글([mm:ss] 줄들)과 요약(마크다운), 회의록을 못 만든 이유.
+    transcript: text('transcript'),
+    summary: text('summary'),
+    minutesError: text('minutes_error'),
+    // 통화에 함께한 사람 이름(요약할 때 알려 준다 — 녹화를 멈출 때의 화상회의 카드에서).
+    participantNames: jsonb('participant_names').notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('call_recordings_room_idx').on(t.roomId, t.startedAt), index('call_recordings_status_idx').on(t.status)],
+);

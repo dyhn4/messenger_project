@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/admin.dart';
 import '../models/announcement.dart';
+import '../models/call_recording.dart';
 import '../models/drive.dart';
 import '../models/wiki.dart';
 import '../models/board_category.dart';
@@ -1983,12 +1984,53 @@ class ApiClient {
 
   /// 이 서버에서 화상회의를 쓸 수 있는지 + LiveKit 접속 주소(server/src/calls.js).
   /// LiveKit을 안 깐 서버면 enabled=false로 오고, 클라이언트는 통화 버튼 자체를 감춘다.
-  Future<({bool enabled, String? url})> fetchCallsConfig() async {
+  /// [recording]·[minutes]·[summary]는 녹화(LiveKit Egress)·회의록 받아쓰기·요약을 이 서버가 하는지(예전 서버면 false).
+  Future<
+    ({bool enabled, String? url, bool recording, bool minutes, bool summary})
+  >
+  fetchCallsConfig() async {
     final body = await _get('/api/calls/config') as Map<String, dynamic>;
     return (
       enabled: body['enabled'] as bool? ?? false,
       url: body['url'] as String?,
+      recording: body['recording'] == true,
+      minutes: body['minutes'] == true,
+      summary: body['summary'] == true,
     );
+  }
+
+  /// 통화 녹화 시작(진행자만 — 서버 callRecording.js). [audioOnly]면 음성만, [minutes]면 끝난 뒤 회의록을 만든다.
+  Future<CallRecording> startCallRecording(
+    String roomId, {
+    bool audioOnly = false,
+    bool minutes = false,
+  }) async {
+    final body =
+        await _post('/api/rooms/$roomId/call/recording', {
+              'audioOnly': audioOnly,
+              'minutes': minutes,
+            })
+            as Map<String, dynamic>;
+    return CallRecording.fromJson(body['recording'] as Map<String, dynamic>);
+  }
+
+  /// 통화 녹화 멈춤(진행자·시작한 사람) — 파일은 서버가 마무리해 대화방에 올린다.
+  Future<void> stopCallRecording(String roomId) async {
+    await _delete('/api/rooms/$roomId/call/recording');
+  }
+
+  /// 녹화 한 건과 회의록(받아쓰기·요약).
+  Future<CallRecording> fetchCallRecording(String id) async {
+    final body = await _get('/api/call-recordings/$id') as Map<String, dynamic>;
+    return CallRecording.fromJson(body['recording'] as Map<String, dynamic>);
+  }
+
+  /// 못 만든 회의록을 다시 만든다(녹화를 시작한 사람·토픽 관리자).
+  Future<CallRecording> retryCallMinutes(String id) async {
+    final body =
+        await _post('/api/call-recordings/$id/minutes/retry', const {})
+            as Map<String, dynamic>;
+    return CallRecording.fromJson(body['recording'] as Map<String, dynamic>);
   }
 
   /// 이 방의 화상회의 참가 토큰. 방 멤버가 아니거나(403) 비밀 대화면(400) 서버가 거부한다.

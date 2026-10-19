@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { callSummaryText } from './calls.js';
 import { addUserCallEvent, closeStaleCallCard, endCallCard, newCallCard } from './callEvents.js';
+import { stopCallRecording } from './callRecording.js';
+import { CALL_CARD_MAX_RECORDINGS, cardRecordingEntry, participantNamesFromCard } from './callRecordingRules.js';
+import { listRecordingsForCallMessage } from './db/queries/callRecordings.js';
 import {
+  findMessageById,
   insertMessage,
   listActiveCallCardMessages,
   updateMessageCallCard,
@@ -112,6 +116,10 @@ export async function postCallLeft(io, state, userId, wasIn) {
     await recordCallEvent(io, state.roomId, userId, 'leave');
   }
   if (!state.ended) return;
+  // 통화가 끝나면 녹화도 멈춘다(마무리 — 파일 올리기·회의록 — 는 뒤에서 이어 간다). 카드를 닫기 전에 멈춰 카드에 "마무리 중"이 먼저 실린다.
+  await stopCallRecording({ io, roomId: state.roomId, reason: 'call-ended' }).catch((err) =>
+    console.error('[call] 통화가 끝나 녹화를 멈추지 못했습니다:', err?.message ?? err),
+  );
   if (await finishCallCard(io, state.roomId, state.ended)) return;
   if (state.ended.restored && !state.ended.answered) return;
   const room = await findRoomById(state.roomId);
@@ -119,6 +127,44 @@ export async function postCallLeft(io, state, userId, wasIn) {
   const users = await Promise.all(state.ended.participantIds.map(findUserById));
   const names = users.filter(Boolean).map((u) => u.name ?? u.username ?? '알 수 없음');
   await postSystemMessage(io, room, callSummaryText(state.ended, names));
+}
+
+/** 지금 진행 중인 통화의 카드 메시지 id — 녹화를 그 카드에 붙인다(callRecording.js). 카드가 없으면 null. */
+export function liveCallCardMessageId(roomId) {
+  return liveCards.get(roomId)?.messageId ?? null;
+}
+
+/** 이 카드에서 함께한 사람 이름(시작·참여) — 녹화를 멈출 때 요약에 넘길 참석자. 진행 중이면 메모리의 카드, 아니면 DB. */
+export async function callCardParticipantNames(roomId, messageId) {
+  const live = liveCards.get(roomId);
+  if (live && live.messageId === messageId) return participantNamesFromCard(live.card);
+  if (!messageId) return [];
+  return participantNamesFromCard((await findMessageById(messageId))?.callCard);
+}
+
+/**
+ * 카드에 실린 녹화 목록(card.recordings — 상태·회의록 단계)을 DB의 녹화 줄로 다시 만들어 알린다. 녹화를 시작·멈춤·마무리·회의록 단계가
+ * 바뀔 때마다 부른다. 진행 중인 통화면 메모리의 카드도 바꿔 둔다(그 뒤의 참여·나감이 녹화 목록을 덮어쓰지 않게). 끝난 통화의 카드도
+ * 고친다(회의록은 통화가 끝난 뒤에 나온다).
+ */
+export function refreshCallCardRecordings(io, roomId, messageId) {
+  if (!messageId) return Promise.resolve();
+  return enqueue(roomId, async () => {
+    const rows = await listRecordingsForCallMessage(messageId);
+    const recordings = rows.slice(0, CALL_CARD_MAX_RECORDINGS).map(cardRecordingEntry);
+    const live = liveCards.get(roomId);
+    let card;
+    if (live && live.messageId === messageId) {
+      live.card = { ...live.card, recordings };
+      card = live.card;
+    } else {
+      const message = await findMessageById(messageId);
+      if (!message?.callCard) return;
+      card = { ...message.callCard, recordings };
+    }
+    await updateMessageCallCard(messageId, card);
+    emitCard(io, roomId, messageId, card);
+  });
 }
 
 /** 서버가 뜰 때 — 지난번 실행 중에 "진행 중"으로 남은 카드를 닫는다(통화 상태는 메모리에만 있어서 재시작하면 사라진다). */

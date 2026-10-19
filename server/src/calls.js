@@ -16,6 +16,8 @@ import { LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_PORT, LIVEKIT_URL } from '
 import { findRoomById, isRoomMember } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { LIVEKIT_PROXY_PREFIX } from './livekitProxy.js';
+import { minutesEnabled, summaryEnabled } from './callMinutes.js';
+import { recordingEnabled } from './callRecording.js';
 
 /**
  * 화상회의(LiveKit SFU) — 대화방 하나당 회의방 하나를 그대로 대응시킨다(LiveKit room 이름 =
@@ -112,9 +114,20 @@ function livekitUrlFor(req) {
 export function createCallsRouter() {
   const router = Router();
 
-  /** 이 서버에서 화상회의를 쓸 수 있는지 + 접속 주소. 클라이언트가 통화 버튼을 보여줄지 정한다. */
+  /**
+   * 이 서버에서 화상회의를 쓸 수 있는지 + 접속 주소. 클라이언트가 통화 버튼을 보여줄지 정한다. recording·minutes·summary는 녹화(Egress)·
+   * 회의록 받아쓰기·요약이 설정됐는지 — 통화 화면이 [녹화]와 "회의록 만들기"를 보여줄지 정한다(callRecording.js·callMinutes.js).
+   */
   router.get('/calls/config', (req, res) => {
-    res.json({ enabled: callsEnabled(), url: callsEnabled() ? livekitUrlFor(req) : null });
+    const enabled = callsEnabled();
+    const recording = enabled && recordingEnabled();
+    res.json({
+      enabled,
+      url: enabled ? livekitUrlFor(req) : null,
+      recording,
+      minutes: recording && minutesEnabled(),
+      summary: recording && minutesEnabled() && summaryEnabled(),
+    });
   });
 
   /**

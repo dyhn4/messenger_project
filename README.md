@@ -413,6 +413,12 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 통화 중 **입장·퇴장 알림**("○○님이 들어왔습니다/나갔습니다")
 - 대화방에는 통화 한 통마다 **화상회의 카드** 한 장 — 진행 중(경과 시간 + [참여]), 종료(길이), 부재중. 누르면
   시작·참여·거절·나감을 시간순으로 펼쳐 봅니다(`messages.call_card`, `server/src/callCards.js`)
+- **녹화·자동 회의록**(관리자가 녹화 서버를 켰을 때 — 아래 "화상회의 녹화·회의록") — 진행자가 통화 화면 위의 ● 단추로 **영상과 소리(mp4)** 또는
+  **소리만(mp3)** 녹화를 시작하면 모두의 화면 왼쪽 위에 "녹화 중 12:34"가 뜨고, 멈추거나 통화가 끝나면 녹화 파일이 **시작한 사람 이름으로
+  대화방에 올라갑니다**. "끝나면 회의록 만들기"를 고르면 녹음을 **받아쓰고 요약**해(요약·논의한 내용·결정 사항·할 일) 화상회의 카드의
+  **[회의록]**으로 보고, 복사하거나 **팀 위키에 새 페이지로 저장**합니다
+- **화이트보드 저장** — 화이트보드 도구 줄의 **저장**으로 지금 판을 그림(1920×1080 PNG)으로 대화방에 올리고, 저장하지 않은 그림이 있는 채
+  **마지막 사람이 통화를 나가면 저절로 올립니다**(보내기 대기열로 — 연결이 끊겨 있어도 잃지 않음)
 - 사내망 밖(LTE/5G)에서도 됨(외부 접속을 설정한 서버 — [환경 변수 설정](#환경-변수-설정)의 "외부(LTE/5G)에서 접속하기")
 
 **알림**
@@ -1610,7 +1616,10 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다(한 �
   비밀 대화의 대기열은 들어갔습니다(위 "보내기 대기열·오프라인 보기"). 남은 것: 오프라인 중 댓글 쓰기·사진/파일 메시지의 설명 고치기, 비밀 대화의
   사진·파일 대기열, 웹 앱의 오프라인 저장(IndexedDB), 서버에서 빠진 구간을 메우는 기록 동기화(지금은 받아 본 페이지만 쌓인다).
 - **자동 자리 비움** — 접속 상태가 접속/미접속뿐이라 한동안 손대지 않으면 "자리 비움"으로 바뀌는 것이 없습니다.
-- **통화 녹화·회의록** — 화상회의 녹화(LiveKit egress)와 자동 회의록이 없고, 화이트보드는 통화 중에만 쓰고 저장되지 않습니다.
+- **통화 녹화·회의록 후속(남은 것)** — Egress 녹화·받아쓰기·요약 회의록·화이트보드 저장은 들어갔습니다(위 "화상회의 녹화·회의록").
+  남은 것: Egress·Redis를 설치 프로그램이 함께 띄우기(지금은 관리자가 Docker로 — Windows 바이너리가 없음), 받아쓰기에서 말한 사람 나누기(지금은 섞인
+  소리 하나를 받아써서 누가 말했는지 모름 — 사람마다 따로 녹음해야 함), 회의록의 할 일을 바로 할 일로 만들기, 녹화 파일 보관 기간·용량 관리,
+  통화 중 실시간 자막, 저장한 화이트보드를 다음 통화에서 다시 불러와 이어 그리기·여러 장.
 
 ### 4순위 — 협업 도구로서 부족한 것
 
@@ -2462,6 +2471,9 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/api/rooms/invite-bulk` | **여러 토픽/그룹채팅에 한 번에 초대** — 본문 `{ teamId, userIds(1~200), roomIds(1~100) }`. 정회원 이상(준회원 403). 방마다 단건 초대(`/rooms/:id/invite`)와 **같은 코드**로 처리해 시스템 메시지·`room:created`가 똑같고, 방별 부분 성공을 허용합니다. 내가 멤버인 같은 팀의 토픽(보관된 토픽·보드 뷰 포함)·그룹채팅만 되고, 1:1·나와의 대화·비밀 대화는 `notAllowed`, 내가 멤버가 아니거나 없는 방은 `notMember`(이름도 알려 주지 않음), 다른 팀 방은 `wrongTeam`입니다. 응답 `{ results: [{ roomId, roomName, roomType, invited:[{userId,name}], alreadyMembers:[…], failed:[{userId,name,reason}], error? }] }`(요청한 방 순서) — 이미 멤버인 사람은 `alreadyMembers`로 빠지고(중복 초대·시스템 메시지 없음), 이 팀 멤버가 아닌 사람은 `failed` |
 | POST | `/api/rooms/:id/convert-to-topic` | **그룹채팅 → 토픽 전환** — 본문 `{ name(1~60자), description(0~300자, 선택) }`. 그 방 멤버인 정회원 이상만(준회원 403, 팀의 토픽 생성 권한 설정 `topicCreationPolicy`도 새 토픽 만들기와 같이 따름), 1:1(비밀 대화 포함)·나와의 대화·이미 토픽인 방은 400. 한 트랜잭션에서 `type`을 `topic`으로 바꾸고 **비공개**로 두며 그룹 전용 아이콘 칸과 나만의 별칭(`custom_name`)을 비우고, 요청자를 토픽 관리자로 올립니다(대화 내용·멤버는 그대로, 되돌릴 수 없음). 방에 시스템 메시지 `OOO 님이 그룹채팅을 'OO' 토픽으로 전환했습니다.`와 `room:created`를 보내고 감사 로그(`room.convert`)를 남깁니다 |
 | POST | `/api/rooms/:id/leave` | 나가기(숨기기) |
+| POST / DELETE | `/api/rooms/:id/call/recording` | **화상회의 녹화 시작/멈춤**(`callRecording.js`) — 시작 `{ audioOnly?, minutes? }`는 진행 중인 통화의 진행자만(409 `진행자만 녹화를 시작할 수 있습니다.`·`이미 녹화하고 있습니다.`, 녹화·받아쓰기가 설정 안 됐으면 503, Egress가 못 받으면 502, 같은 방 10분에 10번 넘으면 429) → 201 `{ recording }`. 멈춤은 진행자·시작한 사람(403). 녹화 중 표시는 소켓 `call:state`의 `recording`, 진행은 `call:card`의 `card.recordings` |
+| GET | `/api/call-recordings/:id` | 녹화 한 건과 **회의록** — 그 방 멤버만(아니면 404). `{ recording: { id, roomId, callMessageId, startedBy, startedByName, startedAt, endedAt, durationMs, audioOnly, status(recording·processing·done·failed), error, messageId, minutesStatus(none·pending·transcribing·summarizing·done·failed), minutesError, participantNames, transcript, summary, canRetry } }` |
+| POST | `/api/call-recordings/:id/minutes/retry` | 못 만든 회의록 다시 만들기 — 녹화를 시작한 사람·토픽 관리자, 받아쓴 글이나 녹음이 남아 있을 때(403), 이미 만드는 중이면 409 |
 | POST | `/api/rooms/:id/favorite` | 즐겨찾기 토글 |
 | POST | `/api/rooms/:id/muted` | 알림 끄기 토글 |
 | GET | `/api/rooms/:id` | 방 정보 조회 |
@@ -3063,11 +3075,47 @@ Node 서버가 이를 같은 PC의 LiveKit(`ws://127.0.0.1:7880`)으로 넘깁�
 LiveKit 데이터 채널(reliable, topic `call`)로 `{"type":"hand","raised":true}`를 보내 알리고(서버는 끼지
 않음, `canPublishData` 권한은 토큰에 이미 있음), 늦게 들어온 사람에게는 내 손이 올라가 있으면 한 번 다시
 보내며, 누가 손을 들면 하단에 `○○님이 손을 들었습니다` 토스트가 뜨고 통화를 나가면 손은 자동으로
-내려갑니다. 녹화·반응·호스트의 강제 음소거는 아직 없습니다.
+내려갑니다. 반응(이모지)은 아직 없습니다. 녹화는 아래 "화상회의 녹화·회의록".
 
-**녹화는 넣지 않았습니다.** LiveKit의 녹화 컴포넌트(Egress)는 바이너리 배포가 없고 Docker 전용
-(+Redis)이라 Windows 설치 모델과 맞지 않고, 클라이언트 녹화도 Windows에 쓸 만한 부품이
-없습니다(`flutter_webrtc`의 MediaRecorder는 Windows 미구현). 대신 대화에 **화상회의 카드**가 남습니다(아래).
+**화상회의 녹화·회의록**(`server/src/callRecording.js`·`callMinutes.js`·`callRecordingRules.js`, 앱 `screens/call/call_recording_widgets.dart`·
+`screens/call_minutes_screen.dart`) — 녹화는 LiveKit의 녹화 컴포넌트 **Egress**가 합니다. Egress는 바이너리 배포 없이 **Docker 전용(+Redis)**이라
+설치 프로그램에 넣지 못해서, **관리자가 따로 띄우고 `.env`에 녹화 폴더를 적어야 켜집니다**(안 적으면 녹화 단추가 보이지 않고 다른 기능은 그대로).
+클라이언트 녹화는 Windows에 쓸 만한 부품이 없습니다(`flutter_webrtc`의 MediaRecorder는 Windows 미구현).
+
+- **녹화** — 통화 화면 위 ● 단추(진행자만 — 서버가 확인)를 누르면 "영상과 소리(mp4)"/"소리만(mp3)"과 "끝나면 회의록 만들기"(받아쓰기가 설정됐을 때만)를
+  고르고, 서버가 Egress에 그 회의방 전체를 파일로 쓰게 합니다(RoomComposite — 말하는 사람이 크게, 화면 공유는 공유 화면이 크게, 소리만은 32kbps
+  mp3로 한 시간에 약 14MB). Egress는 숨은 참가자로 붙어 참가자 목록에는 안 보이므로 **녹화하는 동안 모두의 통화 화면 왼쪽 위에 "녹화 중 12:34"**가
+  뜨고(`call:state`의 `recording`), 시작·멈춤을 알립니다(나중에 들어온 사람에게는 "이 화상회의는 녹화되고 있습니다"). 한 통화에 한 번에 하나, 같은
+  방에서 10분에 10번까지, 한 번에 최대 `CALL_RECORDING_MAX_MINUTES`분(기본 240 — 넘으면 저절로 멈춤). 읽기 전용·보관된 토픽은 토픽 관리자만.
+- **멈춤·올리기** — 진행자나 시작한 사람이 멈추거나(● → 확인, 또는 "녹화 중" 표시를 누름) **통화가 끝나면 저절로 멈춥니다**. 서버는 Egress가 파일을
+  다 썼다고 알릴 때까지 기다렸다가(최대 30분 — 답이 없어도 파일이 있으면 그걸 씀) 녹화 폴더에서 업로드 폴더로 옮기고, **녹화를 시작한 사람
+  이름으로 대화방에 파일 메시지**(`화상회의 녹화 · 12분`, 파일 이름 `화상회의 녹화 2026-10-19 14.30.mp4` — 보드 뷰 토픽은 게시글)를 올립니다.
+  화상회의 카드에는 녹화마다 한 줄(녹화 중·파일 마무리 중·실패와 회의록 단계)이 붙습니다(`card.recordings`, 카드 하나에 20개까지).
+- **자동 회의록** — 녹음을 **OpenAI 호환 받아쓰기 API**(`/audio/transcriptions` — OpenAI Whisper나 사내에 띄운 faster-whisper·whisper.cpp 서버)로
+  받아쓰고(구간마다 `[03:25]` 시각), **요약 서비스**(OpenAI 호환 `/chat/completions` — 사내 LLM 서버 — 또는 Claude)로 요약(요약·논의한 내용·결정 사항·할 일)
+  합니다. 영상 녹화에 회의록까지 고르면 받아쓰기용 소리만 녹음을 하나 더 돌리고 다 쓰면 지웁니다. 화상회의 카드의 **[회의록]**(받아쓰는 중·요약하는
+  중이면 그 단계)을 누르면 회의록 화면 — 회의 정보·참석자·요약·받아쓰기 전문, **복사**(마크다운)와 **팀 위키에 저장**(새 페이지). 못 만들었으면 이유와
+  **다시 만들기**(시작한 사람·토픽 관리자 — 받아쓴 글이 있으면 요약부터). 요약 서비스가 없으면 받아쓰기만 남습니다. 녹음을 그 서비스로 보내므로,
+  회사 밖으로 내보내기 어려우면 사내 서버 주소를 적으세요.
+- **진행 상태는 DB(`call_recordings`)에** 두어, 녹화 중이나 마무리 중에 서버가 다시 시작돼도 켜질 때 멈추고 이어서 마무리합니다(그 통화의 녹화는
+  거기서 끝남 — 계속 녹화하려면 다시 시작).
+- **켜는 법**(Egress를 띄울 PC — Docker가 되는 리눅스 서버나 WSL2):
+  1. Redis를 띄웁니다(`docker run -d --name redis -p 6379:6379 redis:7`).
+  2. LiveKit 설정(`livekit.yaml`, 설치 폴더)에 `redis: { address: <Redis 주소>:6379 }`를 더하고 `TangoTalkLiveKit` 서비스를 다시 시작합니다
+     (Egress가 LiveKit과 Redis로 이야기합니다).
+  3. 녹화 폴더(이 서버에서도 열 수 있는 곳 — 같은 PC의 폴더나 공유 폴더)를 만들고 Egress를 띄웁니다 — `egress.yaml`에 `api_key`(기본 `tangotalk`)·
+     `api_secret`(`server/.livekit-secret`), `ws_url: ws://<LiveKit 주소>:7880`, `redis`를 적고
+     `docker run -d --name egress --cap-add SYS_ADMIN -e EGRESS_CONFIG_FILE=/out/egress.yaml -v <녹화 폴더>:/out livekit/egress`.
+  4. `server/.env`에 `CALL_RECORDING_DIR=<녹화 폴더 — 이 서버에서 본 경로>`(컨테이너 안 경로가 `/out`이 아니면 `CALL_RECORDING_EGRESS_DIR`도),
+     회의록을 쓰려면 `CALL_TRANSCRIBE_URL`(+`CALL_TRANSCRIBE_API_KEY`·`CALL_TRANSCRIBE_MODEL`·`CALL_TRANSCRIBE_LANGUAGE`)과 요약용
+     `CALL_SUMMARY_URL`(+`CALL_SUMMARY_API_KEY`·`CALL_SUMMARY_MODEL`) 또는 `ANTHROPIC_API_KEY`(모델 기본 `claude-opus-5-5`)를 적고 서버를 다시
+     시작합니다(`.env.example` 참고). 앱은 `GET /api/calls/config`의 `recording`·`minutes`·`summary`로 단추를 보입니다.
+  5. 서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0134`)가 필요합니다.
+
+**화이트보드 저장** — 화이트보드 판은 참가자 기기에만 있고(데이터 채널로 주고받음) 서버는 모릅니다. 그래서 도구 줄의 **저장**(⤓)이 지금 판을 그림
+(1920×1080 PNG, 화면과 같은 그리기 코드 — `services/call_whiteboard.dart` `paintWhiteboard`)으로 그 대화방에 올리고(`화상회의 화이트보드` — 보드 뷰
+토픽은 게시글), 저장하지 않은 그림이 남은 채 **마지막 사람이 통화를 나가면 저절로 올립니다**(`화상회의 화이트보드(통화가 끝나 저절로 저장)`). 둘 다 보내기
+대기열로 보내서 연결이 끊겨 있어도 이어서 올라갑니다. 비밀 대화는 통화가 없어 해당 없음. 대화에 **화상회의 카드**도 남습니다(아래).
 
 **수신·거절** — 통화가 시작되면 방 멤버 전원에게 `call:state`가 가고, 앱은 "진행 중 + 나는 참가자 아님 + 나는 통화
 중 아님"이면 **화상회의 요청** 창을 띄웁니다(앱이 꺼진 안드로이드는 FCM 전화 알림). 한 번 응답한 통화(참여·거절·나감,

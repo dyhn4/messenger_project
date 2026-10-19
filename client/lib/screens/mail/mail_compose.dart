@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -8,13 +9,15 @@ import '../../services/api_client.dart' show ApiException;
 import '../../services/mail_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/rich_text_format.dart';
 import '../../l10n/tr.dart';
 
 /// 쓰기 창을 닫은 결과 — 보냄·임시 저장함·그냥 닫음.
 enum MailComposeOutcome { sent, saved, closed }
 
 /// 메일 쓰기 — 보내는 계정(여럿이면 고름), 받는 사람·참조·숨은 참조(쉼표로 여러 명, 쓰는 동안 자동 완성 — 같은 팀 주소록과 보낸 적 있는
-/// 바깥 주소, "주소록"으로 같은 팀에서 메일을 연결한 사람 고르기), 제목, 본문(계정의 서명이 저절로 — 새 메일은 끝, 답장·전달은 인용 앞),
+/// 바깥 주소, "주소록"으로 같은 팀에서 메일을 연결한 사람 고르기), 제목, 본문(서식 — 굵게·기울임·밑줄·취소선·글자색·제목·인용·목록·링크,
+/// 공지와 같은 도구모음 — 서식을 쓰면 서버가 HTML 본문도 함께 보낸다. 계정의 서명이 저절로 — 새 메일은 끝, 답장·전달은 인용 앞),
 /// 첨부(20MB까지). 답장·전달·임시 저장본 이어 쓰기면 [draft]에 채워 온다(mail.dart draftFrom·draftFromSaved). **임시 저장**은
 /// 단추·닫을 때 묻기·1분마다(바뀐 게 있으면) 임시보관함에 넣는다(앞의 저장본은 서버가 지운다).
 Future<MailComposeOutcome> showMailCompose(
@@ -108,13 +111,14 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
     text: widget.draft.bcc.map((a) => a.wire).join(', '),
   );
   late final _subject = TextEditingController(text: widget.draft.subject);
-  late final _body = TextEditingController(
+  late final _body = RichTextEditingController(
     text: withSignature(
       widget.draft.text,
       _signatureFor(_accountId),
       widget.draft.signatureSlot,
     ),
   );
+  final _bodyFocus = FocusNode();
   late bool _showCc = widget.draft.cc.isNotEmpty || widget.draft.bcc.isNotEmpty;
   final _uploads = <_Upload>[];
 
@@ -133,6 +137,12 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
   @override
   void initState() {
     super.initState();
+    // 서식 있는 임시 저장본을 이어 쓰면 서식을 되살린다(서명은 이미 들어 있어 본문 그대로).
+    final format = widget.draft.format;
+    if (format != null &&
+        widget.draft.signatureSlot == MailSignatureSlot.none) {
+      _body.load(widget.draft.text, format);
+    }
     _savedSnapshot = _snapshot();
     _autosave = Timer.periodic(kMailAutosaveInterval, (_) {
       if (_changedSinceSave && !_sending && !_saving && !_uploading) {
@@ -147,6 +157,7 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
     for (final c in [_to, _cc, _bcc, _subject, _body]) {
       c.dispose();
     }
+    _bodyFocus.dispose();
     super.dispose();
   }
 
@@ -175,6 +186,7 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
     _bcc.text,
     _subject.text,
     _body.text,
+    jsonEncode(textFormatToJson(_body.snapshot().format)),
     _uploads.length,
     _savedAttachments.length,
   ].join('\u0000');
@@ -270,18 +282,26 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
       _uploads.fold<int>(0, (s, a) => s + a.size) +
       _savedAttachments.fold<int>(0, (s, a) => s + a.size);
 
+  /// 보낼(저장할) 본문 — 앞뒤 빈 줄까지 그대로(답장은 인용 앞에 빈 줄이 있다)와 서식 구간.
+  ({String text, List<Map<String, dynamic>>? format}) get _bodyOut {
+    final b = _body.snapshot();
+    return (text: b.text, format: textFormatToJson(b.format));
+  }
+
   /// 임시 저장 — 새 저장본을 기억하고(올린 첨부는 이제 저장본 안에 있다), [quiet]가 아니면 알린다. 저장했으면 true.
   Future<bool> _saveDraft({bool quiet = false}) async {
     if (_saving) return false;
     setState(() => _saving = true);
     try {
+      final body = _bodyOut;
       final saved = await widget.api.saveDraft(
         account: _accountId,
         to: splitAddresses(_to.text),
         cc: splitAddresses(_cc.text),
         bcc: splitAddresses(_bcc.text),
         subject: _subject.text.trim(),
-        text: _body.text,
+        text: body.text,
+        format: body.format,
         attachments: _uploadBodies,
         savedAttachments: [for (final a in _savedAttachments) a.index],
         saved: _saved,
@@ -356,6 +376,7 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
       _sending = true;
       _error = null;
     });
+    final body = _bodyOut;
     try {
       await widget.api.send(
         account: _accountId,
@@ -363,7 +384,8 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
         cc: cc,
         bcc: bcc,
         subject: _subject.text.trim(),
-        text: _body.text,
+        text: body.text,
+        format: body.format,
         attachments: _uploadBodies,
         savedAttachments: [for (final a in _savedAttachments) a.index],
         saved: _saved,
@@ -449,6 +471,44 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
       ),
       ?trailing,
     ],
+  );
+
+  /// 본문 — 위에 서식 도구모음(공지·노트와 같은 것 — 글자색·제목까지), 아래 입력칸(Ctrl+B·I·U, 인용 줄의 세로줄).
+  Widget _bodyEditor(ThemeData theme) => Container(
+    decoration: BoxDecoration(
+      border: Border.all(color: theme.colorScheme.outline),
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        RichFormatToolbar(
+          key: const ValueKey('mail-compose-toolbar'),
+          controller: _body,
+          focusNode: _bodyFocus,
+          showColor: true,
+          showHeadings: true,
+          showRule: true,
+        ),
+        Divider(height: 1, color: theme.dividerColor),
+        RichFieldWrapper(
+          controller: _body,
+          child: TextField(
+            key: const ValueKey('mail-compose-body'),
+            controller: _body,
+            focusNode: _bodyFocus,
+            minLines: 12,
+            maxLines: null,
+            keyboardType: TextInputType.multiline,
+            decoration: InputDecoration(
+              hintText: tr('내용'),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.all(12),
+            ),
+          ),
+        ),
+      ],
+    ),
   );
 
   @override
@@ -609,17 +669,7 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
                     ),
                   ),
                 const SizedBox(height: 8),
-                TextField(
-                  key: const ValueKey('mail-compose-body'),
-                  controller: _body,
-                  minLines: 12,
-                  maxLines: null,
-                  keyboardType: TextInputType.multiline,
-                  decoration: InputDecoration(
-                    hintText: tr('내용'),
-                    border: const OutlineInputBorder(),
-                  ),
-                ),
+                _bodyEditor(theme),
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),

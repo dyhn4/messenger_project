@@ -16,8 +16,8 @@
 //       3) 비밀값·인증서: DB 암호화 키·JWT 비밀값·웹 푸시 키·서버 인증서(certs)를 백업 것으로 되돌리고, .env는 이 PC 값(DB 접속·
 //          첨부파일 위치·화상회의)을 둔 채 나머지(외부 접속 주소·웹 앱 도메인 등)를 백업 값으로 합친다. 바꾸기 전 파일은
 //          backups\before-restore_<시각>-config\에 남긴다.
-//       4) 첨부파일: 백업 폴더 옆(TangoTalk-Backup\uploads)에 첨부파일 백업이 있으면 첨부파일 폴더로 풀어 놓는다(이미 있는 파일은
-//          그대로 둔다).
+//       4) 첨부파일·회사 메일함: 백업 폴더 옆(TangoTalk-Backup\uploads·mailstore)에 미러가 있으면 이 PC의 첨부파일·회사 메일함
+//          폴더로 풀어 놓는다(이미 있는 파일은 그대로 둔다 — [--no-uploads]면 둘 다 건너뜀).
 //       마이그레이션은 Restore-Data.ps1이 이어서 돌린다(옛 백업이면 지금 코드에 맞게 올린다).
 //
 // 종료 코드: 0 성공 · 2 백업 암호가 틀림 · 3 이 서버로 복원할 수 없는 백업(더 새 서버의 것 등) · 1 그 밖의 실패.
@@ -196,6 +196,7 @@ async function main() {
         compatible: compat.ok,
         compatError: compat.error ?? null,
         mirror: findMirrorFor(backupDir),
+        mailMirror: findMirrorFor(backupDir, 'mailstore'),
         users,
       }),
     );
@@ -253,19 +254,31 @@ async function main() {
   }
 
   if (!flags.includes('--no-uploads')) {
-    const mirrorDir = findMirrorFor(backupDir);
-    if (!mirrorDir) {
-      warnings.push('백업 폴더 옆에 첨부파일 백업(uploads)이 없어 첨부파일은 복원하지 않았습니다 — 같은 PC라면 첨부파일은 그대로 있습니다.');
-    } else if (!bundle.mirrorKey) {
-      warnings.push('이 백업에는 첨부파일 키가 없어 첨부파일은 복원하지 않았습니다.');
-    } else {
-      const uploadsDir = process.env.UPLOADS_DIR || path.join(serverDir, 'uploads');
-      console.log(`- 첨부파일 복원 중... (${uploadsDir})`);
+    // 첨부파일과 회사 메일함(자체 메일 서버가 받은 메일 원문 — 목록은 DB에 있다) — 외부 위치에 둔 미러를 이 PC의 폴더로 푼다.
+    const targets = [
+      { kind: 'uploads', label: '첨부파일', dir: process.env.UPLOADS_DIR || path.join(serverDir, 'uploads'), required: true },
+      { kind: 'mailstore', label: '회사 메일함', dir: process.env.MAIL_STORE_DIR || path.join(serverDir, 'mailstore'), required: false },
+    ];
+    for (const t of targets) {
+      const mirrorDir = findMirrorFor(backupDir, t.kind);
+      if (!mirrorDir) {
+        // 회사 메일함은 자체 메일 서버를 쓴 서버에만 있다 — 없으면 말없이 넘어간다.
+        if (t.required) {
+          warnings.push('백업 폴더 옆에 첨부파일 백업(uploads)이 없어 첨부파일은 복원하지 않았습니다 — 같은 PC라면 첨부파일은 그대로 있습니다.');
+        }
+        continue;
+      }
+      if (!bundle.mirrorKey) {
+        warnings.push(`이 백업에는 첨부파일 키가 없어 ${t.label}은(는) 복원하지 않았습니다.`);
+        continue;
+      }
+      console.log(`- ${t.label} 복원 중... (${t.dir})`);
       let last = 0;
       const result = await restoreMirror({
         mirrorDir,
         key: bundle.mirrorKey,
-        targetDir: uploadsDir,
+        targetDir: t.dir,
+        kind: t.kind,
         onProgress: (done, total) => {
           if (done === total || Date.now() - last > 2000) {
             last = Date.now();
@@ -278,7 +291,7 @@ async function main() {
       });
       if (result) {
         console.log(`  새로 풀어 놓음 ${result.restored}개, 이미 있음 ${result.skipped}개`);
-        if (result.failed.length) warnings.push(`첨부파일 ${result.failed.length}개는 복원하지 못했습니다(손상되었거나 이름이 잘못됨).`);
+        if (result.failed.length) warnings.push(`${t.label} ${result.failed.length}개는 복원하지 못했습니다(손상되었거나 이름이 잘못됨).`);
       }
     }
   }

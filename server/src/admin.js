@@ -6,7 +6,8 @@ import { AUDIT, recordAudit, toAuditLogDto } from './audit.js';
 import { safeAvatarColor } from './avatarRules.js';
 import { endUserCallAccess } from './callAccess.js';
 import { EXTERNAL_ADDRESS, UPLOADS_DIR, WEB_DOMAIN } from './config.js';
-import { localMailSetupHints, parseLocalMailInput } from './localMailRules.js';
+import { checkDkimRecords, dkimRecords, ensureDkimKey } from './localMailAuth.js';
+import { localDomainsOf, localMailSetupHints, parseLocalMailInput } from './localMailRules.js';
 import { applyLocalMailSettings, localMailStatus } from './localMailServer.js';
 import { mailOAuthProblem, mailOAuthRedirectUri } from './webmailOAuth.js';
 import { encryptField } from './crypto.js';
@@ -525,9 +526,16 @@ export function createAdminRouter(io) {
    * 관리자 콘솔 "메일" 탭의 웹메일 칸 — 자체 메일 서버(회사 도메인으로 직접 받기 — localMailServer.js)의 설정·상태·DNS 안내와, 웹메일을
    * Google·Microsoft 로그인으로 연결하게 할지(webmailOAuth.js — 로그인 보안 탭의 클라이언트를 같이 씀, [problem]은 켜도 쓸 수 없는 이유).
    */
+  /** 이 서버의 DKIM 키(없으면 만들어 둔다 — 관리자가 DNS에 올릴 공개키를 미리 볼 수 있게) — 도메인마다의 레코드. 개인키는 내보내지 않는다. */
+  async function dkimView(s) {
+    const key = await ensureDkimKey(s, (patch) => updateServerSettings(patch));
+    return { key, records: dkimRecords(localDomainsOf(s), key.selector, key.publicKey) };
+  }
+
   async function webmailView() {
     const s = await getServerSettings();
     const asEnabled = { ...s, mailOauthGoogle: true, mailOauthMicrosoft: true };
+    const dkim = await dkimView(s);
     return {
       local: {
         enabled: !!s.localMailEnabled,
@@ -538,6 +546,10 @@ export function createAdminRouter(io) {
         status: localMailStatus(),
         hints: localMailSetupHints(s, EXTERNAL_ADDRESS?.host ?? WEB_DOMAIN ?? null),
         outboundReady: mailReady(s),
+        // 받는 메일의 보낸 쪽 확인(SPF·DKIM·DMARC)으로 스팸 거르기 — 기본 켬.
+        spamFilter: s.localMailSpamFilter !== false,
+        // 보내는 메일 DKIM 서명 — 도메인마다 DNS에 올릴 TXT 레코드.
+        dkim: { enabled: !!s.localMailDkimEnabled, selector: dkim.key.selector, records: dkim.records },
       },
       oauth: {
         redirectUri: mailOAuthRedirectUri(),
@@ -549,6 +561,12 @@ export function createAdminRouter(io) {
 
   router.get('/admin/webmail', async (req, res) => {
     res.json(await webmailView());
+  });
+
+  /** DNS에 DKIM 레코드가 올라가 있는지 → `{ results: [{ domain, ok, found }] }`(켜기 전에 확인). */
+  router.post('/admin/webmail/dkim-check', async (req, res) => {
+    const { key, records } = await dkimView(await getServerSettings());
+    res.json({ results: await checkDkimRecords(records, key.publicKey) });
   });
 
   /** 바꾸기 `{ local?: { enabled?, domains?, port?, maxMessageMb?, quotaMb? }, oauth?: { google?, microsoft? } }` — 넘긴 것만. */
@@ -577,6 +595,10 @@ export function createAdminRouter(io) {
     const detail = [];
     if (Object.keys(fields).some((k) => k.startsWith('localMail'))) {
       detail.push(`자체 메일 서버: ${updated.localMailEnabled ? `켜짐(${updated.localMailDomains ?? ''}, 포트 ${updated.localMailPort})` : '꺼짐'}`);
+      if ('localMailSpamFilter' in fields) detail.push(`스팸 거르기 ${updated.localMailSpamFilter ? '켬' : '끔'}`);
+      if ('localMailDkimEnabled' in fields || 'localMailDkimSelector' in fields) {
+        detail.push(`DKIM 서명 ${updated.localMailDkimEnabled ? '켬' : '끔'}(선택자 ${updated.localMailDkimSelector ?? 'tangotalk'})`);
+      }
     }
     if ('mailOauthGoogle' in fields || 'mailOauthMicrosoft' in fields) {
       detail.push(`메일 OAuth: Google ${updated.mailOauthGoogle ? '켬' : '끔'}, Microsoft ${updated.mailOauthMicrosoft ? '켬' : '끔'}`);

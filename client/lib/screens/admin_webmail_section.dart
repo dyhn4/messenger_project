@@ -10,7 +10,8 @@ import '../widgets/app_toast.dart';
 /// 관리자 콘솔 "메일" 탭 아래의 웹메일 칸(server admin.js /admin/webmail).
 ///  - **자체 메일 서버** — 회사 도메인의 MX를 이 서버로 두면 그 도메인으로 오는 메일을 직접 받아 사람마다 "회사 메일함"에 넣는다
 ///    (주소는 `아이디@도메인`). 받는 포트(기본 25)·한 통 크기·한 사람 메일함 크기를 정하고, 도메인마다 DNS에 넣을 MX를 보여 준다.
-///    바깥으로 보낼 때는 위의 메일(SMTP)로 보낸다.
+///    바깥으로 보낼 때는 위의 메일(SMTP)로 보낸다. 받는 메일은 보낸 쪽 확인(SPF·DKIM·DMARC)으로 스팸을 거르고(끌 수 있음), 보내는
+///    메일에는 DKIM 서명을 할 수 있다(DNS에 올릴 TXT 레코드를 보여 주고, 올라갔는지 확인한 뒤 켠다).
 ///  - **OAuth 연결** — Gmail·Microsoft 365 계정을 앱 비밀번호 대신 그쪽 로그인으로 연결하게 한다(로그인 보안 탭의 클라이언트를 같이 씀).
 /// 예전 서버(이 기능이 없음)면 아무것도 그리지 않는다.
 class AdminWebmailSection extends StatefulWidget {
@@ -25,6 +26,10 @@ class _AdminWebmailSectionState extends State<AdminWebmailSection> {
   WebmailAdminSettings? _s;
   bool _loaded = false;
   bool _saving = false;
+
+  /// "DNS 확인" 결과(도메인마다) — 누르기 전에는 null.
+  List<({String domain, bool ok, String? found})>? _dkimCheck;
+  bool _checking = false;
   final _domains = TextEditingController();
   final _port = TextEditingController();
   final _maxMb = TextEditingController();
@@ -112,6 +117,117 @@ class _AdminWebmailSectionState extends State<AdminWebmailSection> {
     );
   }
 
+  Future<void> _checkDkim() async {
+    setState(() => _checking = true);
+    try {
+      final r = await widget.session.api!.checkDkimRecords();
+      if (mounted) setState(() => _dkimCheck = r);
+    } catch (e) {
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  /// 스팸 거르기와 보내는 메일 DKIM 서명.
+  List<Widget> _authSection(WebmailAdminSettings s, TextStyle? small) {
+    final theme = Theme.of(context);
+    final check = _dkimCheck;
+    return [
+      SwitchListTile(
+        key: const ValueKey('admin-webmail-spam'),
+        contentPadding: EdgeInsets.zero,
+        title: Text(tr('스팸 거르기(SPF·DKIM·DMARC 확인)')),
+        subtitle: Text(
+          tr(
+            '보낸 도메인이 거절하라고 한 위조 메일은 받지 않고, 보낸 쪽 확인에 실패한 메일·우리 회사 도메인을 사칭한 메일은 스팸편지함에 넣습니다. 확인하지 못한 메일은 받은편지함에 넣고 읽을 때 알립니다.',
+          ),
+          style: small,
+        ),
+        value: s.spamFilter,
+        onChanged: _saving
+            ? null
+            : (v) => _update(
+                () => widget.session.api!.updateWebmailAdmin(spamFilter: v),
+                done: v ? tr('스팸 거르기를 켰습니다.') : tr('스팸 거르기를 껐습니다.'),
+              ),
+      ),
+      if (s.dkimRecords.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Text(tr('보내는 메일 DKIM 서명'), style: theme.textTheme.titleSmall),
+        const SizedBox(height: 4),
+        Text(
+          tr(
+            '회사 메일함에서 바깥으로 보내는 메일에 이 서버의 키로 서명해 받는 쪽이 회사 도메인에서 보낸 메일임을 확인할 수 있게 합니다. 도메인마다 아래 TXT 레코드를 DNS에 올리고 "DNS 확인"이 맞다고 나온 뒤에 켜세요. SPF·DMARC 레코드는 보내는 메일 계정(SMTP)·발송 서비스의 안내를 따르세요.',
+          ),
+          style: small,
+        ),
+        for (final r in s.dkimRecords)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(
+                  tr('{name} TXT', {'name': r.name}),
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                ),
+                SelectableText(
+                  r.value,
+                  key: ValueKey('admin-webmail-dkim-${r.domain}'),
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    color: theme.hintColor,
+                  ),
+                ),
+                if (check != null)
+                  for (final c in check.where((c) => c.domain == r.domain))
+                    Text(
+                      c.ok
+                          ? tr('DNS에 올라가 있습니다.')
+                          : c.found == null
+                          ? tr('DNS에서 찾지 못했습니다(올린 뒤 퍼지는 데 시간이 걸릴 수 있습니다).')
+                          : tr('DNS의 값이 다릅니다: {found}', {'found': c.found!}),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: c.ok ? Colors.green : theme.colorScheme.error,
+                      ),
+                    ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            OutlinedButton(
+              key: const ValueKey('admin-webmail-dkim-check'),
+              onPressed: _checking ? null : _checkDkim,
+              child: Text(tr('DNS 확인')),
+            ),
+            FilterChip(
+              key: const ValueKey('admin-webmail-dkim'),
+              label: Text(tr('DKIM 서명')),
+              selected: s.dkimEnabled,
+              onSelected: _saving
+                  ? null
+                  : (v) => _update(
+                      () => widget.session.api!.updateWebmailAdmin(
+                        dkimEnabled: v,
+                      ),
+                      done: v ? tr('DKIM 서명을 켰습니다.') : tr('DKIM 서명을 껐습니다.'),
+                    ),
+            ),
+          ],
+        ),
+      ],
+    ];
+  }
+
   Widget _number(TextEditingController c, String label, String key) => SizedBox(
     width: 120,
     child: TextField(
@@ -132,11 +248,15 @@ class _AdminWebmailSectionState extends State<AdminWebmailSection> {
     final hint = theme.hintColor;
     final small = theme.textTheme.bodySmall?.copyWith(color: hint);
     final status = s.listening
-        ? tr('{port}번 포트로 받는 중 · 받은 메일 {received}통, 거절 {rejected}통', {
-            'port': s.listeningPort ?? s.localPort,
-            'received': s.received,
-            'rejected': s.rejected,
-          })
+        ? tr(
+            '{port}번 포트로 받는 중 · 받은 메일 {received}통(스팸 {junked}통), 거절 {rejected}통',
+            {
+              'port': s.listeningPort ?? s.localPort,
+              'received': s.received,
+              'junked': s.junked,
+              'rejected': s.rejected,
+            },
+          )
         : s.listenError ?? (s.localEnabled ? tr('받는 포트를 열지 못했습니다.') : tr('꺼짐'));
     return Column(
       key: const ValueKey('admin-webmail'),
@@ -147,7 +267,7 @@ class _AdminWebmailSectionState extends State<AdminWebmailSection> {
         const SizedBox(height: 4),
         Text(
           tr(
-            '회사 도메인의 MX 레코드를 이 서버로 두면 그 도메인으로 오는 메일을 이 서버가 직접 받아 사람마다 "회사 메일함"(아이디@도메인)에 넣습니다. 메일 화면에 회사 메일함이 저절로 생깁니다. 바깥 주소로 보낼 때는 위의 보내는 메일 계정(SMTP)으로 보내므로, 그 SMTP가 회사 주소로 보내는 것을 허락해야 합니다(회사 메일 서버·발송 서비스의 도메인 인증). 스팸 거르기는 없으니 받는 규칙으로 정리하세요.',
+            '회사 도메인의 MX 레코드를 이 서버로 두면 그 도메인으로 오는 메일을 이 서버가 직접 받아 사람마다 "회사 메일함"(아이디@도메인)에 넣습니다. 메일 화면에 회사 메일함이 저절로 생깁니다. 바깥 주소로 보낼 때는 위의 보내는 메일 계정(SMTP)으로 보내므로, 그 SMTP가 회사 주소로 보내는 것을 허락해야 합니다(회사 메일 서버·발송 서비스의 도메인 인증).',
           ),
           style: small,
         ),
@@ -223,6 +343,7 @@ class _AdminWebmailSectionState extends State<AdminWebmailSection> {
               ],
             ),
           ),
+        ..._authSection(s, small),
         const Divider(height: 28),
         Text(
           tr('Google·Microsoft 로그인으로 메일 연결(OAuth)'),

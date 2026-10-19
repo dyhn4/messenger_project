@@ -45,6 +45,14 @@ const ROOT_MARKER = 'tangotalk-backup-root.json';
 export const MIRROR_DIR = 'uploads';
 export const MIRROR_MARKER = 'tangotalk-uploads-mirror.json';
 export const MIRROR_INDEX = 'index.json';
+/**
+ * 외부 위치에 파일마다 맞춰 두는 미러 — 첨부파일(uploads)과 회사 메일함(mailstore — 자체 메일 서버가 받은 메일 원문, 목록·플래그는 DB에
+ * 있다). [context]는 파일마다 암호화할 때 섞는 이름의 앞부분(첨부파일은 예전 백업과 같은 'upload').
+ */
+export const MIRRORS = Object.freeze({
+  uploads: Object.freeze({ dir: MIRROR_DIR, marker: MIRROR_MARKER, context: 'upload', label: '첨부파일' }),
+  mailstore: Object.freeze({ dir: 'mailstore', marker: 'tangotalk-mailstore-mirror.json', context: 'mail', label: '회사 메일함' }),
+});
 const LOCK_FILE = '.backup.lock';
 const STATUS_FILE = 'backup-status.json';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -434,24 +442,26 @@ export const MASS_DELETE_MIN = 50;
 export const MASS_DELETE_RATIO = 0.2;
 
 /**
- * 첨부파일 폴더([sourceDir])를 외부 위치의 미러(<extRoot>\uploads)에 맞춘다 — 파일마다 [key](미러 키)로 암호화해서
+ * [kind]의 폴더([sourceDir] — 'uploads'는 첨부파일, 'mailstore'는 회사 메일함 원문)를 외부 위치의 미러(<extRoot>\uploads·mailstore)에
+ * 맞춘다(MIRRORS) — 파일마다 [key](미러 키)로 암호화해서
  * "이름.enc"로 둔다. 크기·수정 시각이 색인과 같으면 다시 보내지 않고, 원본에서 사라진 파일은 미러에서도 지운다. 단 한꺼번에
  * 너무 많이 사라졌으면(MASS_DELETE_*) 지우지 않고 경고만 남긴다 — 미러는 지금 상태를 따라가지만, 사고로 첨부파일이 통째로
  * 사라졌을 때 그 빈 상태를 백업까지 따라가게 하면 안 된다. 미러 키가 바뀌었으면(다른 서버의 DB로 복원한 경우 등) 미러를
  * 비우고 새로 만든다. 첨부파일 폴더와 외부 위치 둘 다 네트워크일 수 있어 비동기 호출만 쓴다.
  */
-export async function mirrorUploads({ sourceDir, extRoot, key, onProgress = () => {}, log = console }) {
-  if (!(await exists(sourceDir))) throw new Error(`첨부파일 폴더(${sourceDir})를 찾을 수 없습니다.`);
-  const mirrorDir = path.join(extRoot, MIRROR_DIR);
+export async function mirrorFolder({ kind = 'uploads', sourceDir, extRoot, key, onProgress = () => {}, log = console }) {
+  const m = MIRRORS[kind];
+  if (!(await exists(sourceDir))) throw new Error(`${m.label} 폴더(${sourceDir})를 찾을 수 없습니다.`);
+  const mirrorDir = path.join(extRoot, m.dir);
   await assertNotLinkAsync(mirrorDir);
   const keyId = mirrorKeyId(key);
-  const markerPath = path.join(mirrorDir, MIRROR_MARKER);
+  const markerPath = path.join(mirrorDir, m.marker);
   const marker = await readJsonAsync(markerPath, null);
   if ((await exists(mirrorDir)) && marker?.keyId !== keyId) {
     if (!marker && (await fsp.readdir(mirrorDir)).length > 0) {
-      throw new Error(`${mirrorDir} 폴더에 다른 파일이 들어 있어 첨부파일을 백업하지 않습니다.`);
+      throw new Error(`${mirrorDir} 폴더에 다른 파일이 들어 있어 ${m.label}을(를) 백업하지 않습니다.`);
     }
-    if (marker) log.warn?.('[backup] 첨부파일 미러 키가 바뀌어 첨부파일 백업을 새로 만듭니다.');
+    if (marker) log.warn?.(`[backup] ${m.label} 미러 키가 바뀌어 ${m.label} 백업을 새로 만듭니다.`);
     await fsp.rm(mirrorDir, { recursive: true, force: true, maxRetries: 3 });
   }
   await fsp.mkdir(mirrorDir, { recursive: true });
@@ -483,7 +493,7 @@ export async function mirrorUploads({ sourceDir, extRoot, key, onProgress = () =
     }
     await fsp.mkdir(path.dirname(target), { recursive: true });
     const tmp = `${target}.tmp`;
-    await pipeline(fs.createReadStream(full), createEncryptStream(key, `upload:${rel}`), fs.createWriteStream(tmp));
+    await pipeline(fs.createReadStream(full), createEncryptStream(key, `${m.context}:${rel}`), fs.createWriteStream(tmp));
     await fsp.rename(tmp, target);
     index[rel] = { size: st.size, mtimeMs: Math.trunc(st.mtimeMs) };
     copied++;
@@ -514,6 +524,9 @@ export async function mirrorUploads({ sourceDir, extRoot, key, onProgress = () =
   onProgress(sources.length, sources.length);
   return { total: sources.length, copied, deleted, deletionSkipped, bytes };
 }
+
+/** 첨부파일 미러(예전 이름 — mirrorFolder의 'uploads'). */
+export const mirrorUploads = (opts) => mirrorFolder({ ...opts, kind: 'uploads' });
 
 /** 백업 폴더의 상태 파일(마지막 결과) — 서버와 시작 메뉴 "백업"이 함께 쓰고, 관리자 콘솔이 읽는다. */
 export function readBackupStatus(root) {

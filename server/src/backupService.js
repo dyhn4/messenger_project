@@ -13,13 +13,13 @@ import {
   createBackup,
   createBackupScheduler,
   listBackups,
-  mirrorUploads,
+  mirrorFolder,
   prepareExternalRoot,
   pruneBackups,
   readBackupStatus,
   writeBackupStatus,
 } from './backup.js';
-import { UPLOADS_DIR } from './config.js';
+import { MAIL_STORE_DIR, UPLOADS_DIR } from './config.js';
 import { decryptField, encryptField } from './crypto.js';
 import { sql } from 'drizzle-orm';
 import { db } from './db/client.js';
@@ -50,6 +50,8 @@ export const backupPaths = Object.freeze({
   pgBin: process.env.PG_BIN || (installed ? path.join(appDir, 'pgsql', 'bin') : null),
   certsDir: path.join(serverDir, 'certs'),
   uploadsDir: UPLOADS_DIR,
+  /** 회사 메일함(자체 메일 서버가 받은 메일 원문) — 첨부파일처럼 외부 위치에만 미러로 둔다. */
+  mailStoreDir: MAIL_STORE_DIR,
   migrationsJournal: path.join(serverDir, 'drizzle', 'meta', '_journal.json'),
 });
 
@@ -219,18 +221,30 @@ export async function performBackup({ kind, owner = 'server', onPhase = () => {}
 
     let external = null;
     if (settings.destination) {
-      external = { path: settings.destination, ok: false, error: null, uploads: null, at: null };
+      external = { path: settings.destination, ok: false, error: null, uploads: null, mailstore: null, at: null };
       try {
         const extRoot = await prepareExternalRoot(settings.destination);
         onPhase('외부 위치로 복사 중');
         await copyBackupsTo(root, extRoot, settings.keep);
         onPhase('첨부파일 복사 중');
-        external.uploads = await mirrorUploads({
+        external.uploads = await mirrorFolder({
+          kind: 'uploads',
           sourceDir: backupPaths.uploadsDir,
           extRoot,
           key: mirrorKey,
           onProgress,
         });
+        // 회사 메일함 — 자체 메일 서버를 한 번도 안 썼으면 폴더가 없다(건너뜀). 목록·플래그는 DB 백업에 있다.
+        if (fs.existsSync(backupPaths.mailStoreDir)) {
+          onPhase('회사 메일함 복사 중');
+          external.mailstore = await mirrorFolder({
+            kind: 'mailstore',
+            sourceDir: backupPaths.mailStoreDir,
+            extRoot,
+            key: mirrorKey,
+            onProgress,
+          });
+        }
         await pruneBackups(extRoot, settings.keep);
         Object.assign(external, { ok: true, at: Date.now() });
       } catch (e) {

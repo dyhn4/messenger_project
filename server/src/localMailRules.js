@@ -82,6 +82,19 @@ export function parseLocalMailInput(body, current = {}) {
     }
     fields.localMailQuotaMb = n;
   }
+  for (const [key, column] of [
+    ['spamFilter', 'localMailSpamFilter'],
+    ['dkimEnabled', 'localMailDkimEnabled'],
+  ]) {
+    if (b[key] === undefined) continue;
+    if (typeof b[key] !== 'boolean') return { error: '켜기 값을 확인하세요.' };
+    fields[column] = b[key];
+  }
+  if (b.dkimSelector !== undefined) {
+    const sel = typeof b.dkimSelector === 'string' ? b.dkimSelector.trim().toLowerCase() : '';
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(sel)) return { error: 'DKIM 선택자는 영문 소문자·숫자·하이픈으로 넣으세요(예: tangotalk).' };
+    fields.localMailDkimSelector = sel;
+  }
   if (b.enabled !== undefined) {
     if (typeof b.enabled !== 'boolean') return { error: '켜기 값을 확인하세요.' };
     const domains = 'localMailDomains' in fields ? fields.localMailDomains : current.localMailDomains;
@@ -127,15 +140,20 @@ export function searchTextOf(parsed) {
 }
 
 /** 폴더 목록 모양(imapflow list 항목처럼 — webmailRules.js folderList에 그대로 넣는다). [counts] `{ 폴더: { unseen, total } }`. */
-export function localFolderEntries(counts = {}) {
-  return LOCAL_FOLDERS.map((path) => ({
+// [custom]은 사람이 만든 폴더 이름들(특수 용도가 없어 이름을 바꾸고 지울 수 있다).
+export function localFolderEntries(counts = {}, custom = []) {
+  return [...LOCAL_FOLDERS, ...custom].map((path) => ({
     path,
     name: path,
-    specialUse: path === 'INBOX' ? null : LOCAL_SPECIAL_USE[path],
+    specialUse: path === 'INBOX' ? null : (LOCAL_SPECIAL_USE[path] ?? null),
     flags: new Set(),
+    delimiter: '/',
     status: { unseen: counts[path]?.unseen ?? 0, messages: counts[path]?.total ?? 0 },
   }));
 }
+
+/** 기본 폴더 이름인지(대소문자 무시 — 사람이 만든 폴더 이름으로 쓸 수 없다). */
+export const isLocalSystemFolder = (name) => LOCAL_FOLDERS.some((f) => f.toLowerCase() === String(name ?? '').toLowerCase());
 
 const addr = (a) => ({ name: a?.name ?? '', address: a?.address ?? '' });
 
@@ -143,6 +161,9 @@ const addr = (a) => ({ name: a?.name ?? '', address: a?.address ?? '' });
 export function localSummaryOf(row) {
   const to = Array.isArray(row.toList) ? row.toList : [];
   return {
+    messageId: row.messageId ?? null,
+    inReplyTo: row.inReplyTo ?? null,
+    references: Array.isArray(row.references) ? row.references : [],
     uid: row.uid,
     subject: row.subject || '(제목 없음)',
     from: addr({ name: row.fromName, address: row.fromAddress }),

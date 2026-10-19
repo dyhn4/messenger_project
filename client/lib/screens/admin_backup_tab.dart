@@ -683,6 +683,13 @@ List<String> backupStatusLines(BackupSettings s) {
             ? '(${formatFileSize(external.uploadsBytes!)})'
             : '',
       }),
+    if (external != null && external.ok && external.mailTotal != null)
+      tr('회사 메일함 {p0}통{p1}', {
+        'p0': external.mailTotal!,
+        'p1': external.mailBytes != null
+            ? '(${formatFileSize(external.mailBytes!)})'
+            : '',
+      }),
     if (external != null && !external.ok) ...[
       tr('외부 위치 복사 실패: {p0}', {'p0': external.error ?? tr('알 수 없는 이유')}),
       if (external.lastOkAt != null)

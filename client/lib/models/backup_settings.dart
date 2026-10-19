@@ -154,6 +154,10 @@ class BackupExternal {
   final int? uploadsCopied;
   final int? uploadsBytes;
 
+  /// 회사 메일함(자체 메일 서버가 받은 메일 원문) 미러 — 자체 메일 서버를 안 쓰면 null.
+  final int? mailTotal;
+  final int? mailBytes;
+
   const BackupExternal({
     this.path,
     this.ok = false,
@@ -162,10 +166,13 @@ class BackupExternal {
     this.uploadsTotal,
     this.uploadsCopied,
     this.uploadsBytes,
+    this.mailTotal,
+    this.mailBytes,
   });
 
   factory BackupExternal.fromJson(Map<String, dynamic> json) {
     final uploads = _map(json['uploads']);
+    final mail = _map(json['mailstore']);
     return BackupExternal(
       path: json['path'] as String?,
       ok: json['ok'] as bool? ?? false,
@@ -174,6 +181,8 @@ class BackupExternal {
       uploadsTotal: (uploads['total'] as num?)?.toInt(),
       uploadsCopied: (uploads['copied'] as num?)?.toInt(),
       uploadsBytes: (uploads['bytes'] as num?)?.toInt(),
+      mailTotal: (mail['total'] as num?)?.toInt(),
+      mailBytes: (mail['bytes'] as num?)?.toInt(),
     );
   }
 }

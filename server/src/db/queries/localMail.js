@@ -1,6 +1,6 @@
-import { and, desc, eq, ilike, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 import { db } from '../client.js';
-import { localMailMessages } from '../schema.js';
+import { localMailFolders, localMailMessages } from '../schema.js';
 
 /** 회사 메일함(자체 메일 서버)의 메일 표 — 원문 파일은 localMailStore.js가 다룬다. */
 
@@ -102,4 +102,57 @@ export function listExpiredTrash(before, limit = 500) {
     .from(localMailMessages)
     .where(and(eq(localMailMessages.folder, 'Trash'), isNotNull(localMailMessages.trashedAt), lt(localMailMessages.trashedAt, before)))
     .limit(limit);
+}
+
+// ── 사람이 만든 폴더 ──
+
+/** 이 계정에 사람이 만든 폴더 이름들(만든 차례). */
+export async function listLocalFolders(accountId) {
+  const rows = await db
+    .select({ name: localMailFolders.name })
+    .from(localMailFolders)
+    .where(eq(localMailFolders.accountId, accountId))
+    .orderBy(asc(localMailFolders.createdAt));
+  return rows.map((r) => r.name);
+}
+
+/** 폴더 만들기 — 대소문자만 다른 이름이 이미 있으면 false(고유 색인). */
+export async function insertLocalFolder(accountId, name) {
+  const rows = await db.insert(localMailFolders).values({ accountId, name }).onConflictDoNothing().returning({ id: localMailFolders.id });
+  return rows.length > 0;
+}
+
+/** 폴더 이름 바꾸기 — 폴더 행과 그 폴더의 메일을 한 번에. 그 폴더가 없으면 false. */
+export async function renameLocalFolder(accountId, from, to) {
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(localMailFolders)
+      .set({ name: to })
+      .where(and(eq(localMailFolders.accountId, accountId), eq(localMailFolders.name, from)))
+      .returning({ id: localMailFolders.id });
+    if (rows.length === 0) return false;
+    await tx
+      .update(localMailMessages)
+      .set({ folder: to })
+      .where(and(eq(localMailMessages.accountId, accountId), eq(localMailMessages.folder, from)));
+    return true;
+  });
+}
+
+/** 폴더 지우기(비어 있는지는 부르는 쪽이 본다). 지웠으면 true. */
+export async function deleteLocalFolder(accountId, name) {
+  const rows = await db
+    .delete(localMailFolders)
+    .where(and(eq(localMailFolders.accountId, accountId), eq(localMailFolders.name, name)))
+    .returning({ id: localMailFolders.id });
+  return rows.length > 0;
+}
+
+/** [folder]의 메일 수. */
+export async function localFolderMessageCount(accountId, folder) {
+  const [row] = await db
+    .select({ n: sql`count(*)::int` })
+    .from(localMailMessages)
+    .where(and(eq(localMailMessages.accountId, accountId), eq(localMailMessages.folder, folder)));
+  return row?.n ?? 0;
 }

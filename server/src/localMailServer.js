@@ -9,6 +9,7 @@ import { getServerSettings } from './db/queries/serverSettings.js';
 import { listUsersByUsernameIgnoringCase } from './db/queries/users.js';
 import { findLocalMailAccount, insertMailAccount, updateMailAccount } from './db/queries/webmail.js';
 import { localQuotaUsed } from './db/queries/localMail.js';
+import { authRecordOf, checkInboundMail } from './localMailAuth.js';
 import {
   LOCAL_IP_MESSAGES_PER_10MIN,
   LOCAL_RCPT_MAX,
@@ -27,7 +28,8 @@ import { applyRulesToNew, mailsToNotify, notifyNewMail } from './webmailNotify.j
  * (localMailStore.js). 관리자 콘솔 "메일" 탭에서 켜고 도메인·포트를 정한다(server_settings.localMail*). 받는 주소는 `아이디@도메인`
  * (localMailRules.js) — 우리 도메인이 아니거나 그런 사람이 없으면 받는 사람 단계에서 거절한다(남의 메일을 넘겨주는 열린 중계가 아니다).
  * 로그인(AUTH)은 받지 않고, 보내는 쪽 TLS(STARTTLS)는 이 서버의 인증서(certs/)로 받는다. 한 통 크기·메일함 크기·한 IP의 10분당 메일
- * 수에 상한이 있다. 스팸 거르기는 없다 — 받는 규칙(webmailNotify.js)으로 정리한다.
+ * 수에 상한이 있다. 스팸 거르기(관리자가 끌 수 있음 — 기본 켬)는 보낸 쪽 확인(SPF·DKIM·DMARC — localMailAuth.js)으로 한다: 보낸
+ * 도메인이 거절하라고 한 위조 메일은 받지 않고, 확인에 실패한 메일·우리 도메인을 사칭한 메일은 스팸편지함에 넣는다(받는 규칙·알림 없음).
  *
  * 받는 즉시 받는 규칙을 걸고, 알림을 켠 사람에게 소켓·푸시로 알린다. 회사 메일함에서 우리 도메인 사람에게 보낸 메일도 바깥을 거치지 않고
  * 여기(deliverLocal)로 바로 넣는다.
@@ -37,7 +39,7 @@ const ipLimiter = new RateLimiter({ max: LOCAL_IP_MESSAGES_PER_10MIN, windowMs: 
 setInterval(() => ipLimiter.prune(), 10 * 60 * 1000).unref();
 
 /** 지금 상태(관리자 콘솔). */
-let state = { listening: false, port: null, error: null, startedAt: null, received: 0, rejected: 0 };
+let state = { listening: false, port: null, error: null, startedAt: null, received: 0, rejected: 0, junked: 0 };
 let running = null; // { server, key }
 /** 소켓 서버(알림) — startLocalMailServer가 넣는다(관리자가 설정을 바꿔 다시 열 때도 같은 것). */
 let ioRef = null;
@@ -85,9 +87,10 @@ const envelopeOfParsed = (uid, p) => {
 
 /**
  * 우리 도메인 받는 사람들([recipients] — 주소)의 받은편지함에 [raw]를 넣는다. 받는 규칙을 걸고 알린다. 받는 사람이 겹치면 한 번만.
+ * [folder]가 'Junk'(스팸 거르기가 걸렀음)면 스팸편지함에 넣고 규칙·알림은 하지 않는다. [auth]는 보낸 쪽 확인 결과(표에 남김).
  * → `{ delivered: [userId], failed: [{ address, error }] }`.
  */
-export async function deliverLocal(io, raw, recipients, { settings = null, parsed = null } = {}) {
+export async function deliverLocal(io, raw, recipients, { settings = null, parsed = null, folder = 'INBOX', auth = null } = {}) {
   const s = settings ?? (await getServerSettings());
   const domains = localDomainsOf(s);
   const { quotaBytes } = localMailLimits(s);
@@ -111,8 +114,12 @@ export async function deliverLocal(io, raw, recipients, { settings = null, parse
       continue;
     }
     try {
-      const { uid } = await storeLocalMessage(account.id, raw, { folder: 'INBOX', quotaBytes, parsed: p });
+      const { uid } = await storeLocalMessage(account.id, raw, { folder, quotaBytes, parsed: p, auth });
       delivered.push(user.id);
+      if (folder !== 'INBOX') {
+        io?.to(`user:${account.userId}`).emit('mail:changed', { accountId: account.id });
+        continue;
+      }
       const envelopes = [envelopeOfParsed(uid, p)];
       const plan = await applyRulesToNew(account, mailBackend(account), envelopes).catch((err) => {
         console.error('[local-mail] 받는 규칙 실패:', err?.message ?? err);
@@ -209,13 +216,33 @@ function createServer(io, s) {
           return callback(smtpError(421, '4.7.0 Too many messages, try again later'));
         }
         try {
-          const raw = Buffer.concat(chunks);
-          const result = await deliverLocal(io, raw, session.envelope.rcptTo.map((r) => r.address), { settings: s });
+          let raw = Buffer.concat(chunks);
+          let folder = 'INBOX';
+          let auth = null;
+          if (s.localMailSpamFilter !== false) {
+            const checked = await checkInboundMail(raw, {
+              ip: session.remoteAddress,
+              helo: session.hostNameAppearsAs,
+              mailFrom: session.envelope.mailFrom?.address,
+              mta: name,
+              localDomains: domains,
+            });
+            if (checked.verdict === 'reject') {
+              state.rejected += 1;
+              return callback(smtpError(550, '5.7.1 Message rejected by the sender domain DMARC policy'));
+            }
+            if (checked.verdict === 'junk') folder = 'Junk';
+            auth = authRecordOf(checked);
+            // 확인 결과 머리(Authentication-Results·Received-SPF)는 Received 아래, 원래 머리 위에.
+            if (checked.headers) raw = Buffer.concat([chunks[0], Buffer.from(checked.headers), ...chunks.slice(1)]);
+          }
+          const result = await deliverLocal(io, raw, session.envelope.rcptTo.map((r) => r.address), { settings: s, folder, auth });
           if (result.delivered.length === 0) {
             state.rejected += 1;
             return callback(smtpError(450, '4.2.0 Mailbox unavailable'));
           }
           state.received += 1;
+          if (folder === 'Junk') state.junked += 1;
           callback(null, 'Message accepted');
         } catch (err) {
           console.error('[local-mail] 받기 실패:', err?.message ?? err);

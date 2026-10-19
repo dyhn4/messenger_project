@@ -167,6 +167,10 @@ test('목록 한 줄·첨부 여부·읽기 모양', () => {
     size: 1234,
   });
   assert.deepEqual(row, {
+    // 대화로 묶기 — 봉투에 없으면 비어 있다(webmailFollowup2.test.js가 채운 경우를 본다).
+    messageId: null,
+    inReplyTo: null,
+    references: [],
     uid: 7,
     subject: '(제목 없음)',
     from: { name: '김', address: 'kim@x.kr' },

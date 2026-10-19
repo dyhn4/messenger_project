@@ -591,6 +591,15 @@ export const serverSettings = pgTable('server_settings', {
   localMailPort: integer('local_mail_port').notNull().default(25),
   localMailMaxMessageMb: integer('local_mail_max_message_mb').notNull().default(25),
   localMailQuotaMb: integer('local_mail_quota_mb').notNull().default(2048),
+  // 받는 메일의 보낸 쪽 확인(SPF·DKIM·DMARC — localMailAuth.js) — 켜 두면(기본) 보낸 도메인이 거절하라고 한 위조 메일은 받지 않고,
+  // 격리하라고 했거나 확인에 실패한 메일·우리 도메인을 사칭한 메일은 스팸편지함으로 넣는다.
+  localMailSpamFilter: boolean('local_mail_spam_filter').notNull().default(true),
+  // 보내는 메일 DKIM 서명 — 회사 메일함에서 바깥으로 보내는 메일에 이 서버의 키로 서명한다. 키(RSA 2048 개인키 PEM)는 처음 볼 때
+  // 만들어 암호화해 두고(crypto.js encryptField), 관리자가 DNS에 공개키(TXT)를 올린 뒤에 켠다(올리기 전에 서명하면 받는 쪽에서 실패로
+  // 보인다). [localMailDkimSelector]는 DNS 이름의 앞부분(<선택자>._domainkey.<도메인>).
+  localMailDkimEnabled: boolean('local_mail_dkim_enabled').notNull().default(false),
+  localMailDkimSelector: text('local_mail_dkim_selector'),
+  localMailDkimKey: text('local_mail_dkim_key'),
   // 웹메일을 Google·Microsoft 로그인(OAuth)으로 연결하게 할지(webmailOAuth.js) — 아래 로그인 보안의 Google·Microsoft 클라이언트를 같이
   // 쓰고, 그 클라이언트에 메일 권한(Google https://mail.google.com/ · Microsoft IMAP.AccessAsUser.All·SMTP.Send)을 더해야 한다.
   mailOauthGoogle: boolean('mail_oauth_google').notNull().default(false),
@@ -3188,7 +3197,10 @@ export const mailRules = pgTable(
 /**
  * 자체 메일 서버가 받은(또는 회사 메일함에서 보낸·임시 저장한) 메일 — 원문은 디스크(MAIL_STORE_DIR/<계정>/<파일>.eml), 여기에는 목록·찾기에
  * 쓰는 겉봉과 플래그만(localMailStore.js). [uid]는 서버 전체에서 늘어나는 번호라 IMAP의 UID처럼 쓴다(새것일수록 큼). [folder]는
- * 'INBOX'|'Sent'|'Drafts'|'Junk'|'Trash'|'Archive'. [searchText]는 제목·주소·본문 앞부분(소문자 — 찾기).
+ * 'INBOX'|'Sent'|'Drafts'|'Junk'|'Trash'|'Archive' 또는 사람이 만든 폴더(local_mail_folders의 이름). [searchText]는 제목·주소·본문 앞부분
+ * (소문자 — 찾기). [inReplyTo]·[references]는 대화로 묶어 보기에 쓴다(예전에 받은 메일은 비어 있다). [auth]는 자체 메일 서버가 받을 때
+ * 본 보낸 쪽 확인 결과 `{ spf, dkim, dmarc, verdict: 'pass'|'none'|'junk', reason }`(localMailAuth.js — 읽기 화면의 경고, 우리끼리
+ * 보낸 메일·예전 메일은 null).
  */
 export const localMailMessages = pgTable(
   'local_mail_messages',
@@ -3214,10 +3226,30 @@ export const localMailMessages = pgTable(
     size: integer('size').notNull().default(0),
     hasAttachments: boolean('has_attachments').notNull().default(false),
     messageId: text('message_id'),
+    inReplyTo: text('in_reply_to'),
+    references: jsonb('references').notNull().default([]),
+    auth: jsonb('auth'),
     searchText: text('search_text'),
     fileName: text('file_name').notNull(),
   },
   (t) => [index('local_mail_messages_folder_idx').on(t.accountId, t.folder, t.uid)],
+);
+
+/**
+ * 회사 메일함에 사람이 만든 폴더 — 메일은 local_mail_messages.folder에 이 [name]을 적는다(이름을 바꾸면 그 메일들도 같이 — localMailStore.js).
+ * 기본 폴더(받은편지함 등 — localMailRules.js LOCAL_FOLDERS)와 이름이 겹칠 수 없고, 한 계정 안에서 대소문자만 다른 이름도 같은 것으로 본다.
+ */
+export const localMailFolders = pgTable(
+  'local_mail_folders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => mailAccounts.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('local_mail_folders_account_name_uq').on(t.accountId, sql`lower(${t.name})`)],
 );
 
 /** 문서 번호 매기기 — 범위·해마다 마지막 번호(groupware 문서를 올리는 트랜잭션 안에서 하나씩 올린다). */

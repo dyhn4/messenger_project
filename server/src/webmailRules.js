@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { composeFormat, formatFromParsed, isFormatPart } from './mailFormatHtml.js';
 import { isEmailAddress } from './mailRules.js';
 import { htmlToRich } from './webmailHtml.js';
 
@@ -421,8 +422,9 @@ export function parseAddressList(input, label) {
 const MESSAGE_ID_RE = /^<[^<>\s]{1,300}>$/;
 
 /**
- * 보낼 메일 `{ to, cc?, bcc?, subject, text, attachments?: [{ fileUrl, fileName, mimeType, fileSize }], draftAttachments?: [번호],
- * inReplyTo?, references? }` → `{ values }` | `{ error }`. 받는 사람은 합쳐 50명, 첨부는 올린 파일과 임시 저장본에서 이어 온 첨부
+ * 보낼 메일 `{ to, cc?, bcc?, subject, text, format?, attachments?: [{ fileUrl, fileName, mimeType, fileSize }], draftAttachments?: [번호],
+ * inReplyTo?, references? }` → `{ values }` | `{ error }`. [format]은 본문의 서식 구간(textFormat.js 모양 — 있으면 HTML 본문도 보낸다,
+ * mailFormatHtml.js) — 본문에 맞지 않는 구간은 버린다. 받는 사람은 합쳐 50명, 첨부는 올린 파일과 임시 저장본에서 이어 온 첨부
  * ([draftAttachments] — 임시 저장한 메일의 첨부 번호)를 합쳐 10개(합계 20MB — 크기는 부르는 쪽이 다시 잰다). [draft](임시 저장)면
  * 받는 사람·제목·본문이 비어도 된다.
  */
@@ -467,6 +469,7 @@ export function parseCompose(body, { draft = false } = {}) {
       ...lists,
       subject: subject || (draft ? '' : '(제목 없음)'),
       text,
+      format: composeFormat(b.format, text),
       draftAttachments,
       attachments: attachments.map((a) => ({
         fileUrl: a.fileUrl,
@@ -514,7 +517,10 @@ const SPECIAL_LABEL = {
   '\\Flagged': '중요',
 };
 
-/** imapflow list() 항목들 → 앱 폴더 목록(고를 수 없는 폴더·Gmail의 [Gmail] 껍데기는 뺀다). */
+/**
+ * imapflow list() 항목들 → 앱 폴더 목록(고를 수 없는 폴더·Gmail의 [Gmail] 껍데기는 뺀다). [depth]는 하위 폴더 깊이(들여쓰기 —
+ * "INBOX." 아래에 폴더를 두는 서버는 그 한 단계를 빼고 센다), [editable]이면 이름을 바꾸거나 지울 수 있다(받은편지함·특수 폴더는 안 됨).
+ */
 export function folderList(entries) {
   const rows = [];
   for (const e of entries ?? []) {
@@ -526,6 +532,9 @@ export function folderList(entries) {
       specialUse: special,
       unseen: e.status?.unseen ?? null,
       total: e.status?.messages ?? null,
+      depth: folderDepth(e.parent),
+      delimiter: e.delimiter ?? null,
+      editable: !special,
     });
   }
   const rank = (r) => {
@@ -535,22 +544,90 @@ export function folderList(entries) {
   return rows.sort((a, b) => rank(a) - rank(b) || a.path.localeCompare(b.path, 'ko'));
 }
 
+/** 상위 폴더 이름들 → 들여쓰기 깊이(맨 위가 INBOX면 이름공간이라 뺀다). */
+export function folderDepth(parent) {
+  if (!Array.isArray(parent) || parent.length === 0) return 0;
+  return parent.length - (String(parent[0]).toUpperCase() === 'INBOX' ? 1 : 0);
+}
+
+// ── 폴더 만들기·이름 바꾸기·지우기 ──
+
+export const FOLDER_NAME_MAX = 100;
+
+/**
+ * 새 폴더 이름(만들기·이름 바꾸기 — 마지막 칸 이름만) → `{ name }` | `{ error }`. 앞뒤 공백은 떼고, 제어 문자·`/`·`\`와 그 메일 서버의
+ * 폴더 구분 글자([delimiter] — 넣으면 하위 폴더가 생겨 버린다)는 쓸 수 없다. 받은편지함(INBOX)과 이름이 같으면 안 된다.
+ */
+export function parseFolderName(raw, { delimiter = '/' } = {}) {
+  const name = typeof raw === 'string' ? raw.trim() : '';
+  if (!name) return { error: '폴더 이름을 넣으세요.' };
+  if ([...name].length > FOLDER_NAME_MAX) return { error: `폴더 이름은 ${FOLDER_NAME_MAX}자 이내로 넣으세요.` };
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f/\\]/.test(name) || (delimiter && name.includes(delimiter))) {
+    return { error: `폴더 이름에 쓸 수 없는 글자가 있습니다(${['/', '\\', delimiter].filter(Boolean).filter((d, i, a) => a.indexOf(d) === i).join(' ')} 등).` };
+  }
+  if (name.toUpperCase() === 'INBOX') return { error: '받은편지함과 같은 이름은 쓸 수 없습니다.' };
+  return { name };
+}
+
+/** [path]가 [folder] 자신이거나 그 아래 폴더인지(구분 글자 [delimiter]). */
+export const isSameOrUnder = (path, folder, delimiter) =>
+  path === folder || (!!delimiter && typeof path === 'string' && path.startsWith(`${folder}${delimiter}`));
+
+/**
+ * 폴더 이름을 [from] → [to]로 바꿨을 때 옮길 폴더를 고쳐야 하는 받는 규칙들 `[{ rule, moveTo }]` — 그 폴더 아래 폴더로 옮기던 규칙도
+ * 앞부분을 바꾼다.
+ */
+export function retargetRules(rules, from, to, delimiter) {
+  const out = [];
+  for (const r of rules ?? []) {
+    const target = r.actions?.moveTo;
+    if (!target || !isSameOrUnder(target, from, delimiter)) continue;
+    out.push({ rule: r, moveTo: `${to}${target.slice(from.length)}` });
+  }
+  return out;
+}
+
+/** [path] 폴더(·그 아래)로 옮기는 받는 규칙들 — 있으면 그 폴더를 지우지 않는다. */
+export const rulesUsingFolder = (rules, path, delimiter) =>
+  (rules ?? []).filter((r) => r.actions?.moveTo && isSameOrUnder(r.actions.moveTo, path, delimiter));
+
+// ── 대화로 묶기 ──
+
+const MESSAGE_ID_IN_TEXT_RE = /<[^<>\s]{1,300}>/g;
+export const THREAD_REFERENCES_MAX = 30;
+
+/** References·In-Reply-To 머리 글 → 메시지 id들(`<…>`, 뒤쪽 [max]개). Buffer·배열도 받는다. */
+export function messageIdsIn(value, max = THREAD_REFERENCES_MAX) {
+  const text = Array.isArray(value) ? value.join(' ') : Buffer.isBuffer(value) ? value.toString('utf8') : String(value ?? '');
+  const ids = text.match(MESSAGE_ID_IN_TEXT_RE) ?? [];
+  return ids.slice(-max);
+}
+
 /** bodyStructure 안에 첨부가 있는지(attachment 표시이거나 이름이 있는 text·multipart가 아닌 부분). */
 export function hasAttachment(node) {
   if (!node) return false;
   if (node.disposition === 'attachment') return true;
   const type = String(node.type ?? '').toLowerCase();
-  if (!type.startsWith('multipart/') && !type.startsWith('text/') && (node.dispositionParameters?.filename || node.parameters?.name)) return true;
+  if (!type.startsWith('multipart/') && !type.startsWith('text/') && (node.dispositionParameters?.filename || node.parameters?.name) && !isFormatPart({ contentType: type })) {
+    return true;
+  }
   return (node.childNodes ?? []).some(hasAttachment);
 }
 
 const addressOut = (a) => ({ name: a?.name ?? '', address: a?.address ?? '' });
 
-/** imapflow fetch 결과 하나 → 목록 한 줄. */
+/**
+ * imapflow fetch 결과 하나 → 목록 한 줄. [messageId]·[inReplyTo]·[references]는 앱이 대화로 묶는 데 쓴다(봉투 + References 머리 —
+ * webmailClient.js SUMMARY_QUERY).
+ */
 export function messageSummary(m) {
   const env = m.envelope ?? {};
   const flags = m.flags ?? new Set();
   return {
+    messageId: messageIdsIn(env.messageId, 1)[0] ?? null,
+    inReplyTo: messageIdsIn(env.inReplyTo, 1)[0] ?? null,
+    references: messageIdsIn(m.headers),
     uid: m.uid,
     subject: env.subject || '(제목 없음)',
     from: addressOut(env.from?.[0]),
@@ -568,9 +645,11 @@ export function messageSummary(m) {
 /**
  * mailparser 결과 → 읽기 화면 모양. 본문은 글자([text] — HTML 메일은 mailparser가 글자로 바꾼 것)와, HTML 메일이면 걸러 낸 서식([rich] —
  * webmailHtml.js htmlToRich: 스크립트·양식·추적 픽셀은 빠지고 바깥 그림은 주소만 — 앱이 "그림 보기"를 눌러야 서버를 거쳐 받는다).
- * 본문 안에 그려지는 첨부(cid 그림)는 첨부 목록에서 뺀다. [bcc]는 임시 저장본에만 있다(보낸 메일에는 실리지 않음).
+ * 본문 안에 그려지는 첨부(cid 그림)는 첨부 목록에서 뺀다. [bcc]는 임시 저장본에만 있다(보낸 메일에는 실리지 않음). [format]은 이 앱이
+ * 임시 저장한 서식 있는 메일의 서식 구간(숨은 부분 — mailFormatHtml.js, 이어 쓸 때 되살린다 — 그 밖에는 null).
  */
-export function messageDetail(uid, parsed, flags = new Set()) {
+// [auth]는 회사 메일함이 받을 때 본 보낸 쪽 확인 결과(localMailAuth.js) — 확인되지 않았거나 스팸으로 걸렀으면 `{ verdict, reason }`(읽기 화면의 경고).
+export function messageDetail(uid, parsed, flags = new Set(), { auth = null } = {}) {
   const list = (v) => (v?.value ?? []).map(addressOut);
   const refs = parsed.references ? (Array.isArray(parsed.references) ? parsed.references : [parsed.references]) : [];
   const rich = parsed.html ? htmlToRich(parsed.html, { attachments: parsed.attachments ?? [] }) : null;
@@ -587,6 +666,7 @@ export function messageDetail(uid, parsed, flags = new Set()) {
     replyTo: list(parsed.replyTo),
     date: parsed.date ? parsed.date.getTime() : null,
     text: (parsed.text ?? '').slice(0, BODY_MAX),
+    format: draft ? formatFromParsed(parsed, (parsed.text ?? '').slice(0, BODY_MAX)) : null,
     truncated: (parsed.text ?? '').length > BODY_MAX,
     html: !!parsed.html,
     rich: rich ? { doc: rich.doc, remoteImages: rich.remoteImages, truncated: rich.truncated } : null,
@@ -599,13 +679,14 @@ export function messageDetail(uid, parsed, flags = new Set()) {
         fileName: a.filename || `첨부${index + 1}`,
         contentType: a.contentType,
         size: a.size ?? a.content?.length ?? 0,
-        hidden: (a.contentDisposition === 'inline' && !a.filename) || shownInBody.has(index),
+        hidden: (a.contentDisposition === 'inline' && !a.filename) || shownInBody.has(index) || isFormatPart(a),
       }))
       .filter((a) => !a.hidden)
       .map(({ hidden, ...a }) => a),
     seen: true,
     flagged: flags.has('\\Flagged'),
     draft,
+    auth: auth && auth.verdict !== 'pass' ? { verdict: auth.verdict, reason: auth.reason ?? null } : null,
   };
 }
 

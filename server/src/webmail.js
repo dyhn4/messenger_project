@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Router } from 'express';
 import { RateLimiter, tooMany } from './authGuard.js';
 import { decryptField, encryptField } from './crypto.js';
-import { getServerSettings } from './db/queries/serverSettings.js';
+import { getServerSettings, updateServerSettings } from './db/queries/serverSettings.js';
 import { findUserById } from './db/queries/users.js';
 import {
   deleteMailAccount,
@@ -30,9 +30,11 @@ import { isUuid } from './favoritesRules.js';
 import { checkFileRefs } from './fileRefs.js';
 import { acceptablePreviewResponse, isRemoteImageUrl, sniffImageType } from './linkPreviewImage.js';
 import { safeFetch } from './linkPreview.js';
+import { ensureDkimKey, signOutgoing } from './localMailAuth.js';
 import { deliverLocal, ensureLocalAccount, findLocalUser } from './localMailServer.js';
 import { isLocalAddress, localDomainsOf, localMailReady, localPartOf } from './localMailRules.js';
 import { LocalQuotaError } from './localMailStore.js';
+import { formatPartOf, formatToHtml } from './mailFormatHtml.js';
 import { MailError, sendRawMail } from './mailer.js';
 import { describeSmtpError, mailReady } from './mailRules.js';
 import { recordUploadedBytes, uploadFileNameOf, uploadsDir, uploadsDirHasRoom } from './upload.js';
@@ -67,6 +69,8 @@ import {
   messageDetail,
   newMailCount,
   normalizeTrustedSender,
+  retargetRules,
+  rulesUsingFolder,
   parseAccountInput,
   parseAccountPatch,
   parseCompose,
@@ -134,7 +138,7 @@ const safeExt = (name) => {
 
 /** 메일 서버 쪽 일을 하다 난 오류 → 응답(로그인 실패면 계정에 남겨 화면이 알 수 있게). */
 async function mailFailed(res, account, err) {
-  if (err instanceof MailInputError || err instanceof LocalQuotaError || ['NO_FOLDER', 'NO_DRAFTS', 'QUOTA'].includes(err?.code)) {
+  if (err instanceof MailInputError || err instanceof LocalQuotaError || ['NO_FOLDER', 'NO_DRAFTS', 'QUOTA', 'FOLDER'].includes(err?.code)) {
     return res.status(400).json({ error: err.message });
   }
   if (err?.code === 'EBLOCKED') return res.status(502).json({ error: err.message });
@@ -465,7 +469,7 @@ export function createWebmailRouter(io) {
       const got = await backend.readMessage(folder, uid);
       if (!got) return res.status(404).json({ error: '메일을 찾을 수 없습니다. 다른 곳에서 옮기거나 지웠을 수 있습니다.' });
       if (got.tooLarge) return res.status(413).json({ error: '메일이 너무 커서 여기서 열 수 없습니다(30MB 넘음). 원래 메일 프로그램에서 보세요.' });
-      res.json(messageDetail(uid, got.parsed, got.flags));
+      res.json(messageDetail(uid, got.parsed, got.flags, { auth: got.auth }));
     }),
   );
 
@@ -538,6 +542,54 @@ export function createWebmailRouter(io) {
     res.setHeader('Cache-Control', 'private, max-age=86400');
     res.send(got.body);
   });
+
+  // ── 폴더 만들기·이름 바꾸기·지우기 ──
+
+  /** 폴더 만들기 `{ account?, name, parent? }`(parent는 위 폴더 경로 — 바깥 메일 서버만) → `{ path, folders }`(201). */
+  router.post(
+    '/mail/folders',
+    withAccount(async (req, res, account, backend) => {
+      const parent = req.body?.parent == null || req.body.parent === '' ? null : folderOf(req.body.parent);
+      if (req.body?.parent && !parent) return res.status(400).json({ error: '위 폴더를 확인하세요.' });
+      const path = await backend.createFolder(req.body?.name, parent);
+      res.status(201).json({ path, folders: await backend.listFolders() });
+    }),
+  );
+
+  /**
+   * 폴더 이름 바꾸기 `{ account?, path, name }`(같은 위 폴더 안에서 마지막 칸 이름만) → `{ path, folders }`. 그 폴더(·아래 폴더)로 옮기던
+   * 받는 규칙도 새 경로로 고친다.
+   */
+  router.post(
+    '/mail/folders/rename',
+    withAccount(async (req, res, account, backend) => {
+      const path = folderOf(req.body?.path);
+      if (!path) return res.status(400).json({ error: '폴더를 확인하세요.' });
+      const { from, to, delimiter } = await backend.renameFolder(path, req.body?.name);
+      if (from !== to) {
+        for (const { rule, moveTo } of retargetRules(await listMailRules(account.id), from, to, delimiter)) {
+          await updateMailRule(req.user.sub, rule.id, { actions: { ...rule.actions, moveTo } });
+        }
+      }
+      res.json({ path: to, folders: await backend.listFolders() });
+    }),
+  );
+
+  /** 폴더 지우기 `{ account?, path }` — 비어 있고, 받는 규칙이 그 폴더로 옮기지 않을 때만 → `{ folders }`. */
+  router.post(
+    '/mail/folders/delete',
+    withAccount(async (req, res, account, backend) => {
+      const path = folderOf(req.body?.path);
+      if (!path) return res.status(400).json({ error: '폴더를 확인하세요.' });
+      const delimiter = (await backend.listFolders()).find((f) => f.path === path)?.delimiter ?? '/';
+      const using = rulesUsingFolder(await listMailRules(account.id), path, delimiter);
+      if (using.length) {
+        return res.status(400).json({ error: `받는 규칙 "${using[0].name}"이(가) 이 폴더로 옮깁니다. 규칙을 먼저 고치거나 지우세요.` });
+      }
+      await backend.deleteFolder(path);
+      res.json({ folders: await backend.listFolders() });
+    }),
+  );
 
   // ── 정리 ──
 
@@ -617,14 +669,19 @@ export function createWebmailRouter(io) {
     return out;
   }
 
-  const nodemailerMail = (account, mail, attachments, extra = {}) => ({
+  /**
+   * nodemailer 메일 모양 — 서식이 있으면 HTML 본문도 함께(글자 본문과 multipart/alternative — mailFormatHtml.js). [draft]면 서식 구간을
+   * 숨은 부분으로 첨부 맨 뒤에 넣는다(이어 쓸 때 되살린다 — 이어 온 첨부 번호는 앞쪽 그대로).
+   */
+  const nodemailerMail = (account, mail, attachments, extra = {}, { draft = false } = {}) => ({
     from: fromHeaderOf(account),
     to: mail.to,
     cc: mail.cc,
     bcc: mail.bcc,
     subject: mail.subject,
     text: mail.text,
-    attachments,
+    html: mail.format ? formatToHtml(mail.text, mail.format) : undefined,
+    attachments: draft && mail.format ? [...attachments, formatPartOf(mail.format)] : attachments,
     inReplyTo: mail.inReplyTo ?? undefined,
     references: mail.references.length ? mail.references : undefined,
     ...extra,
@@ -643,7 +700,7 @@ export function createWebmailRouter(io) {
       const attachments = await collectAttachments(req.user.sub, parsed.values, backend, prev);
       const domain = account.email.split('@')[1] ?? 'localhost';
       const messageId = `<${randomUUID()}@${domain}>`;
-      const raw = await buildRaw(nodemailerMail(account, parsed.values, attachments, { messageId }), { keepBcc: true });
+      const raw = await buildRaw(nodemailerMail(account, parsed.values, attachments, { messageId }, { draft: true }), { keepBcc: true });
       const saved = await backend.saveDraft(raw, messageId);
       if (prev) await backend.expunge(prev.folder, [prev.uid]).catch((err) => console.error('[webmail] 앞 저장본 지우기 실패:', err?.message ?? err));
       res.status(201).json(saved);
@@ -663,7 +720,8 @@ export function createWebmailRouter(io) {
 
   /**
    * 회사 메일함에서 보내기 — 우리 도메인 사람에게는 바깥을 거치지 않고 바로 넣고, 바깥 주소는 서버의 SMTP(관리자 콘솔 메일)로 넘긴다.
-   * 보낸 원문.
+   * 관리자가 DKIM 서명을 켰으면 바깥으로 나가는 원문에 보내는 주소의 도메인으로 서명한다(localMailAuth.js). 보낸 원문(서명 전 — 보낸편지함·
+   * 우리 사람에게 넣는 것).
    */
   async function sendFromLocal(account, message) {
     const s = await getServerSettings();
@@ -679,8 +737,14 @@ export function createWebmailRouter(io) {
     }
     const raw = await buildRaw(message);
     if (external.length) {
+      let outgoing = raw;
+      const domain = account.email.split('@')[1]?.toLowerCase();
+      if (s.localMailDkimEnabled && domain && domains.includes(domain)) {
+        const key = await ensureDkimKey(s, (patch) => updateServerSettings(patch));
+        outgoing = await signOutgoing(raw, { domain, selector: key.selector, privateKey: key.privateKey });
+      }
       try {
-        await sendRawMail({ from: account.email, to: external, raw });
+        await sendRawMail({ from: account.email, to: external, raw: outgoing });
       } catch (err) {
         if (err instanceof MailError) throw new MailInputError(err.message);
         throw err;

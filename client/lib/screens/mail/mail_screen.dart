@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/mail.dart';
+import '../../models/mail_threads.dart';
 import '../../services/api_client.dart' show ApiException;
 import '../../services/download_storage.dart' show openLocalFile;
 import '../../services/mail_api.dart';
@@ -28,12 +30,22 @@ const kMailWideBreakpoint = 900.0;
 /// 한 사람이 연결할 수 있는 계정 수 — 서버 webmailRules.js ACCOUNTS_MAX.
 const kMailAccountsMax = 5;
 
+/// 한 번에 바꿀 수 있는 메일 수 — 서버 webmail.js UIDS_MAX(넘으면 나눠 보낸다).
+const kMailBulkChunk = 200;
+
+/// "대화로 묶어 보기"를 기억하는 곳(이 기기 — 기본 켬).
+const kMailThreadedPrefsKey = 'mail_threaded';
+
 /// 메일 본문의 바깥 링크를 여는 곳 — 시험에서 바꿔 끼운다.
 Future<bool> Function(Uri uri) mailOpenLink = (uri) =>
     launchUrl(uri, mode: LaunchMode.externalApplication);
 
 /// 웹메일 — 연결한 메일 계정들(IMAP/SMTP·OAuth·회사 메일함)의 폴더·목록·읽기·쓰기(server/src/webmail.js). 계정이 여럿이면 폴더 칸
 /// 위에서 바꾼다. 계정이 없으면 연결 안내. 새 메일이 오면(session.mailEvents — 소켓 mail:new·mail:changed) 목록을 다시 받는다.
+///
+/// 목록은 대화로 묶어 보이고(mail_threads.dart — 끌 수 있음, 묶음을 펼쳐 지난 메일을 본다), 길게 누르거나 [선택]으로 여러 통을 골라
+/// 한꺼번에 읽음·안 읽음·중요·옮기기·지우기를 한다. 폴더 칸에서 폴더를 만들고, 사람이 만든 폴더는 이름을 바꾸거나(받는 규칙도 서버가
+/// 따라 고친다) 비어 있으면 지운다.
 class MailScreen extends StatefulWidget {
   final Session session;
 
@@ -66,6 +78,15 @@ class _MailScreenState extends State<MailScreen> {
   int? _selectedUid;
   StreamSubscription<void>? _sub;
 
+  /// 여러 통 고르기 — [_picking]이면 목록의 줄을 누를 때 열지 않고 고른다(길게 누르거나 [선택]으로 들어온다).
+  bool _picking = false;
+  final Set<int> _picked = {};
+  bool _bulkBusy = false;
+
+  /// 대화로 묶어 보기(기본 켬 — 이 기기에 기억)와 펼친 대화들(MailThread.key).
+  bool _threaded = true;
+  final Set<String> _expanded = {};
+
   MailAccount? get _account {
     for (final a in _accounts) {
       if (a.id == _accountId) return a;
@@ -78,6 +99,30 @@ class _MailScreenState extends State<MailScreen> {
     super.initState();
     _loadAccounts();
     _sub = widget.session.mailEvents.listen((_) => _loadAccounts(quiet: true));
+    unawaited(_loadThreaded());
+  }
+
+  Future<void> _loadThreaded() async {
+    try {
+      final v = (await SharedPreferences.getInstance()).getBool(
+        kMailThreadedPrefsKey,
+      );
+      if (v != null && mounted) setState(() => _threaded = v);
+    } catch (_) {
+      // 저장소를 못 열면 기본(켬).
+    }
+  }
+
+  void _setThreaded(bool v) {
+    setState(() {
+      _threaded = v;
+      _expanded.clear();
+    });
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((p) => p.setBool(kMailThreadedPrefsKey, v))
+          .catchError((_) => false),
+    );
   }
 
   @override
@@ -148,6 +193,9 @@ class _MailScreenState extends State<MailScreen> {
         _nextBefore = page.nextBefore;
         _loadingList = false;
         _error = null;
+        // 다시 받은 목록에 없는 메일은 고른 것에서 뺀다(다른 곳에서 옮겼거나 지움).
+        final present = {for (final m in page.messages) m.uid};
+        _picked.removeWhere((u) => !present.contains(u));
       });
     } catch (e) {
       if (mounted) {
@@ -191,6 +239,8 @@ class _MailScreenState extends State<MailScreen> {
       _messages = const [];
       _query = '';
       _search.clear();
+      _endPicking();
+      _expanded.clear();
     });
     _loadMessages();
   }
@@ -203,6 +253,8 @@ class _MailScreenState extends State<MailScreen> {
       _folders = const [];
       _messages = const [];
       _selectedUid = null;
+      _endPicking();
+      _expanded.clear();
       _query = '';
       _search.clear();
       _error = null;
@@ -214,8 +266,184 @@ class _MailScreenState extends State<MailScreen> {
     setState(() {
       _query = q.trim();
       _selectedUid = null;
+      _endPicking();
     });
     _loadMessages();
+  }
+
+  // ── 여러 통 고르기 ──
+
+  /// 고르기를 그만둔다(setState 안에서 부른다).
+  void _endPicking() {
+    _picking = false;
+    _picked.clear();
+  }
+
+  /// [uids]를 고르거나 푼다 — 모두 골라져 있으면 풀고, 아니면 고른다(대화 하나를 통째로).
+  void _togglePick(List<int> uids) {
+    setState(() {
+      _picking = true;
+      if (uids.every(_picked.contains)) {
+        _picked.removeAll(uids);
+      } else {
+        _picked.addAll(uids);
+      }
+    });
+  }
+
+  void _pickAll() {
+    setState(() {
+      final all = {for (final m in _messages) m.uid};
+      if (_picked.containsAll(all)) {
+        _picked.clear();
+      } else {
+        _picked.addAll(all);
+      }
+    });
+  }
+
+  /// 고른 메일들에 한꺼번에 — 'seen'·'unseen'·'flag'·'unflag'·'move'([to])·'delete'. 서버가 한 번에 받는 수(200)씩 나눠 보낸다.
+  Future<void> _bulk(String action, {String? to}) async {
+    final uids = _messages.map((m) => m.uid).where(_picked.contains).toList();
+    if (uids.isEmpty || _bulkBusy) return;
+    setState(() => _bulkBusy = true);
+    var trashed = false;
+    try {
+      for (var i = 0; i < uids.length; i += kMailBulkChunk) {
+        final part = uids.sublist(
+          i,
+          i + kMailBulkChunk > uids.length ? uids.length : i + kMailBulkChunk,
+        );
+        switch (action) {
+          case 'seen' || 'unseen':
+            await _api.setFlags(
+              _accountId,
+              _folder,
+              part,
+              seen: action == 'seen',
+            );
+          case 'flag' || 'unflag':
+            await _api.setFlags(
+              _accountId,
+              _folder,
+              part,
+              flagged: action == 'flag',
+            );
+          case 'move':
+            await _api.move(_accountId, _folder, part, to!);
+          case 'delete':
+            trashed = await _api.delete(_accountId, _folder, part) == 'trash';
+        }
+      }
+      if (!mounted) return;
+      final n = uids.length;
+      showAppToast(context, switch (action) {
+        'seen' => tr('{n}통을 읽음으로 바꿨습니다.', {'n': n}),
+        'unseen' => tr('{n}통을 안 읽음으로 바꿨습니다.', {'n': n}),
+        'flag' => tr('{n}통에 중요 표시를 했습니다.', {'n': n}),
+        'unflag' => tr('{n}통의 중요 표시를 껐습니다.', {'n': n}),
+        'move' => tr('{n}통을 옮겼습니다.', {'n': n}),
+        _ =>
+          trashed
+              ? tr('{n}통을 휴지통으로 옮겼습니다.', {'n': n})
+              : tr('{n}통을 지웠습니다.', {'n': n}),
+      });
+      setState(() {
+        if (action == 'move' || action == 'delete') {
+          if (uids.contains(_selectedUid)) _selectedUid = null;
+        }
+        _endPicking();
+      });
+    } catch (e) {
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
+    } finally {
+      if (mounted) setState(() => _bulkBusy = false);
+      unawaited(_refresh());
+    }
+  }
+
+  // ── 폴더 만들기·이름 바꾸기·지우기 ──
+
+  Future<String?> _askFolderName(String title, {String initial = ''}) =>
+      showDialog<String>(
+        context: context,
+        builder: (_) => _FolderNameDialog(title: title, initial: initial),
+      );
+
+  /// 폴더 만들기 — [parent]가 있으면 그 아래(바깥 메일 서버만).
+  Future<void> _createFolder({MailFolder? parent}) async {
+    final name = await _askFolderName(
+      parent == null
+          ? tr('폴더 만들기')
+          : tr('{name} 아래에 폴더 만들기', {'name': parent.name}),
+    );
+    if (name == null || !mounted) return;
+    try {
+      final r = await _api.createFolder(_accountId, name, parent: parent?.path);
+      if (!mounted) return;
+      setState(() => _folders = r.folders);
+      showAppToast(context, tr('폴더를 만들었습니다.'));
+    } catch (e) {
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
+    }
+  }
+
+  Future<void> _renameFolder(MailFolder f) async {
+    final name = await _askFolderName(tr('폴더 이름 바꾸기'), initial: f.name);
+    if (name == null || name == f.name || !mounted) return;
+    try {
+      final r = await _api.renameFolder(_accountId, f.path, name);
+      if (!mounted) return;
+      final wasOpen = _folder == f.path;
+      setState(() {
+        _folders = r.folders;
+        if (wasOpen) _folder = r.path;
+      });
+      showAppToast(context, tr('폴더 이름을 바꿨습니다.'));
+      // 아래 폴더를 보고 있었으면 경로가 바뀌었다 — 없는 폴더면 받은편지함으로.
+      if (!r.folders.any((x) => x.path == _folder)) _openFolder('INBOX');
+    } catch (e) {
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
+    }
+  }
+
+  Future<void> _deleteFolder(MailFolder f) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(tr('폴더를 지울까요?')),
+        content: Text(tr('{name} — 빈 폴더만 지울 수 있습니다.', {'name': f.name})),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(tr('취소')),
+          ),
+          FilledButton(
+            key: const ValueKey('mail-folder-delete-confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(tr('지우기')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      final folders = await _api.deleteFolder(_accountId, f.path);
+      if (!mounted) return;
+      setState(() => _folders = folders);
+      showAppToast(context, tr('폴더를 지웠습니다.'));
+      if (_folder == f.path) _openFolder('INBOX');
+    } catch (e) {
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
+    }
   }
 
   /// 읽기로 연 메일을 목록에서 읽음으로(서버는 열 때 읽음으로 바꾼다).
@@ -227,13 +455,7 @@ class _MailScreenState extends State<MailScreen> {
       _folders = [
         for (final f in _folders)
           f.path == _folder && (f.unseen ?? 0) > 0
-              ? MailFolder(
-                  path: f.path,
-                  name: f.name,
-                  specialUse: f.specialUse,
-                  unseen: f.unseen! - 1,
-                  total: f.total,
-                )
+              ? f.copyWith(unseen: f.unseen! - 1)
               : f,
       ];
     });
@@ -296,6 +518,7 @@ class _MailScreenState extends State<MailScreen> {
         bcc: draft.bcc,
         subject: draft.subject,
         text: draft.text,
+        format: draft.format,
         inReplyTo: draft.inReplyTo,
         references: draft.references,
         answered: draft.answered,
@@ -550,6 +773,38 @@ class _MailScreenState extends State<MailScreen> {
     );
   }
 
+  /// 사람이 만든 폴더의 ⋮ 메뉴 — 이름 바꾸기·지우기, 바깥 메일 서버면 아래에 폴더 만들기.
+  Widget _folderMenu(MailFolder f) => PopupMenuButton<String>(
+    key: ValueKey('mail-folder-menu-${f.path}'),
+    tooltip: tr('폴더'),
+    icon: const Icon(Icons.more_vert, size: 18),
+    padding: EdgeInsets.zero,
+    onSelected: (v) => switch (v) {
+      'rename' => _renameFolder(f),
+      'delete' => _deleteFolder(f),
+      'sub' => _createFolder(parent: f),
+      _ => null,
+    },
+    itemBuilder: (_) => [
+      PopupMenuItem(
+        key: const ValueKey('mail-folder-rename'),
+        value: 'rename',
+        child: Text(tr('이름 바꾸기')),
+      ),
+      if (!(_account?.isLocal ?? false))
+        PopupMenuItem(
+          key: const ValueKey('mail-folder-sub'),
+          value: 'sub',
+          child: Text(tr('아래에 폴더 만들기')),
+        ),
+      PopupMenuItem(
+        key: const ValueKey('mail-folder-delete'),
+        value: 'delete',
+        child: Text(tr('지우기')),
+      ),
+    ],
+  );
+
   Widget _folderList({VoidCallback? afterTap}) => ListView(
     key: const ValueKey('mail-folders'),
     children: [
@@ -559,12 +814,23 @@ class _MailScreenState extends State<MailScreen> {
           key: ValueKey('mail-folder-${f.path}'),
           dense: true,
           selected: f.path == _folder,
+          contentPadding: EdgeInsetsDirectional.only(
+            start: 16.0 + 16.0 * f.depth.clamp(0, 6),
+            end: f.editable ? 0 : 16,
+          ),
           leading: Icon(_folderIcon(f), size: 20),
           title: Text(f.name, overflow: TextOverflow.ellipsis),
-          trailing: (f.unseen ?? 0) > 0
-              ? Text(
-                  '${f.unseen}',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+          trailing: (f.unseen ?? 0) > 0 || f.editable
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if ((f.unseen ?? 0) > 0)
+                      Text(
+                        '${f.unseen}',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    if (f.editable) _folderMenu(f),
+                  ],
                 )
               : null,
           onTap: () {
@@ -572,8 +838,158 @@ class _MailScreenState extends State<MailScreen> {
             afterTap?.call();
           },
         ),
+      if (!_legacy && _folders.isNotEmpty)
+        ListTile(
+          key: const ValueKey('mail-folder-new'),
+          dense: true,
+          leading: Icon(
+            Icons.create_new_folder_outlined,
+            size: 20,
+            color: Theme.of(context).hintColor,
+          ),
+          title: Text(
+            tr('폴더 만들기'),
+            style: TextStyle(color: Theme.of(context).hintColor),
+          ),
+          onTap: () => _createFolder(),
+        ),
     ],
   );
+
+  /// 목록의 줄들 — 대화로 묶으면 대화마다 대표(가장 새 메일) 한 줄, 펼친 대화는 그 아래에 지난 메일들을 들여 쓴다.
+  List<({MailSummary m, MailThread? thread, bool child})> get _rows {
+    if (!_threaded) {
+      return [for (final m in _messages) (m: m, thread: null, child: false)];
+    }
+    return [
+      for (final t in groupMailThreads(_messages)) ...[
+        (m: t.latest, thread: t.count > 1 ? t : null, child: false),
+        if (t.count > 1 && _expanded.contains(t.key))
+          for (final m in t.messages.skip(1)) (m: m, thread: null, child: true),
+      ],
+    ];
+  }
+
+  Widget _messageTile(
+    MailSummary m, {
+    MailThread? thread,
+    bool child = false,
+    required bool wide,
+    required bool toSide,
+    required DateTime now,
+  }) {
+    final theme = Theme.of(context);
+    final uids = thread?.uids ?? [m.uid];
+    final unread = thread?.unread ?? !m.seen;
+    final who = toSide
+        ? (m.to.isEmpty
+              ? (m.draft ? tr('(받는 사람 없음)') : '')
+              : tr('받는 사람: {m.to.first.label}', {
+                  'm.to.first.label': m.to.first.label,
+                }))
+        : m.from.label;
+    final bold = TextStyle(
+      fontWeight: unread ? FontWeight.w700 : FontWeight.normal,
+    );
+    final picked = uids.every(_picked.contains);
+    return ListTile(
+      key: ValueKey('mail-item-${m.uid}'),
+      selected:
+          (wide && !_picking && _selectedUid == m.uid) || (_picking && picked),
+      contentPadding: EdgeInsetsDirectional.only(
+        start: child ? 48 : 16,
+        end: 16,
+      ),
+      leading: _picking
+          ? Checkbox(
+              key: ValueKey('mail-pick-${m.uid}'),
+              value: picked,
+              onChanged: (_) => _togglePick(uids),
+            )
+          : Icon(
+              m.draft
+                  ? Icons.edit_note
+                  : unread
+                  ? Icons.mail
+                  : Icons.drafts_outlined,
+              color: unread ? theme.colorScheme.primary : theme.hintColor,
+              size: 20,
+            ),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(who, style: bold, overflow: TextOverflow.ellipsis),
+          ),
+          if (thread != null)
+            Container(
+              key: ValueKey('mail-thread-count-${m.uid}'),
+              margin: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${thread.count}',
+                style: TextStyle(fontSize: 11, color: theme.hintColor),
+              ),
+            ),
+          Text(
+            mailListTime(m.date, now),
+            style: TextStyle(fontSize: 12, color: theme.hintColor),
+          ),
+        ],
+      ),
+      subtitle: Row(
+        children: [
+          if (m.draft)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Text(
+                tr('[임시]'),
+                style: TextStyle(fontSize: 12, color: theme.colorScheme.error),
+              ),
+            ),
+          if (m.answered)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Icon(Icons.reply, size: 14, color: theme.hintColor),
+            ),
+          Expanded(
+            child: Text(
+              m.subject.isEmpty ? tr('(제목 없음)') : m.subject,
+              style: bold.copyWith(fontSize: 13),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (thread?.hasAttachments ?? m.hasAttachments)
+            Icon(Icons.attach_file, size: 14, color: theme.hintColor),
+          if (thread?.flagged ?? m.flagged)
+            const Icon(Icons.star, size: 16, color: Colors.amber),
+          if (thread != null)
+            InkWell(
+              key: ValueKey('mail-thread-toggle-${m.uid}'),
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => setState(() {
+                if (!_expanded.remove(thread.key)) _expanded.add(thread.key);
+              }),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Icon(
+                  _expanded.contains(thread.key)
+                      ? Icons.expand_less
+                      : Icons.expand_more,
+                  size: 20,
+                  color: theme.hintColor,
+                ),
+              ),
+            ),
+        ],
+      ),
+      onTap: () => _picking ? _togglePick(uids) : _open(m, wide: wide),
+      onLongPress: () => _togglePick(uids),
+    );
+  }
 
   Widget _messageList({required bool wide}) {
     final theme = Theme.of(context);
@@ -596,14 +1012,15 @@ class _MailScreenState extends State<MailScreen> {
     }
     final current = _folders.where((f) => f.path == _folder).firstOrNull;
     final toSide = (current?.isSent ?? false) || (current?.isDrafts ?? false);
+    final rows = _rows;
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView.separated(
         key: const ValueKey('mail-list'),
-        itemCount: _messages.length + (_nextBefore != null ? 1 : 0),
+        itemCount: rows.length + (_nextBefore != null ? 1 : 0),
         separatorBuilder: (_, _) => const Divider(height: 1),
         itemBuilder: (context, i) {
-          if (i == _messages.length) {
+          if (i == rows.length) {
             return Padding(
               padding: const EdgeInsets.all(12),
               child: Center(
@@ -617,79 +1034,95 @@ class _MailScreenState extends State<MailScreen> {
               ),
             );
           }
-          final m = _messages[i];
-          final who = toSide
-              ? (m.to.isEmpty
-                    ? (m.draft ? tr('(받는 사람 없음)') : '')
-                    : tr('받는 사람: {m.to.first.label}', {
-                        'm.to.first.label': m.to.first.label,
-                      }))
-              : m.from.label;
-          final bold = TextStyle(
-            fontWeight: m.seen ? FontWeight.normal : FontWeight.w700,
-          );
-          return ListTile(
-            key: ValueKey('mail-item-${m.uid}'),
-            selected: wide && _selectedUid == m.uid,
-            leading: Icon(
-              m.draft
-                  ? Icons.edit_note
-                  : m.seen
-                  ? Icons.drafts_outlined
-                  : Icons.mail,
-              color: m.seen ? theme.hintColor : theme.colorScheme.primary,
-              size: 20,
-            ),
-            title: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    who,
-                    style: bold,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Text(
-                  mailListTime(m.date, now),
-                  style: TextStyle(fontSize: 12, color: theme.hintColor),
-                ),
-              ],
-            ),
-            subtitle: Row(
-              children: [
-                if (m.draft)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: Text(
-                      tr('[임시]'),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: theme.colorScheme.error,
-                      ),
-                    ),
-                  ),
-                if (m.answered)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: Icon(Icons.reply, size: 14, color: theme.hintColor),
-                  ),
-                Expanded(
-                  child: Text(
-                    m.subject.isEmpty ? tr('(제목 없음)') : m.subject,
-                    style: bold.copyWith(fontSize: 13),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (m.hasAttachments)
-                  Icon(Icons.attach_file, size: 14, color: theme.hintColor),
-                if (m.flagged)
-                  const Icon(Icons.star, size: 16, color: Colors.amber),
-              ],
-            ),
-            onTap: () => _open(m, wide: wide),
+          final r = rows[i];
+          return _messageTile(
+            r.m,
+            thread: r.thread,
+            child: r.child,
+            wide: wide,
+            toSide: toSide,
+            now: now,
           );
         },
       ),
+    );
+  }
+
+  /// 고르는 중의 위 막대 — 고른 수, 모두 고르기, 읽음·안 읽음·중요·옮기기·지우기.
+  AppBar _pickingBar() {
+    final moveTargets = [
+      for (final f in _folders)
+        if (f.path != _folder) f,
+    ];
+    final none = _picked.isEmpty || _bulkBusy;
+    return AppBar(
+      key: const ValueKey('mail-picking-bar'),
+      leading: IconButton(
+        key: const ValueKey('mail-picking-close'),
+        tooltip: tr('고르기 끝내기'),
+        icon: const Icon(Icons.close),
+        onPressed: () => setState(_endPicking),
+      ),
+      title: Text(tr('{n}통 고름', {'n': _picked.length})),
+      actions: [
+        IconButton(
+          key: const ValueKey('mail-pick-all'),
+          tooltip: tr('모두 고르기'),
+          icon: const Icon(Icons.select_all),
+          onPressed: _bulkBusy ? null : _pickAll,
+        ),
+        IconButton(
+          key: const ValueKey('mail-bulk-seen'),
+          tooltip: tr('읽음으로'),
+          icon: const Icon(Icons.drafts_outlined),
+          onPressed: none ? null : () => _bulk('seen'),
+        ),
+        IconButton(
+          key: const ValueKey('mail-bulk-unseen'),
+          tooltip: tr('안 읽음으로'),
+          icon: const Icon(Icons.mark_email_unread_outlined),
+          onPressed: none ? null : () => _bulk('unseen'),
+        ),
+        PopupMenuButton<String>(
+          key: const ValueKey('mail-bulk-flag'),
+          tooltip: tr('중요 표시'),
+          icon: const Icon(Icons.star_border),
+          enabled: !none,
+          onSelected: _bulk,
+          itemBuilder: (_) => [
+            PopupMenuItem(value: 'flag', child: Text(tr('중요 표시'))),
+            PopupMenuItem(value: 'unflag', child: Text(tr('중요 표시 끄기'))),
+          ],
+        ),
+        if (moveTargets.isNotEmpty)
+          PopupMenuButton<String>(
+            key: const ValueKey('mail-bulk-move'),
+            tooltip: tr('옮기기'),
+            icon: const Icon(Icons.drive_file_move_outline),
+            enabled: !none,
+            onSelected: (to) => _bulk('move', to: to),
+            itemBuilder: (_) => [
+              for (final f in moveTargets)
+                PopupMenuItem(
+                  key: ValueKey('mail-bulk-move-${f.path}'),
+                  value: f.path,
+                  child: Text(f.name),
+                ),
+            ],
+          ),
+        IconButton(
+          key: const ValueKey('mail-bulk-delete'),
+          tooltip: tr('지우기'),
+          icon: _bulkBusy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.delete_outline),
+          onPressed: none ? null : () => _bulk('delete'),
+        ),
+      ],
     );
   }
 
@@ -775,6 +1208,14 @@ class _MailScreenState extends State<MailScreen> {
           icon: const Icon(Icons.refresh),
           onPressed: _refresh,
         ),
+        IconButton(
+          key: const ValueKey('mail-select'),
+          tooltip: tr('여러 통 고르기'),
+          icon: const Icon(Icons.checklist),
+          onPressed: _messages.isEmpty
+              ? null
+              : () => setState(() => _picking = true),
+        ),
         if (wide)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -789,6 +1230,7 @@ class _MailScreenState extends State<MailScreen> {
           key: const ValueKey('mail-menu'),
           tooltip: tr('계정'),
           onSelected: (v) => switch (v) {
+            'threads' => _setThreaded(!_threaded),
             'edit' => _connect(edit: true),
             'signature' => _signature(),
             'rules' => _rules(),
@@ -799,6 +1241,13 @@ class _MailScreenState extends State<MailScreen> {
             _ => null,
           },
           itemBuilder: (_) => [
+            CheckedPopupMenuItem(
+              key: const ValueKey('mail-menu-threads'),
+              value: 'threads',
+              checked: _threaded,
+              child: Text(tr('대화로 묶어 보기')),
+            ),
+            const PopupMenuDivider(),
             if (!account.isLocal)
               PopupMenuItem(value: 'edit', child: Text(tr('계정 바꾸기'))),
             if (!_legacy) ...[
@@ -860,7 +1309,7 @@ class _MailScreenState extends State<MailScreen> {
         : null;
     if (!wide) {
       return Scaffold(
-        appBar: appBar,
+        appBar: _picking ? _pickingBar() : appBar,
         drawer: Drawer(
           child: SafeArea(
             child: Builder(
@@ -886,7 +1335,7 @@ class _MailScreenState extends State<MailScreen> {
     }
     final selected = _selectedUid;
     return Scaffold(
-      appBar: appBar,
+      appBar: _picking ? _pickingBar() : appBar,
       body: Column(
         children: [
           ?banner,
@@ -1204,6 +1653,59 @@ class _MailReaderState extends State<MailReader> {
     if (made && mounted) showAppToast(context, tr('할 일을 만들었습니다.'));
   }
 
+  /// 회사 메일함이 받을 때 보낸 쪽 확인(SPF·DKIM·DMARC)이 통과하지 못한 메일 — 스팸으로 걸렀으면 빨갛게(스팸편지함이면
+  /// "스팸 아님"으로 받은편지함에 돌려놓기), 확인만 못 했으면 옅게.
+  Widget _authBanner(MailMessage m) {
+    final theme = Theme.of(context);
+    final junk = m.authVerdict == 'junk';
+    final inJunk =
+        widget.folders
+            .where((f) => f.path == widget.folder)
+            .firstOrNull
+            ?.specialUse ==
+        r'\Junk';
+    final inbox = widget.folders.where((f) => f.isInbox).firstOrNull;
+    return Container(
+      key: const ValueKey('mail-auth-banner'),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: junk
+            ? theme.colorScheme.errorContainer
+            : theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        children: [
+          Icon(
+            junk ? Icons.report_gmailerrorred : Icons.help_outline,
+            size: 18,
+            color: junk ? theme.colorScheme.onErrorContainer : theme.hintColor,
+          ),
+          Text(
+            junk
+                ? tr('스팸으로 분류된 메일입니다: {reason}', {
+                    'reason': trServer(m.authReason ?? ''),
+                  })
+                : tr('보낸 사람을 확인하지 못했습니다 — 링크·첨부를 조심하세요.'),
+            style: TextStyle(
+              fontSize: 12,
+              color: junk ? theme.colorScheme.onErrorContainer : null,
+            ),
+          ),
+          if (junk && inJunk && inbox != null)
+            TextButton(
+              key: const ValueKey('mail-not-spam'),
+              onPressed: () => _move(inbox.path),
+              child: Text(tr('스팸 아님')),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _imagesBanner(MailMessage m) {
     final theme = Theme.of(context);
     return Container(
@@ -1406,6 +1908,7 @@ class _MailReaderState extends State<MailReader> {
           ),
         ],
         const Divider(height: 24),
+        if (m.authVerdict == 'junk' || m.authVerdict == 'warn') _authBanner(m),
         if (rich != null)
           Align(
             alignment: Alignment.centerRight,
@@ -1458,4 +1961,54 @@ class _MailReaderState extends State<MailReader> {
       ],
     );
   }
+}
+
+/// 폴더 이름 넣기(만들기·이름 바꾸기) — 넣은 이름(앞뒤 공백 뗌)을 돌려준다. 서버가 다시 검사한다(webmailRules.js parseFolderName).
+class _FolderNameDialog extends StatefulWidget {
+  final String title;
+  final String initial;
+  const _FolderNameDialog({required this.title, this.initial = ''});
+
+  @override
+  State<_FolderNameDialog> createState() => _FolderNameDialogState();
+}
+
+class _FolderNameDialogState extends State<_FolderNameDialog> {
+  late final _name = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  void _ok() {
+    final name = _name.text.trim();
+    if (name.isEmpty) return;
+    Navigator.of(context).pop(name);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.title),
+    content: TextField(
+      key: const ValueKey('mail-folder-name'),
+      controller: _name,
+      autofocus: true,
+      maxLength: 100,
+      decoration: InputDecoration(labelText: tr('폴더 이름'), counterText: ''),
+      onSubmitted: (_) => _ok(),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: Text(tr('취소')),
+      ),
+      FilledButton(
+        key: const ValueKey('mail-folder-name-ok'),
+        onPressed: _ok,
+        child: Text(tr('확인')),
+      ),
+    ],
+  );
 }

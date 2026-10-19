@@ -7,9 +7,8 @@ import {
   DB_FILE,
   isSafeRelativePath,
   MANIFEST_FILE,
-  MIRROR_DIR,
   MIRROR_INDEX,
-  MIRROR_MARKER,
+  MIRRORS,
   SECRETS_FILE,
 } from './backup.js';
 import {
@@ -97,12 +96,13 @@ export function secretTarget(entry) {
 }
 
 /**
- * 새 PC의 .env에서 그대로 두는 값 — DB 접속 정보(새 설치가 만든 DB 비밀번호), 첨부파일 위치(이 PC의 경로), 화상회의
+ * 새 PC의 .env에서 그대로 두는 값 — DB 접속 정보(새 설치가 만든 DB 비밀번호), 첨부파일·회사 메일함 위치(이 PC의 경로), 화상회의
  * 설정(이 PC의 LiveKit 서비스·livekit.yaml과 짝), 이 PC의 폴더들.
  */
 export const ENV_KEEP_LOCAL = new Set([
   'DATABASE_URL',
   'UPLOADS_DIR',
+  'MAIL_STORE_DIR',
   'WEB_DIR',
   'LIVEKIT_API_KEY',
   'LIVEKIT_API_SECRET',
@@ -160,31 +160,33 @@ export function mergeEnv(currentText, backupText) {
   return { text: `${lines.join('\r\n')}\r\n`, carried, portChanges };
 }
 
-/** 백업 폴더 옆(같은 TangoTalk-Backup 안)에 첨부파일 미러가 있으면 그 경로, 없으면 null. */
-export function findMirrorFor(backupDir) {
-  const mirrorDir = path.join(path.dirname(path.resolve(backupDir)), MIRROR_DIR);
-  return fs.existsSync(path.join(mirrorDir, MIRROR_MARKER)) ? mirrorDir : null;
+/** 백업 폴더 옆(같은 TangoTalk-Backup 안)에 [kind] 미러(첨부파일 'uploads'·회사 메일함 'mailstore')가 있으면 그 경로, 없으면 null. */
+export function findMirrorFor(backupDir, kind = 'uploads') {
+  const m = MIRRORS[kind];
+  const mirrorDir = path.join(path.dirname(path.resolve(backupDir)), m.dir);
+  return fs.existsSync(path.join(mirrorDir, m.marker)) ? mirrorDir : null;
 }
 
 /**
- * 첨부파일 미러를 [targetDir](이 서버의 첨부파일 폴더)로 풀어 놓는다. 이미 있는 파일은 건드리지 않는다(같은 PC에 복원하면
- * 대부분 그대로 있다 — 첨부파일 이름은 무작위라 이름이 같으면 같은 파일이다). 미러 키가 다르면 던진다.
+ * [kind] 미러(첨부파일 'uploads'·회사 메일함 'mailstore')를 [targetDir](이 서버의 그 폴더)로 풀어 놓는다. 이미 있는 파일은 건드리지
+ * 않는다(같은 PC에 복원하면 대부분 그대로 있다 — 파일 이름은 무작위라 이름이 같으면 같은 파일이다). 미러 키가 다르면 던진다.
  */
-export async function restoreMirror({ mirrorDir, key, targetDir, onProgress = () => {} }) {
+export async function restoreMirror({ mirrorDir, key, targetDir, kind = 'uploads', onProgress = () => {} }) {
+  const m = MIRRORS[kind];
   let marker;
   try {
-    marker = JSON.parse(fs.readFileSync(path.join(mirrorDir, MIRROR_MARKER), 'utf8'));
+    marker = JSON.parse(fs.readFileSync(path.join(mirrorDir, m.marker), 'utf8'));
   } catch {
-    throw new Error('첨부파일 백업 정보를 읽지 못했습니다.');
+    throw new Error(`${m.label} 백업 정보를 읽지 못했습니다.`);
   }
   if (marker?.keyId !== mirrorKeyId(key)) {
-    throw new Error('첨부파일 백업이 이 백업과 다른 서버(또는 다른 키)의 것입니다 — 첨부파일은 복원하지 않았습니다.');
+    throw new Error(`${m.label} 백업이 이 백업과 다른 서버(또는 다른 키)의 것입니다 — ${m.label}은(는) 복원하지 않았습니다.`);
   }
   let index;
   try {
     index = JSON.parse(fs.readFileSync(path.join(mirrorDir, MIRROR_INDEX), 'utf8')).files ?? {};
   } catch {
-    throw new Error('첨부파일 백업 목록(index.json)을 읽지 못했습니다.');
+    throw new Error(`${m.label} 백업 목록(index.json)을 읽지 못했습니다.`);
   }
   fs.mkdirSync(targetDir, { recursive: true });
   const entries = Object.keys(index);
@@ -206,7 +208,7 @@ export async function restoreMirror({ mirrorDir, key, targetDir, onProgress = ()
         fs.mkdirSync(path.dirname(target), { recursive: true });
         const tmp = `${target}.restoring`;
         fs.rmSync(tmp, { force: true });
-        await decryptFileTo(path.join(mirrorDir, ...`${rel}.enc`.split('/')), tmp, key, `upload:${rel}`);
+        await decryptFileTo(path.join(mirrorDir, ...`${rel}.enc`.split('/')), tmp, key, `${m.context}:${rel}`);
         await fsp.rename(tmp, target);
         restored++;
       } catch {

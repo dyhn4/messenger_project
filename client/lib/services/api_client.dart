@@ -2216,13 +2216,17 @@ class ApiClient {
   }
 
   /// 웹메일 칸 바꾸기 — 넘긴 것만. 자체 메일 서버는 [localEnabled]·[localDomains]·[localPort]·[localMaxMessageMb]·[localQuotaMb],
-  /// OAuth 연결은 [oauthGoogle]·[oauthMicrosoft]. 서버가 받는 포트를 바로 다시 연다.
+  /// 스팸 거르기 [spamFilter], 보내는 메일 DKIM 서명 [dkimEnabled]·[dkimSelector], OAuth 연결은 [oauthGoogle]·[oauthMicrosoft]. 서버가
+  /// 받는 포트를 바로 다시 연다.
   Future<WebmailAdminSettings> updateWebmailAdmin({
     bool? localEnabled,
     String? localDomains,
     int? localPort,
     int? localMaxMessageMb,
     int? localQuotaMb,
+    bool? spamFilter,
+    bool? dkimEnabled,
+    String? dkimSelector,
     bool? oauthGoogle,
     bool? oauthMicrosoft,
   }) async {
@@ -2232,6 +2236,9 @@ class ApiClient {
       'port': ?localPort,
       'maxMessageMb': ?localMaxMessageMb,
       'quotaMb': ?localQuotaMb,
+      'spamFilter': ?spamFilter,
+      'dkimEnabled': ?dkimEnabled,
+      'dkimSelector': ?dkimSelector,
     };
     final oauth = {'google': ?oauthGoogle, 'microsoft': ?oauthMicrosoft};
     return WebmailAdminSettings.fromJson(
@@ -2241,6 +2248,22 @@ class ApiClient {
           })
           as Map<String, dynamic>,
     );
+  }
+
+  /// DKIM 레코드가 DNS에 올라가 있는지 도메인마다(POST /api/admin/webmail/dkim-check) — [ok]가 아니면 [found]는 DNS에서 찾은 값의
+  /// 앞부분(없으면 null).
+  Future<List<({String domain, bool ok, String? found})>>
+  checkDkimRecords() async {
+    final m = await _post('/api/admin/webmail/dkim-check', {}) as Map;
+    return [
+      for (final r in m['results'] as List? ?? const [])
+        if (r is Map)
+          (
+            domain: r['domain'] as String? ?? '',
+            ok: r['ok'] == true,
+            found: r['found'] as String?,
+          ),
+    ];
   }
 
   /// 시험 메일 — 지금 저장된 값으로 [to]에 한 통 보낸다. 성공하면 메일 기능을 켤 수 있게 된다. 실패하면 고칠 수 있는 이유로

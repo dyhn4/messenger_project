@@ -2,22 +2,28 @@ import { decryptField, encryptField } from './crypto.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { updateMailAccount } from './db/queries/webmail.js';
 import {
+  localCreateFolder,
   localDelete,
+  localDeleteFolder,
   localExpunge,
+  localHasFolder,
   localListFolders,
   localListMessages,
   localMove,
   localReadMessage,
   localRecent,
+  localRenameFolder,
   localSetFlags,
   localUnseen,
   storeLocalMessage,
 } from './localMailStore.js';
-import { LOCAL_FOLDERS, localMailLimits } from './localMailRules.js';
+import { localMailLimits } from './localMailRules.js';
 import {
   appendDraft,
   appendToSent,
   applyRulePlan,
+  createFolder,
+  deleteFolder,
   deleteMessages,
   expungeMessages,
   folderExists,
@@ -28,6 +34,7 @@ import {
   moveMessages,
   readMessage,
   recentMessages,
+  renameFolder,
   setFlags,
   withImap,
 } from './webmailClient.js';
@@ -81,6 +88,9 @@ function imapBackend(account) {
     folderExists: (path) => run((c) => folderExists(c, path)),
     recent: (folder, limit) => run((c) => recentMessages(c, folder, limit)),
     applyPlan: (folder, plan) => run((c) => applyRulePlan(c, folder, plan)),
+    createFolder: (name, parent) => run((c) => createFolder(c, name, parent)),
+    renameFolder: (path, name) => run((c) => renameFolder(c, path, name)),
+    deleteFolder: (path) => run((c) => deleteFolder(c, path)),
   };
 }
 
@@ -106,13 +116,17 @@ function localBackend(account) {
       return { folder: 'Drafts', uid };
     },
     inboxUnseen: () => localUnseen(id),
-    folderExists: async (path) => LOCAL_FOLDERS.includes(path),
+    folderExists: (path) => localHasFolder(id, path),
     recent: (folder, limit) => localRecent(id, folder, limit),
     applyPlan: async (folder, plan) => {
       if (plan.seen.length) await localSetFlags(id, folder, plan.seen, { seen: true });
       if (plan.flagged.length) await localSetFlags(id, folder, plan.flagged, { flagged: true });
-      for (const [to, uids] of plan.moves) if (to !== folder && LOCAL_FOLDERS.includes(to) && uids.length) await localMove(id, folder, uids, to);
+      for (const [to, uids] of plan.moves) if (to !== folder && uids.length && (await localHasFolder(id, to))) await localMove(id, folder, uids, to);
     },
+    // 회사 메일함은 하위 폴더가 없다 — [parent]는 무시.
+    createFolder: (name) => localCreateFolder(id, name),
+    renameFolder: (path, name) => localRenameFolder(id, path, name),
+    deleteFolder: (path) => localDeleteFolder(id, path),
   };
 }
 

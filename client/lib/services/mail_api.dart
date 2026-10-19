@@ -192,6 +192,48 @@ class MailApi {
     );
   }
 
+  List<MailFolder> _folderList(Object? list) => [
+    for (final f in list as List? ?? const [])
+      MailFolder.fromJson((f as Map).cast<String, dynamic>()),
+  ];
+
+  /// 폴더 만들기 — [parent](위 폴더 경로)가 있으면 그 아래(바깥 메일 서버만). → 만든 경로와 새 폴더 목록.
+  Future<({String path, List<MailFolder> folders})> createFolder(
+    String account,
+    String name, {
+    String? parent,
+  }) async {
+    final m = await _map('POST', '/api/mail/folders', {
+      if (account.isNotEmpty) 'account': account,
+      'name': name,
+      'parent': ?parent,
+    });
+    return (path: m['path'] as String, folders: _folderList(m['folders']));
+  }
+
+  /// 폴더 이름 바꾸기(같은 위 폴더 안에서 마지막 칸 이름만) — 그 폴더로 옮기던 받는 규칙은 서버가 따라 고친다. → 새 경로와 목록.
+  Future<({String path, List<MailFolder> folders})> renameFolder(
+    String account,
+    String path,
+    String name,
+  ) async {
+    final m = await _map('POST', '/api/mail/folders/rename', {
+      if (account.isNotEmpty) 'account': account,
+      'path': path,
+      'name': name,
+    });
+    return (path: m['path'] as String, folders: _folderList(m['folders']));
+  }
+
+  /// 폴더 지우기 — 비어 있고 받는 규칙이 쓰지 않을 때만(아니면 ApiException에 이유). → 새 폴더 목록.
+  Future<List<MailFolder>> deleteFolder(String account, String path) async =>
+      _folderList(
+        (await _map('POST', '/api/mail/folders/delete', {
+          if (account.isNotEmpty) 'account': account,
+          'path': path,
+        }))['folders'],
+      );
+
   Future<List<MailFolder>> folders(String account) async => [
     for (final f
         in await _api.requestJson(
@@ -307,6 +349,7 @@ class MailApi {
     required List<String> bcc,
     required String subject,
     required String text,
+    List<Map<String, dynamic>>? format,
     required List<Map<String, dynamic>> attachments,
     required List<int> savedAttachments,
     ({String folder, int uid})? saved,
@@ -319,6 +362,7 @@ class MailApi {
     'bcc': bcc,
     'subject': subject,
     'text': text,
+    'format': ?format,
     'attachments': attachments,
     if (savedAttachments.isNotEmpty) 'draftAttachments': savedAttachments,
     if (saved != null) 'draft': {'folder': saved.folder, 'uid': saved.uid},
@@ -327,7 +371,8 @@ class MailApi {
   };
 
   /// 보내기 — [attachments]는 올린 파일(uploadFile 결과)의 `{ fileUrl, fileName, mimeType }`, [savedAttachments]는 이어 쓰는
-  /// 임시 저장본([saved])의 첨부 번호(서버가 저장본에서 꺼내 싣고, 보낸 뒤 저장본을 지운다).
+  /// 임시 저장본([saved])의 첨부 번호(서버가 저장본에서 꺼내 싣고, 보낸 뒤 저장본을 지운다). [format]은 본문의 서식 구간
+  /// (textFormatToJson — 있으면 서버가 HTML 본문도 함께 보낸다).
   Future<void> send({
     String account = '',
     required List<String> to,
@@ -335,6 +380,7 @@ class MailApi {
     List<String> bcc = const [],
     required String subject,
     required String text,
+    List<Map<String, dynamic>>? format,
     List<Map<String, dynamic>> attachments = const [],
     List<int> savedAttachments = const [],
     ({String folder, int uid})? saved,
@@ -352,6 +398,7 @@ class MailApi {
         bcc: bcc,
         subject: subject,
         text: text,
+        format: format,
         attachments: attachments,
         savedAttachments: savedAttachments,
         saved: saved,
@@ -371,6 +418,7 @@ class MailApi {
     List<String> bcc = const [],
     String subject = '',
     String text = '',
+    List<Map<String, dynamic>>? format,
     List<Map<String, dynamic>> attachments = const [],
     List<int> savedAttachments = const [],
     ({String folder, int uid})? saved,
@@ -387,6 +435,7 @@ class MailApi {
         bcc: bcc,
         subject: subject,
         text: text,
+        format: format,
         attachments: attachments,
         savedAttachments: savedAttachments,
         saved: saved,

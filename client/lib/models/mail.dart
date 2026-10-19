@@ -2,6 +2,7 @@
 // 도우미, 서명 넣기.
 
 import '../l10n/tr.dart';
+import 'text_format.dart';
 
 /// 주소 하나 — 이름이 없을 수 있다.
 class MailAddress {
@@ -171,18 +172,24 @@ class MailAccount {
 }
 
 /// 폴더 — [specialUse] '\\Inbox' | '\\Sent' | '\\Drafts' | '\\Junk' | '\\Trash' | … 또는 null.
+///
+/// [depth]는 하위 폴더 깊이(들여쓰기), [editable]이면 이름을 바꾸거나 지울 수 있다(사람이 만든 폴더 — 예전 서버는 모름, false).
 class MailFolder {
   final String path;
   final String name;
   final String? specialUse;
   final int? unseen;
   final int? total;
+  final int depth;
+  final bool editable;
   const MailFolder({
     required this.path,
     required this.name,
     this.specialUse,
     this.unseen,
     this.total,
+    this.depth = 0,
+    this.editable = false,
   });
 
   factory MailFolder.fromJson(Map<String, dynamic> json) => MailFolder(
@@ -191,6 +198,18 @@ class MailFolder {
     specialUse: json['specialUse'] as String?,
     unseen: (json['unseen'] as num?)?.toInt(),
     total: (json['total'] as num?)?.toInt(),
+    depth: (json['depth'] as num?)?.toInt() ?? 0,
+    editable: json['editable'] == true,
+  );
+
+  MailFolder copyWith({int? unseen}) => MailFolder(
+    path: path,
+    name: name,
+    specialUse: specialUse,
+    unseen: unseen ?? this.unseen,
+    total: total,
+    depth: depth,
+    editable: editable,
   );
 
   bool get isInbox => specialUse == r'\Inbox';
@@ -199,9 +218,12 @@ class MailFolder {
   bool get isDrafts => specialUse == r'\Drafts';
 }
 
-/// 목록 한 줄.
+/// 목록 한 줄. [messageId]·[inReplyTo]·[references]는 대화로 묶는 데 쓴다(mailThreads — 예전 서버는 비어 있다).
 class MailSummary {
   final int uid;
+  final String? messageId;
+  final String? inReplyTo;
+  final List<String> references;
   final String subject;
   final MailAddress from;
   final List<MailAddress> to;
@@ -222,10 +244,19 @@ class MailSummary {
     this.answered = false,
     this.draft = false,
     this.hasAttachments = false,
+    this.messageId,
+    this.inReplyTo,
+    this.references = const [],
   });
 
   factory MailSummary.fromJson(Map<String, dynamic> json) => MailSummary(
     uid: (json['uid'] as num).toInt(),
+    messageId: json['messageId'] as String?,
+    inReplyTo: json['inReplyTo'] as String?,
+    references: [
+      for (final r in json['references'] as List? ?? const [])
+        if (r is String) r,
+    ],
     subject: json['subject'] as String? ?? tr('(제목 없음)'),
     from: MailAddress.fromJson(json['from']),
     to: _addresses(json['to']),
@@ -250,6 +281,9 @@ class MailSummary {
     answered: answered,
     draft: draft,
     hasAttachments: hasAttachments,
+    messageId: messageId,
+    inReplyTo: inReplyTo,
+    references: references,
   );
 }
 
@@ -298,6 +332,13 @@ class MailMessage {
 
   /// 임시 저장본(\Draft) — 읽기 대신 "이어 쓰기".
   final bool draft;
+
+  /// 이 앱이 임시 저장한 서식 있는 메일의 서식 구간(이어 쓸 때 되살린다 — 서버 mailFormatHtml.js). 그 밖에는 null.
+  final List<TextFormatRun>? format;
+
+  /// 회사 메일함이 받을 때 본 보낸 쪽 확인(SPF·DKIM·DMARC — 서버 localMailAuth.js)이 통과하지 못했으면 'warn'|'junk', 그 이유.
+  final String? authVerdict;
+  final String? authReason;
   const MailMessage({
     required this.uid,
     required this.subject,
@@ -319,9 +360,13 @@ class MailMessage {
     this.attachments = const [],
     this.flagged = false,
     this.draft = false,
+    this.format,
+    this.authVerdict,
+    this.authReason,
   });
 
   factory MailMessage.fromJson(Map<String, dynamic> json) {
+    final auth = json['auth'] is Map ? json['auth'] as Map : null;
     final rich = json['rich'] is Map
         ? (json['rich'] as Map).cast<String, dynamic>()
         : null;
@@ -356,6 +401,9 @@ class MailMessage {
       ],
       flagged: json['flagged'] == true,
       draft: json['draft'] == true,
+      format: parseTextFormat(json['format']),
+      authVerdict: auth?['verdict'] as String?,
+      authReason: auth?['reason'] as String?,
     );
   }
 }
@@ -367,6 +415,9 @@ class MailDraft {
   final List<MailAddress> bcc;
   final String subject;
   final String text;
+
+  /// [text]의 서식 구간(이어 쓰는 서식 있는 임시 저장본 — 새 메일·답장은 null).
+  final List<TextFormatRun>? format;
   final String? inReplyTo;
   final List<String> references;
 
@@ -388,6 +439,7 @@ class MailDraft {
     this.bcc = const [],
     this.subject = '',
     this.text = '',
+    this.format,
     this.inReplyTo,
     this.references = const [],
     this.answered,
@@ -527,6 +579,7 @@ MailDraft draftFromSaved(
   bcc: m.bcc,
   subject: m.subject,
   text: m.text,
+  format: m.format,
   inReplyTo: m.inReplyTo,
   references: m.references,
   saved: (folder: folder, uid: m.uid),

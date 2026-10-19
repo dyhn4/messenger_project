@@ -4,7 +4,7 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import nodemailer from 'nodemailer';
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
-import { isBlockedAddress, LIST_LIMIT_MAX, MESSAGE_BYTES_MAX, SEARCH_MAX } from './webmailRules.js';
+import { isBlockedAddress, LIST_LIMIT_MAX, MESSAGE_BYTES_MAX, parseFolderName, SEARCH_MAX } from './webmailRules.js';
 
 /**
  * 웹메일의 메일 서버 쪽 — IMAP(imapflow)으로 폴더·목록·읽기·플래그·이동·지우기·임시 저장, SMTP(nodemailer)로 보내기. 계정마다 IMAP 연결
@@ -162,6 +162,82 @@ export async function folderExists(client, path) {
   return list.some((m) => m.path === path && !m.flags?.has?.('\\Noselect'));
 }
 
+/** 폴더 일을 할 수 없을 때(이름이 겹침·특수 폴더·비어 있지 않음 — 화면에 그대로 알린다, webmail.js mailFailed가 400). */
+export function folderError(message) {
+  const e = new Error(message);
+  e.code = 'FOLDER';
+  return e;
+}
+
+const sameName = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+/** 맨 위 폴더인지 — "INBOX." 아래에 폴더를 두는 서버는 그 바로 아래가 맨 위다. */
+const isTopLevel = (m) => !m.parent?.length || (m.parent.length === 1 && m.parent[0].toUpperCase() === 'INBOX');
+
+/** 경로의 폴더 항목(list) — 없으면 FOLDER 오류. */
+async function folderEntry(client, path) {
+  const entry = (await client.list()).find((m) => m.path === path);
+  if (!entry) throw folderError('폴더를 찾을 수 없습니다. 다른 곳에서 바꿨을 수 있습니다.');
+  return entry;
+}
+
+/** 받은편지함·특수 폴더(보낸편지함·휴지통 등)는 이름을 바꾸거나 지울 수 없다. */
+function assertEditable(entry) {
+  if (entry.path.toUpperCase() === 'INBOX' || entry.specialUse) throw folderError('기본 폴더는 이름을 바꾸거나 지울 수 없습니다.');
+}
+
+/**
+ * 폴더 만들기 — [parent](경로)가 있으면 그 아래, 없으면 맨 위(이름공간 앞머리는 imapflow가 붙인다). [raw] 이름은 이 서버의 폴더 구분
+ * 글자까지 막아 고른다(webmailRules.js parseFolderName). 같은 자리에 같은 이름(대소문자 무시)이 있으면 FOLDER 오류. 만든 경로.
+ */
+export async function createFolder(client, raw, parent = null) {
+  const list = await client.list();
+  const parsed = parseFolderName(raw, { delimiter: list.find((m) => m.delimiter)?.delimiter ?? '/' });
+  if (parsed.error) throw folderError(parsed.error);
+  const { name } = parsed;
+  let path = name;
+  if (parent) {
+    const p = list.find((m) => m.path === parent);
+    if (!p) throw folderError('위 폴더를 찾을 수 없습니다.');
+    path = `${p.path}${p.delimiter ?? '/'}${name}`;
+    if (list.some((m) => m.parentPath === p.path && sameName(m.name, name))) throw folderError('같은 이름의 폴더가 이미 있습니다.');
+  } else if (list.some((m) => isTopLevel(m) && sameName(m.name, name))) {
+    throw folderError('같은 이름의 폴더가 이미 있습니다.');
+  }
+  const created = await client.mailboxCreate(path);
+  return created?.path ?? path;
+}
+
+/** 폴더 이름 바꾸기 — 같은 위 폴더 안에서 마지막 칸 이름만 바꾼다. → `{ from, to, delimiter }`. */
+export async function renameFolder(client, path, raw) {
+  const list = await client.list();
+  const entry = list.find((m) => m.path === path);
+  if (!entry) throw folderError('폴더를 찾을 수 없습니다. 다른 곳에서 바꿨을 수 있습니다.');
+  assertEditable(entry);
+  const delimiter = entry.delimiter ?? '/';
+  const parsed = parseFolderName(raw, { delimiter });
+  if (parsed.error) throw folderError(parsed.error);
+  const { name } = parsed;
+  if (list.some((m) => m.path !== path && m.parentPath === entry.parentPath && sameName(m.name, name))) {
+    throw folderError('같은 이름의 폴더가 이미 있습니다.');
+  }
+  const to = entry.parentPath ? `${entry.parentPath}${delimiter}${name}` : name;
+  if (to === path) return { from: path, to, delimiter };
+  const res = await client.mailboxRename(path, to);
+  return { from: path, to: res?.newPath ?? to, delimiter };
+}
+
+/** 폴더 지우기 — 비어 있고 아래 폴더가 없을 때만(메일 서버는 폴더째 메일을 지운다 — 실수로 메일을 잃지 않게). */
+export async function deleteFolder(client, path) {
+  const entry = await folderEntry(client, path);
+  assertEditable(entry);
+  const delimiter = entry.delimiter ?? '/';
+  if ((await client.list()).some((m) => m.path.startsWith(`${path}${delimiter}`))) throw folderError('아래 폴더가 있는 폴더는 지울 수 없습니다.');
+  const status = await client.status(path, { messages: true });
+  if ((status?.messages ?? 0) > 0) throw folderError('메일이 들어 있는 폴더는 지울 수 없습니다. 메일을 먼저 옮기거나 지우세요.');
+  await client.mailboxDelete(path);
+  return { delimiter };
+}
+
 async function withLock(client, path, fn, { readOnly = false } = {}) {
   const lock = await client.getMailboxLock(path, { readOnly });
   try {
@@ -171,7 +247,8 @@ async function withLock(client, path, fn, { readOnly = false } = {}) {
   }
 }
 
-const SUMMARY_QUERY = { uid: true, envelope: true, flags: true, bodyStructure: true, size: true, internalDate: true };
+// References 머리는 대화로 묶기에 쓴다(봉투에는 Message-ID·In-Reply-To만 있다).
+const SUMMARY_QUERY = { uid: true, envelope: true, flags: true, bodyStructure: true, size: true, internalDate: true, headers: ['references'] };
 
 /**
  * [path] 폴더의 메일 — 새것부터 [limit]통, [before](uid)보다 앞의 것. [q]면 제목·보낸 사람·받는 사람·본문으로 찾는다(최근 100통까지).

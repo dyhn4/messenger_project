@@ -201,6 +201,17 @@ class WebmailAdminSettings {
   final int received;
   final int rejected;
 
+  /// 그중 스팸편지함으로 거른 메일 수.
+  final int junked;
+
+  /// 받는 메일의 보낸 쪽 확인(SPF·DKIM·DMARC)으로 스팸 거르기(서버 localMailAuth.js — 기본 켬, 예전 서버는 false).
+  final bool spamFilter;
+
+  /// 보내는 메일 DKIM 서명 — 켬 여부, 선택자, 도메인마다 DNS에 올릴 TXT 레코드(이름·값). 예전 서버는 [dkimRecords]가 비어 있다.
+  final bool dkimEnabled;
+  final String dkimSelector;
+  final List<({String domain, String name, String value})> dkimRecords;
+
   /// 도메인마다 DNS에 넣을 MX와 안내.
   final List<({String domain, String mx, String note})> hints;
 
@@ -225,6 +236,11 @@ class WebmailAdminSettings {
     this.listenError,
     this.received = 0,
     this.rejected = 0,
+    this.junked = 0,
+    this.spamFilter = false,
+    this.dkimEnabled = false,
+    this.dkimSelector = '',
+    this.dkimRecords = const [],
     this.hints = const [],
     this.outboundReady = false,
     this.oauthRedirectUri,
@@ -241,6 +257,7 @@ class WebmailAdminSettings {
     final oauth = (json['oauth'] as Map?)?.cast<String, dynamic>() ?? const {};
     final google = (oauth['google'] as Map?) ?? const {};
     final microsoft = (oauth['microsoft'] as Map?) ?? const {};
+    final dkim = (local['dkim'] as Map?)?.cast<String, dynamic>() ?? const {};
     return WebmailAdminSettings(
       localEnabled: local['enabled'] == true,
       localDomains: local['domains'] as String? ?? '',
@@ -252,6 +269,19 @@ class WebmailAdminSettings {
       listenError: status['error'] as String?,
       received: (status['received'] as num?)?.toInt() ?? 0,
       rejected: (status['rejected'] as num?)?.toInt() ?? 0,
+      junked: (status['junked'] as num?)?.toInt() ?? 0,
+      spamFilter: local['spamFilter'] == true,
+      dkimEnabled: dkim['enabled'] == true,
+      dkimSelector: dkim['selector'] as String? ?? '',
+      dkimRecords: [
+        for (final r in dkim['records'] as List? ?? const [])
+          if (r is Map)
+            (
+              domain: r['domain'] as String? ?? '',
+              name: r['name'] as String? ?? '',
+              value: r['value'] as String? ?? '',
+            ),
+      ],
       hints: [
         for (final h in local['hints'] as List? ?? const [])
           if (h is Map)

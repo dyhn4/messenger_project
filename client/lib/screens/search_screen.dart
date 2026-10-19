@@ -9,6 +9,7 @@ import '../models/poll.dart' show pollPreviewText;
 import '../models/room.dart';
 import '../models/todo.dart';
 import '../services/api_client.dart';
+import '../services/connection_errors.dart';
 import '../services/session.dart';
 import '../widgets/filter_dropdown.dart';
 import '../widgets/floating_dialog.dart';
@@ -86,6 +87,9 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _loading = false;
   String? _error;
   int _page = 0; // 0-based.
+
+  /// 서버에 닿지 않아 이 기기에 저장된 메시지에서 찾은 결과인지(_searchOffline) — 결과 줄에 알린다.
+  bool _offline = false;
 
   List<AppUser>? _users;
   String? _roomId; // null = 참여한 대화방(전체)
@@ -226,6 +230,7 @@ class _SearchScreenState extends State<SearchScreen> {
       final rooms = await roomsFuture;
       if (!mounted || seq != _requestSeq) return;
       setState(() {
+        _offline = false;
         _results = page.items;
         _roomResults = null;
         _todoResults = null;
@@ -237,10 +242,91 @@ class _SearchScreenState extends State<SearchScreen> {
       });
     } catch (e) {
       if (!mounted || seq != _requestSeq) return;
+      // 서버에 닿지 않으면 메시지·파일·투표 찾기는 이 기기 메시지 DB에서 한다(대화방·할 일 탭은 서버에서만).
+      if (isConnectionError(e) &&
+          _type != SearchType.room &&
+          _type != SearchType.todo) {
+        final local = await _searchOffline(
+          q,
+          teamId: teamId,
+          allTeams: allTeams,
+        );
+        if (!mounted || seq != _requestSeq) return;
+        setState(() {
+          _offline = true;
+          _results = local;
+          _roomResults = null;
+          _todoResults = null;
+          _roomPreview = const [];
+          _roomPreviewTotal = 0;
+          _resultAllTeams = allTeams;
+          _total = local.length;
+          _page = 0;
+        });
+        return;
+      }
       setState(() => _error = e.toString());
     } finally {
       if (mounted && seq == _requestSeq) setState(() => _loading = false);
     }
+  }
+
+  /// 오프라인 찾기 — 이 기기 메시지 DB(local_message_store.dart — 받아 둔 메시지만, 비밀 대화 제외)에서 [q]가 든 메시지를 찾아 서버
+  /// 결과와 같은 모양으로. 방·멤버·기간·탭(파일·투표·메시지) 필터와 정렬은 여기서 거른다.
+  Future<List<SearchResult>> _searchOffline(
+    String q, {
+    required String teamId,
+    required bool allTeams,
+  }) async {
+    final session = widget.session;
+    final roomsById = {for (final r in session.rooms) r.id: r};
+    final roomIds = _roomId != null
+        ? [_roomId!]
+        : allTeams
+        ? null
+        : [
+            for (final r in session.rooms)
+              if (r.teamId == teamId && !r.isSecret) r.id,
+          ];
+    final since = _period.since();
+    final until = _period.until;
+    final raws = await session.offlineCache.searchMessages(
+      q,
+      roomIds: roomIds,
+      limit: searchFetchLimit,
+    );
+    final out = <SearchResult>[];
+    for (final raw in raws) {
+      if (raw['senderName'] is! String || raw['createdAt'] is! num) continue;
+      final type = raw['type'] as String? ?? 'text';
+      final hasFile =
+          raw['fileName'] != null ||
+          (raw['attachments'] is List &&
+              (raw['attachments'] as List).isNotEmpty);
+      final keep = switch (_type) {
+        SearchType.file => hasFile,
+        SearchType.poll => type == 'poll',
+        SearchType.message => type != 'poll' && type != 'sticker',
+        _ => type != 'sticker',
+      };
+      if (!keep) continue;
+      if (_senderId != null && raw['senderId'] != _senderId) continue;
+      final at = DateTime.fromMillisecondsSinceEpoch(
+        (raw['createdAt'] as num).toInt(),
+      );
+      if (since != null && at.isBefore(since)) continue;
+      if (until != null && at.isAfter(until)) continue;
+      out.add(
+        SearchResult.fromJson({
+          ...raw,
+          'roomName': roomsById[raw['roomId']]?.name,
+        }),
+      );
+    }
+    if (!_newestFirst) {
+      out.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    }
+    return out;
   }
 
   /// 할 일 탭 — 고른 팀(모든 팀이면 가입한 팀마다)에서 제목·설명에 [q]가 든 할 일을 찾는다. 참여 대화방 필터는 그 방,
@@ -747,6 +833,13 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           ),
           TextSpan(text: tr('건')),
+          if (_offline && !isRooms && !isTodos)
+            TextSpan(
+              text: tr(' · 연결이 끊겨 이 기기에 저장된 메시지에서 찾았습니다'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
           // 한도를 넘으면 목록에는 앞의 일부만 있다는 걸 알린다.
           if (total > shown)
             TextSpan(

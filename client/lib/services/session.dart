@@ -52,7 +52,10 @@ import 'notification_controller.dart';
 import 'deep_link_service.dart';
 import 'device_identity.dart';
 import 'draft_sync.dart';
+import 'chat_image_cache.dart';
+import 'connection_errors.dart';
 import 'message_outbox.dart';
+import 'outbox_files.dart';
 import 'offline_cache.dart';
 import 'download_storage.dart';
 import 'favorites_api.dart';
@@ -338,14 +341,158 @@ class Session extends ChangeNotifier {
   );
   StreamSubscription? _draftChangedSub;
 
-  /// 보내기 대기열(message_outbox.dart) — 비밀 대화가 아닌 방의 글·이모티콘·첨부 메시지. 연결되면 기다리던 것을 보낸다.
+  /// 보내기 대기열(message_outbox.dart) — 글·이모티콘·첨부 메시지(아직 올리지 못한 첨부 포함), 비밀 대화의 글(메모리에만),
+  /// 오프라인 중 고치기·지우기·공감. 연결되면 기다리던 것을 한다([_deliverOutbox]).
   late final outbox = MessageOutbox(
     send: (payload) => chatSocket.sendPayload(payload, requireConnection: true),
+    deliver: _deliverOutbox,
+    isTransient: isConnectionError,
+    onDiscarded: _outboxDiscarded,
   );
+
+  /// 대기열의 일 중 바로 보낼 수 없는 것 — 아직 올리지 못한 첨부를 올리고, 비밀 대화의 글을 암호화해 보내고, 고치기·지우기·공감을
+  /// 서버에 반영한다. 연결 문제면 [MessageSendException](transient) 또는 연결 오류가 그대로 나가 대기열이 기다린다.
+  Future<void> _deliverOutbox(OutboxItem item) async {
+    final client = api;
+    if (client == null) {
+      throw const MessageSendException('서버와 연결되어 있지 않습니다.', transient: true);
+    }
+    final room = _findRoom(item.roomId);
+    switch (item.kind) {
+      case OutboxKind.message:
+        if (item.files.isNotEmpty) await _uploadOutboxFiles(client, item);
+        var payload = sendableOutboxPayload(item.payload);
+        if (item.secret) {
+          if (room == null) {
+            throw const MessageSendException('대화방을 찾을 수 없습니다.');
+          }
+          payload = {
+            ...payload,
+            'text': await encryptOutgoing(room, payload['text'] as String?),
+          };
+        }
+        await chatSocket.sendPayload(payload, requireConnection: true);
+      case OutboxKind.edit:
+        final id = item.targetId!;
+        var text = item.payload['text'] as String? ?? '';
+        if (item.secret) {
+          if (room == null) {
+            throw const MessageSendException('대화방을 찾을 수 없습니다.');
+          }
+          text =
+              (await encryptOutgoing(
+                room,
+                text,
+                place: SecretTextPlace.message(editOf: id),
+              )) ??
+              text;
+        }
+        await client.editMessageBody(id, {
+          'text': text,
+          'textFormat': ?item.payload['textFormat'],
+          'mentions': ?item.payload['mentions'],
+        });
+      case OutboxKind.delete:
+        try {
+          await client.deleteMessage(item.targetId!);
+        } on ApiException catch (e) {
+          if (e.statusCode != 404) rethrow; // 이미 지워졌다.
+        }
+      case OutboxKind.reaction:
+        final id = item.targetId!;
+        final reactions = await client.setMessageReaction(
+          id,
+          item.payload['emoji'] as String?,
+        );
+        existingControllerFor(item.roomId)?.applyReactions(id, reactions);
+    }
+  }
+
+  /// 아직 올리지 못한 첨부를 하나씩 올려 [item]의 첨부로 옮긴다(하나 올릴 때마다 저장 — 중간에 끊겨도 올린 것은 다시 올리지 않는다).
+  Future<void> _uploadOutboxFiles(ApiClient client, OutboxItem item) async {
+    while (item.files.isNotEmpty) {
+      final f = item.files.first;
+      if (!await outboxFileExists(f.path)) {
+        throw MessageSendException(
+          tr('올릴 파일을 찾을 수 없습니다: {name}', {'name': f.name}),
+        );
+      }
+      final uploaded = await uploadPlainFile(
+        client,
+        XFile(f.path, name: f.name, mimeType: f.mimeType),
+        isImage: f.isImage,
+      );
+      final attachments = [
+        ...(item.payload['attachments'] as List? ?? const []),
+        uploaded.toPayload(),
+      ];
+      item.payload['attachments'] = attachments;
+      item.files = item.files.sublist(1);
+      outbox.updated(item);
+      await deleteOutboxFile(f.path);
+    }
+    await deleteOutboxFiles(item.clientId);
+  }
+
+  /// 대기열에서 하지 않고 버렸다 — 복사해 둔 첨부를 치우고, 화면에 먼저 보인 고치기·지우기는 서버 것으로 되돌린다.
+  void _outboxDiscarded(OutboxItem item) {
+    if (item.isMessage) {
+      unawaited(deleteOutboxFiles(item.clientId));
+      return;
+    }
+    if (item.kind == OutboxKind.edit || item.kind == OutboxKind.delete) {
+      unawaited(existingControllerFor(item.roomId)?.refresh());
+    }
+  }
+
+  /// 아직 올리지 못한 첨부를 대기열에 넣으려고 이 기기의 앱 폴더(outbox_files/<임시 id>)에 복사한다. 웹이면(폴더 없음) null.
+  Future<List<OutboxFile>?> stashOutboxFiles(
+    String clientId,
+    List<({List<int> bytes, String name, String? mimeType, bool isImage})>
+    files,
+  ) => stashFilesForOutbox(clientId, files);
 
   /// 오프라인 보기 저장소(offline_cache.dart) — 팀·방 목록·방마다 최근 메시지. 서버에 닿지 않으면 이걸로 보여 준다.
   late final offlineCache = OfflineCache();
   StreamSubscription? _rawMessageSub;
+  StreamSubscription? _rawMessageChangeSub;
+
+  /// 바뀐 메시지(수정·삭제·공감 — chat_socket.dart rawMessageChanges)를 이 기기 메시지 DB에도 맞춘다(비밀 대화는 넣지 않는다).
+  void _applyRawMessageChange(Map<String, dynamic> change) {
+    switch (change['kind']) {
+      case 'edited':
+        final raw = change['message'];
+        if (raw is! Map) return;
+        final roomId = raw['roomId'];
+        final room = roomId is String ? _findRoom(roomId) : null;
+        if (room == null || room.isSecret) return;
+        // 수정 브로드캐스트에는 댓글 등이 빠질 수 있어 저장해 둔 것 위에 덮는다.
+        final edited = Map<String, dynamic>.from(raw);
+        offlineCache.updateMessage(
+          edited['id'] as String? ?? '',
+          (stored) => {...stored, ...edited},
+        );
+      case 'deleted':
+        final id = change['id'];
+        if (id is! String) return;
+        offlineCache.updateMessage(
+          id,
+          (stored) => {
+            ...stored,
+            'deleted': true,
+            'text': null,
+            'attachments': const [],
+          },
+        );
+      case 'reactions':
+        final id = change['messageId'];
+        if (id is! String) return;
+        offlineCache.updateMessage(
+          id,
+          (stored) => {...stored, 'reactions': change['reactions']},
+        );
+    }
+  }
 
   /// 지금 목록이 서버가 아니라 이 기기에 저장해 둔 것인지(앱을 켤 때 서버에 닿지 않았다) — 다시 연결되면 서버 것으로 바뀐다.
   bool showingCachedData = false;
@@ -359,8 +506,8 @@ class Session extends ChangeNotifier {
         for (final r in raw)
           if (r is! Map || r['isSecret'] != true) r,
       ]);
-    } else if (key.startsWith('messages:')) {
-      final roomId = key.substring(9);
+    } else if (key.startsWith('messages:') || key.startsWith('older:')) {
+      final roomId = key.substring(key.indexOf(':') + 1);
       final room = _findRoom(roomId);
       if (room == null || room.isSecret) return;
       offlineCache.saveMessages(roomId, raw);
@@ -409,6 +556,51 @@ class Session extends ChangeNotifier {
       return const [];
     }
   }
+
+  /// 위로 넘기는데 서버에 닿지 않을 때 — 이 기기 메시지 DB에서 [before]보다 오래된 메시지 [limit]개(비밀 대화는 없다).
+  Future<List<Message>> cachedOlderMessages(
+    Room room,
+    DateTime before,
+    int limit,
+  ) async {
+    if (room.isSecret) return const [];
+    try {
+      return [
+        for (final m in await offlineCache.olderMessages(
+          room.id,
+          before,
+          limit: limit,
+        ))
+          Message.fromJson(m),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 서버에 닿지 않을 때의 찾기 — 이 기기 메시지 DB에 쌓인 메시지에서(새것부터). [roomIds]를 주면 그 방들에서만(비밀 대화는 없다).
+  Future<List<Message>> searchCachedMessages(
+    String query, {
+    Iterable<String>? roomIds,
+    int limit = 100,
+  }) async {
+    try {
+      return [
+        for (final m in await offlineCache.searchMessages(
+          query,
+          roomIds: roomIds,
+          limit: limit,
+        ))
+          Message.fromJson(m),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 서버에 닿지 않는 것이 확인됐는지 — 실시간 연결이 3초 넘게 끊겼거나, 앱을 켤 때 서버에 닿지 않아 저장해 둔 목록을 보여 주는 중.
+  /// 그러면 고치기·지우기·공감·첨부 올리기를 서버에 보내 보지 않고 바로 대기열에 넣는다(시간 초과를 기다리지 않게).
+  bool get knownOffline => connectionLost || showingCachedData;
 
   /// 서버와의 실시간 연결이 끊긴 지 잠깐(3초) 지났는지 — 화면 위 "연결이 끊겼습니다" 띠(잠깐 끊겼다 붙는 것은 보이지 않게).
   bool connectionLost = false;
@@ -2443,6 +2635,10 @@ class Session extends ChangeNotifier {
       if (room == null || room.isSecret) return;
       unawaited(offlineCache.appendMessage(roomId, raw));
     });
+    _rawMessageChangeSub?.cancel();
+    _rawMessageChangeSub = chatSocket.rawMessageChanges.listen(
+      _applyRawMessageChange,
+    );
     if (chatSocket.isConnected) unawaited(outbox.drain());
     _connectFailureSub?.cancel();
     _connectFailureSub = chatSocket.connectFailures.listen(
@@ -4216,9 +4412,31 @@ class Session extends ChangeNotifier {
     }
 
     apply(reactionsWith(before, me, next));
+    // 연결이 없거나 연결 문제로 실패하면 화면에 보인 그대로 두고 대기열에 넣는다(공감은 "이것으로 정하기"라 늦게 보내도 같다 —
+    // 같은 메시지에 다시 누르면 마지막 것만 간다).
+    void queue() {
+      outbox.submitAction(
+        roomId: message.roomId,
+        kind: OutboxKind.reaction,
+        payload: {'messageId': message.id, 'emoji': next},
+        preview: next == null ? tr('공감 빼기') : tr('공감 {emoji}', {'emoji': next}),
+      );
+      if (!(_findRoom(message.roomId)?.isSecret ?? true)) {
+        offlineCache.updateMessage(
+          message.id,
+          (raw) => {
+            ...raw,
+            'reactions': [for (final r in message.reactions) r.toJson()],
+          },
+        );
+      }
+    }
+
+    if (knownOffline) return queue();
     try {
       apply(await api.setMessageReaction(message.id, next));
-    } catch (_) {
+    } catch (e) {
+      if (isConnectionError(e)) return queue();
       apply(before);
       rethrow;
     }
@@ -5763,6 +5981,7 @@ class Session extends ChangeNotifier {
     await _draftChangedSub?.cancel();
     await _connectionSub?.cancel();
     await _rawMessageSub?.cancel();
+    await _rawMessageChangeSub?.cancel();
     await _scheduledEventSub?.cancel();
     await _scheduledChangedSub?.cancel();
     await _groupwareChangedSub?.cancel();
@@ -5781,6 +6000,9 @@ class Session extends ChangeNotifier {
     draftSync.reset(); // 서버로 보내려던 임시 저장도 버린다.
     outbox.reset(); // 보내기 대기열도 메모리에서는(이 기기 저장분은 같은 사람이 다시 로그인하면 보낸다).
     unawaited(offlineCache.clear()); // 오프라인 보기 저장분은 지운다(공용 PC에 대화가 남지 않게).
+    unawaited(
+      ChatImageCache.clear(),
+    ); // 오래 보관하던 대화 사진 미리보기도(chat_image_cache.dart).
     showingCachedData = false;
     _connectionLostTimer?.cancel();
     connectionLost = false;

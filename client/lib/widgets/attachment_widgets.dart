@@ -12,6 +12,7 @@ import '../models/room.dart';
 import '../screens/image_viewer_screen.dart';
 import '../screens/pdf_viewer_screen.dart';
 import '../screens/text_viewer_screen.dart';
+import '../services/chat_image_cache.dart';
 import '../services/clipboard_image.dart' show canCopyImageToClipboard;
 import '../services/download_progress.dart';
 import '../services/download_storage.dart';
@@ -648,11 +649,15 @@ class DownloadableImage extends StatefulWidget {
   /// 누르면 기본 뷰어(이 한 장) 대신 이걸 부른다 — 앞뒤 사진까지 넘기는 뷰어를 열 때.
   final VoidCallback? onOpen;
 
+  /// 미리보기를 오래 보관할 변하지 않는 열쇠(chat_image_cache.dart — 댓글 사진 등). 없으면 주소로(기본 캐시).
+  final String? previewCacheKey;
+
   const DownloadableImage({
     super.key,
     required this.session,
     required this.url,
     required this.fileName,
+    this.previewCacheKey,
     this.attachmentKey,
     this.attachmentNonce,
     this.thumbnailUrl,
@@ -856,6 +861,10 @@ class _DownloadableImageState extends State<DownloadableImage> {
           )
         : RetryingNetworkImage(
             imageUrl: _previewUrl,
+            cacheKey: widget.previewCacheKey,
+            cacheManager: widget.previewCacheKey == null
+                ? null
+                : ChatImageCache.instance,
             width: 200,
             // placeholder/errorWidget과 높이를 맞춰서(150) 고정한다 — 안 그러면 이미지가
             // 원본 비율대로 로드되면서 크기가 바뀌어, 로드되기 전 크기를 기준으로 계산해둔
@@ -1396,6 +1405,12 @@ class _ChatImageTileState extends State<_ChatImageTile> {
           )
         : RetryingNetworkImage(
             imageUrl: _previewUrl,
+            // 서명 링크는 한 시간마다 바뀌므로 첨부 id로 열쇠를 고정해 오래 보관한다(오프라인에서도 보이게).
+            cacheKey: chatImageCacheKey(
+              widget.attachment.id,
+              thumbnail: widget.attachment.thumbnailUrl != null,
+            ),
+            cacheManager: ChatImageCache.instance,
             onRetry: _relistenForRatio,
             width: width,
             height: height,
@@ -1956,6 +1971,9 @@ class UploadingAttachment extends StatelessWidget {
   /// 보여준다(업로드 중 → 완료 전환 때 카드 자체가 다른 위젯으로 바뀌지 않게 하기 위함 —
   /// 예전엔 완료되면 작은 칩으로 통째로 바뀌어서 썸네일이 "달라 보인다"는 피드백이 있었다).
   final bool completed;
+
+  /// 연결이 끊겨 올리지 못했다 — 보내면 대기열에 들어가 연결되면 올라간다("연결되면 올립니다").
+  final bool queued;
   final VoidCallback onCancel;
   const UploadingAttachment({
     super.key,
@@ -1964,6 +1982,7 @@ class UploadingAttachment extends StatelessWidget {
     required this.totalBytes,
     required this.sentBytes,
     required this.completed,
+    this.queued = false,
     required this.onCancel,
   });
 
@@ -1979,7 +1998,24 @@ class UploadingAttachment extends StatelessWidget {
         color: Colors.black.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: completed
+      child: queued
+          ? Row(
+              key: const ValueKey('uploading-queued'),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.schedule, size: 10, color: Colors.white),
+                const SizedBox(width: 2),
+                Flexible(
+                  child: Text(
+                    tr('대기'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 9),
+                  ),
+                ),
+              ],
+            )
+          : completed
           ? Text(
               formatFileSize(totalBytes),
               maxLines: 1,
@@ -2009,6 +2045,13 @@ class UploadingAttachment extends StatelessWidget {
   /// 파일 카드(가로형) 안의 용량 줄 — 업로드 중엔 진행바+퍼센트, 끝나면 용량 텍스트만.
   Widget _buildFileProgressRow(BuildContext context) {
     final hintColor = Theme.of(context).hintColor;
+    if (queued) {
+      return Text(
+        tr('{size} · 연결되면 올립니다', {'size': formatFileSize(totalBytes)}),
+        key: const ValueKey('uploading-queued'),
+        style: TextStyle(fontSize: 11, color: hintColor),
+      );
+    }
     if (completed) {
       return Text(
         formatFileSize(totalBytes),

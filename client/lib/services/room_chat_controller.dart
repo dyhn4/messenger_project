@@ -15,6 +15,8 @@ import '../models/text_format.dart';
 import '../models/uploaded_attachment.dart';
 import 'api_client.dart' show ApiClient, ApiException, UploadCancelToken;
 import 'chat_draft_store.dart' show ChatDraft;
+import 'connection_errors.dart';
+import 'message_outbox.dart' show OutboxKind, newClientId;
 import 'file_type_utils.dart';
 import 'image_thumbnail.dart';
 import 'photo_quality.dart';
@@ -248,6 +250,8 @@ class RoomChatController extends ChangeNotifier {
         error = e.toString();
       } else {
         _mergeHistory(cached);
+        // 위로 넘기면 이 기기 메시지 DB에서 더 오래된 기록을 꺼낸다(loadOlderMessages).
+        _advanceHistoryCursor(cached);
         fromCache = true;
       }
     }
@@ -296,7 +300,14 @@ class RoomChatController extends ChangeNotifier {
         _advanceHistoryCursor(older);
       }
     } catch (_) {
-      // 실패해도 조용히 무시 — 계속 스크롤하면 다시 시도된다.
+      // 서버에 닿지 않으면 이 기기 메시지 DB에 쌓아 둔 더 오래된 기록을 보여 준다(비밀 대화는 없다). 그것도 없으면 조용히
+      // 넘어간다 — 계속 스크롤하면 다시 시도된다.
+      final local = await _session.cachedOlderMessages(room, cursor, _pageSize);
+      if (!_disposed && local.isNotEmpty) {
+        _mergeHistory(local);
+        _advanceHistoryCursor(local);
+        fromCache = true;
+      }
     } finally {
       loadingMore = false;
       notifyListeners();
@@ -642,7 +653,8 @@ class RoomChatController extends ChangeNotifier {
   }
 
   /// 메시지를 수정한다(텍스트 메시지, 본인, 작성 5분 이내만 서버가 허용). 실제 반영은
-  /// message:edited 브로드캐스트(applyEdit)로 이뤄진다.
+  /// message:edited 브로드캐스트(applyEdit)로 이뤄진다. 연결이 없거나 연결 문제로 실패하면 화면에 먼저 고쳐 보이고 보내기
+  /// 대기열에 넣어 연결되면 반영한다(비밀 대화는 평문이라 메모리에만 — 보낼 때 암호화).
   Future<void> editMessage(
     String messageId,
     String text, {
@@ -651,6 +663,73 @@ class RoomChatController extends ChangeNotifier {
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
+    final formatJson = room.isSecret || trimmed != text
+        ? null
+        : textFormatToJson(format);
+    final mentionsJson = room.isSecret
+        ? null
+        : (trimmed != text ? const <Object?>[] : mentionsToJson(mentions));
+    void queue() {
+      _applyLocalEdit(
+        messageId,
+        trimmed,
+        format: formatJson == null ? null : format,
+      );
+      _session.outbox.submitAction(
+        roomId: room.id,
+        kind: OutboxKind.edit,
+        payload: {
+          'messageId': messageId,
+          'text': trimmed,
+          'textFormat': ?formatJson,
+          'mentions': ?mentionsJson,
+        },
+        preview: tr('메시지 수정 · {text}', {'text': trimmed}),
+        secret: room.isSecret,
+      );
+    }
+
+    // 서버에 닿지 않는 것이 확인됐으면(Session.knownOffline) 기다리지 않고 바로 대기열로.
+    if (_session.knownOffline) return queue();
+    try {
+      await _sendEdit(messageId, text, trimmed, format, mentions);
+    } catch (e) {
+      if (!isConnectionError(e)) rethrow;
+      queue();
+    }
+  }
+
+  /// 고친 글을 화면(과 이 기기 메시지 DB)에 먼저 반영한다 — 대기열이 서버에 보내면 message:edited가 다시 맞춘다.
+  void _applyLocalEdit(
+    String messageId,
+    String text, {
+    List<TextFormatRun>? format,
+  }) {
+    for (final m in _instancesOf(messageId)) {
+      m.text = text;
+      m.textFormat = format;
+      m.editedAt = DateTime.now();
+    }
+    if (!room.isSecret) {
+      _session.offlineCache.updateMessage(
+        messageId,
+        (raw) => {
+          ...raw,
+          'text': text,
+          'editedAt': DateTime.now().millisecondsSinceEpoch,
+        },
+      );
+    }
+    notifyListeners();
+  }
+
+  Future<void> _sendEdit(
+    String messageId,
+    String text,
+    String trimmed,
+    List<TextFormatRun>? format,
+    List<Mention>? mentions,
+  ) async {
     final payload = await _session.encryptOutgoing(
       room,
       trimmed,
@@ -688,9 +767,39 @@ class RoomChatController extends ChangeNotifier {
   }
 
   /// 메시지를 삭제한다(본인, 작성 5분 이내만 서버가 허용). 실제 반영은
-  /// message:deleted 브로드캐스트(applyDelete)로 이뤄진다.
-  Future<void> deleteMessage(String messageId) =>
-      _session.api!.deleteMessage(messageId);
+  /// message:deleted 브로드캐스트(applyDelete)로 이뤄진다. 연결이 없거나 연결 문제로 실패하면 화면에서 먼저 지우고 보내기
+  /// 대기열에 넣어 연결되면 반영한다(서버가 거절하면 대기열에 이유가 남고, 버리면 서버 것으로 되돌린다).
+  Future<void> deleteMessage(String messageId) async {
+    void queue() {
+      applyDelete(messageId);
+      if (!room.isSecret) {
+        _session.offlineCache.updateMessage(
+          messageId,
+          (raw) => {
+            ...raw,
+            'deleted': true,
+            'text': null,
+            'attachments': const [],
+          },
+        );
+      }
+      _session.outbox.submitAction(
+        roomId: room.id,
+        kind: OutboxKind.delete,
+        payload: {'messageId': messageId},
+        preview: tr('메시지 삭제'),
+      );
+    }
+
+    // 서버에 닿지 않는 것이 확인됐으면(Session.knownOffline) 기다리지 않고 바로 대기열로.
+    if (_session.knownOffline) return queue();
+    try {
+      await _session.api!.deleteMessage(messageId);
+    } catch (e) {
+      if (!isConnectionError(e)) rethrow;
+      queue();
+    }
+  }
 
   /// Session이 message:edited 브로드캐스트를 라우팅할 때 호출한다. 게시글의 제목·고정 상태도
   /// 이 이벤트로 오므로(고정/해제도 message:edited) 함께 반영하고 고정 목록을 맞춘다.
@@ -1123,13 +1232,16 @@ class RoomChatController extends ChangeNotifier {
       );
       // 처음 불러오기가 실패했던 방이면, 이번에 받은 최근 페이지로 과거 페이지 커서를 잡고 오류를
       // 거둔다 — 안 그러면 목록은 보여도 위(보드는 아래)로 더 불러오기가 영영 안 된다.
-      final recovering = (error != null || fromCache) && _historyCursor == null;
+      final recovering = error != null || fromCache;
       if (recovering) {
         error = null;
         fromCache = false;
-        _advanceHistoryCursor(history);
-        if (history.where((m) => !m.outOfWindow).length < _pageSize) {
-          hasMoreHistory = false;
+        // 이 기기 DB로 위까지 넘겨 봤으면 그 커서를 그대로 이어 쓴다(서버에서 그보다 오래된 것을 받는다).
+        if (_historyCursor == null) {
+          _advanceHistoryCursor(history);
+          if (history.where((m) => !m.outOfWindow).length < _pageSize) {
+            hasMoreHistory = false;
+          }
         }
       }
       if (!_mergeHistory(history) && !recovering) return;
@@ -1316,13 +1428,12 @@ class RoomChatController extends ChangeNotifier {
       );
       return;
     }
-    final payload = await _session.encryptOutgoing(room, trimmed);
-    await _session.chatSocket.send(
+    // 비밀 대화 — 평문으로 대기열에 넣고(메모리에만 — 이 기기에 저장하지 않는다) 보낼 때마다 그때의 암호화 상태로 암호화한다
+    // (Session._deliverOutbox). 연결이 없으면 붙을 때 보낸다.
+    _session.outbox.submit(
       roomId: room.id,
-      type: 'text',
-      text: payload,
-      textFormat: room.isSecret || trimmed != text ? null : format,
-      mentions: room.isSecret || trimmed != text ? null : mentions,
+      payload: {'type': 'text', 'text': trimmed},
+      secret: true,
     );
   }
 
@@ -1336,12 +1447,53 @@ class RoomChatController extends ChangeNotifier {
       );
       return;
     }
-    final payload = await _session.encryptOutgoing(room, stickerId);
-    await _session.chatSocket.send(
+    _session.outbox.submit(
       roomId: room.id,
-      type: 'sticker',
-      text: payload,
+      payload: {'type': 'sticker', 'text': stickerId},
+      secret: true,
     );
+  }
+
+  /// 첨부 일부를 아직 올리지 못한 채 보낸다(연결이 끊겨 올리지 못함 — chat_input_bar.dart) — 올린 것([uploaded])은 그대로, 올리지
+  /// 못한 것([pending] — 바이트)은 이 기기 앱 폴더에 복사해 보내기 대기열에 넣고, 연결되면 올려서 한 메시지로 보낸다
+  /// (Session._deliverOutbox). 사진만이면 사진 격자, 파일이 섞이면 파일 목록. 비밀 대화·웹은 담을 수 없어 false(부르는 쪽이 알린다).
+  Future<bool> queueAttachmentMessage({
+    required List<UploadedAttachment> uploaded,
+    required List<
+      ({List<int> bytes, String name, String? mimeType, bool isImage})
+    >
+    pending,
+    String? caption,
+    List<TextFormatRun>? captionFormat,
+    List<Mention>? captionMentions,
+  }) async {
+    if (room.isSecret) return false;
+    final clientId = newClientId();
+    final files = await _session.stashOutboxFiles(clientId, pending);
+    if (files == null) return false;
+    final trimmed = caption?.trim();
+    final captionText = trimmed?.isNotEmpty == true ? trimmed : null;
+    final formatJson = trimmed == caption
+        ? textFormatToJson(captionFormat)
+        : null;
+    final mentionsJson = trimmed == caption
+        ? mentionsToJson(captionMentions)
+        : null;
+    final allImages =
+        uploaded.every((u) => u.isImage) && pending.every((p) => p.isImage);
+    _session.outbox.submit(
+      roomId: room.id,
+      clientId: clientId,
+      payload: {
+        'type': allImages ? 'image' : 'file',
+        'text': ?captionText,
+        'textFormat': ?formatJson,
+        'mentions': ?mentionsJson,
+        'attachments': [for (final u in uploaded) u.toPayload()],
+      },
+      files: files,
+    );
+    return true;
   }
 
   /// 보드 뷰 게시글을 올린다 — 채팅 메시지와 같은 message:send 경로에 type 'post'와 제목을

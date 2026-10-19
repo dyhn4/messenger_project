@@ -56,6 +56,11 @@ class ApiException implements Exception {
   String toString() => trServer(message);
 }
 
+/// 서버가 정한 시간 안에 답하지 않았다 — 연결 문제로 본다(보내기 대기열이 다시 한다 — connection_errors.dart).
+class ApiTimeoutException extends ApiException {
+  const ApiTimeoutException(super.message);
+}
+
 /// 메일로 확인 코드를 보냈다는 서버 답 — [email]은 일부만 보이는 받는 주소(모르면 null), 코드는 [expiresIn] 동안 쓸 수 있고
 /// [resendIn]이 지나야 다시 받을 수 있다(server/src/emailCodes.js).
 class EmailCodeSent {
@@ -539,7 +544,7 @@ class ApiClient {
   Future<bool> Function()? onUnauthorized;
 
   /// 오프라인 보기로 저장할 응답을 받았을 때(offline_cache.dart) — [key]는 'teams' | 'rooms:<팀 id>' | 'messages:<방 id>'(방의 최근
-  /// 페이지만), [raw]는 서버가 준 JSON 그대로. Session이 비밀 대화를 걸러 저장한다.
+  /// 페이지) | 'older:<방 id>'(더 오래된 페이지), [raw]는 서버가 준 JSON 그대로. Session이 비밀 대화를 걸러 저장한다.
   void Function(String key, List<Object?> raw)? onCacheable;
 
   /// 서버가 자체 서명 인증서(HTTPS)를 쓰므로, PinnedTls.httpClient()로 만든(그 인증서만
@@ -571,8 +576,9 @@ class ApiClient {
   Future<http.Response> _withTimeout(Future<http.Response> future) =>
       future.timeout(
         _requestTimeout,
-        onTimeout: () =>
-            throw ApiException(tr('요청이 시간 초과되었습니다. 네트워크 연결을 확인하고 다시 시도하세요.')),
+        onTimeout: () => throw ApiTimeoutException(
+          tr('요청이 시간 초과되었습니다. 네트워크 연결을 확인하고 다시 시도하세요.'),
+        ),
       );
 
   Future<http.Response> _send(Future<http.Response> Function() request) async {
@@ -2161,9 +2167,7 @@ class ApiClient {
       () => _client.get(_uri('/api/admin/webmail'), headers: _authHeaders),
     );
     if (res.statusCode == 404) return null;
-    return WebmailAdminSettings.fromJson(
-      _decodeDdns(res, what: tr('웹메일 설정')),
-    );
+    return WebmailAdminSettings.fromJson(_decodeDdns(res, what: tr('웹메일 설정')));
   }
 
   /// 웹메일 칸 바꾸기 — 넘긴 것만. 자체 메일 서버는 [localEnabled]·[localDomains]·[localPort]·[localMaxMessageMb]·[localQuotaMb],
@@ -2638,7 +2642,11 @@ class ApiClient {
     final list =
         await _get('/api/rooms/$roomId/messages?limit=$limit$beforeParam')
             as List;
-    if (before == null) onCacheable?.call('messages:$roomId', list);
+    // 최근 페이지든 더 오래된 페이지든 이 기기 메시지 DB에 쌓는다(오프라인으로 위로 넘겨 보기·찾기 — offline_cache.dart).
+    onCacheable?.call(
+      before == null ? 'messages:$roomId' : 'older:$roomId',
+      list,
+    );
     return list
         .map((e) => Message.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -4791,6 +4799,14 @@ class ApiClient {
           as Map<String, dynamic>,
     );
   }
+
+  /// [editMessage]와 같지만 본문을 그대로 — 보내기 대기열이 저장해 둔 고치기(글·서식·멘션 JSON)를 보낼 때.
+  Future<Message> editMessageBody(
+    String messageId,
+    Map<String, dynamic> body,
+  ) async => Message.fromJson(
+    await _patch('/api/messages/$messageId', body) as Map<String, dynamic>,
+  );
 
   Future<void> deleteMessage(String messageId) async {
     await _delete('/api/messages/$messageId');

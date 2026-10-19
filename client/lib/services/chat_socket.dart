@@ -580,6 +580,13 @@ class ChatSocket {
       StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get rawMessages => _rawMessageController.stream;
 
+  /// 메시지가 바뀌었다 — 이 기기 메시지 DB(local_message_store.dart)를 맞추는 데 쓴다. `{ kind: 'edited', message }`(서버가 준
+  /// 메시지 모양 그대로) · `{ kind: 'deleted', id, roomId }` · `{ kind: 'reactions', messageId, roomId, reactions }`.
+  final _rawMessageChangeController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get rawMessageChanges =>
+      _rawMessageChangeController.stream;
+
   /// 붙었다(true)·끊겼다(false) — 처음 붙을 때도 온다. 보내기 대기열·"연결 끊김" 표시가 듣는다.
   final _connectionController = StreamController<bool>.broadcast();
   final _authErrorController = StreamController<void>.broadcast();
@@ -1176,9 +1183,9 @@ class ChatSocket {
       );
     });
     socket.on('message:edited', (data) {
-      _messageEditedController.add(
-        Message.fromJson(Map<String, dynamic>.from(data as Map)),
-      );
+      final raw = Map<String, dynamic>.from(data as Map);
+      _messageEditedController.add(Message.fromJson(raw));
+      _rawMessageChangeController.add({'kind': 'edited', 'message': raw});
     });
     socket.on('message:linkPreview', (data) {
       _messageLinkPreviewController.add(
@@ -1231,9 +1238,9 @@ class ChatSocket {
       );
     });
     socket.on('message:deleted', (data) {
-      _messageDeletedController.add(
-        MessageDeletedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
-      );
+      final raw = Map<String, dynamic>.from(data as Map);
+      _messageDeletedController.add(MessageDeletedEvent.fromJson(raw));
+      _rawMessageChangeController.add({...raw, 'kind': 'deleted'});
     });
     socket.on('comment:edited', (data) {
       _commentEditedController.add(
@@ -1339,6 +1346,7 @@ class ChatSocket {
           messageId: messageId,
           reactions: parseReactions(m['reactions']),
         ));
+        _rawMessageChangeController.add({...m, 'kind': 'reactions'});
       }
     });
     socket.on('post:read', (data) {

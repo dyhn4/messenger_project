@@ -80,6 +80,10 @@ void main() {
         final cleared = OfflineCache(baseDir: () async => tmp);
         await cleared.configure('https://192.168.0.5:3000', 'U-me');
         expect(await cleared.teams(), isEmpty);
+        // 같은 폴더를 연 다른 인스턴스의 DB도 닫는다(Windows는 열린 파일을 지우지 못한다).
+        for (final c in [cache, other, cleared]) {
+          c.close();
+        }
       },
     );
 

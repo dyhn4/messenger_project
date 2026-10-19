@@ -5,9 +5,13 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
-/// 오프라인 보기용 저장소 — 서버에서 받은 팀 목록·방 목록(팀마다)·방마다 최근 메시지([messagesPerRoom]개)를 서버가 준 모양(JSON) 그대로
-/// 이 기기에 둔다. 연결이 끊겼거나 서버에 닿지 않을 때 이걸로 목록과 대화를 보여 준다(Session·RoomChatController). 받은 그대로 두었다가
-/// 그대로 다시 읽으므로(fromJson) 모델을 따로 저장하는 코드가 없다.
+import 'local_message_store.dart'
+    if (dart.library.js_interop) 'local_message_store_stub.dart';
+
+/// 오프라인 보기용 저장소 — 서버에서 받은 팀 목록·방 목록(팀마다)은 JSON 파일로, **메시지는 이 기기의 SQLite DB**(local_message_store.dart
+/// — 받은 페이지·실시간 메시지·수정·공감·삭제를 모두 쌓아 방마다 최근 5000통까지)에 서버가 준 모양(JSON) 그대로 둔다. 연결이 끊겼거나
+/// 서버에 닿지 않을 때 이걸로 목록과 대화(방을 열면 최근 [messagesPerRoom]개, 위로 넘기면 그보다 오래된 기록 — [olderMessages])를
+/// 보여 주고, 찾기도 여기서 한다([searchMessages]). 받은 그대로 두었다가 그대로 다시 읽으므로(fromJson) 모델을 따로 저장하는 코드가 없다.
 ///
 /// 비밀 대화는 넣지 않는다(부르는 쪽이 거른다 — 평문이 화면 밖에 남으면 안 된다). 서버·사람마다 폴더를 나누고, 로그아웃하면 그 사람의
 /// 것을 지운다(공용 PC). 웹은 쓰지 않는다(파일이 없다 — 늘 서버에서 받는다). 쓰기는 잠깐 모았다가(0.5초) 파일마다 한 번에.
@@ -21,6 +25,10 @@ class OfflineCache {
   final Future<Directory?> Function() _baseDir;
   Directory? _dir;
   String? _scope;
+  LocalMessageStore? _store;
+
+  /// 메시지 DB(못 열었거나 웹이면 null).
+  LocalMessageStore? get store => _store;
   final Map<String, Object?> _memory = {};
   final Map<String, Timer> _pending = {};
 
@@ -45,8 +53,13 @@ class OfflineCache {
     if (scope == _scope && _dir != null) return;
     _scope = scope;
     _memory.clear();
+    _store?.close();
+    _store = null;
     final base = await _baseDir();
     _dir = base == null ? null : Directory('${base.path}/$scope');
+    if (_dir != null) {
+      _store = LocalMessageStore.open('${_dir!.path}/messages.sqlite');
+    }
   }
 
   bool get enabled => _dir != null;
@@ -116,43 +129,63 @@ class OfflineCache {
   Future<List<Map<String, dynamic>>> teams() => _list('teams');
   Future<List<Map<String, dynamic>>> rooms(String teamId) =>
       _list(roomsName(teamId));
-  Future<List<Map<String, dynamic>>> messages(String roomId) =>
-      _list(messagesName(roomId));
+
+  /// 방의 가장 최근 메시지 [messagesPerRoom]개(오래된 것부터).
+  Future<List<Map<String, dynamic>>> messages(String roomId) async =>
+      _store?.latest(roomId, limit: messagesPerRoom) ?? const [];
+
+  /// [before]보다 오래된 메시지 [limit]개(오래된 것부터) — 오프라인일 때 위로 넘겨 보기.
+  Future<List<Map<String, dynamic>>> olderMessages(
+    String roomId,
+    DateTime before, {
+    int limit = messagesPerRoom,
+  }) async => _store?.older(roomId, before, limit: limit) ?? const [];
+
+  /// 이 기기에 저장된 메시지에서 찾기(새것부터) — [roomIds]를 주면 그 방들에서만.
+  Future<List<Map<String, dynamic>>> searchMessages(
+    String query, {
+    Iterable<String>? roomIds,
+    int limit = 100,
+  }) async => _store?.search(query, roomIds: roomIds, limit: limit) ?? const [];
 
   void saveTeams(List<Object?> raw) => write('teams', raw);
   void saveRooms(String teamId, List<Object?> raw) =>
       write(roomsName(teamId), raw);
 
-  /// 방의 최근 메시지(서버가 준 최근 페이지)로 바꾼다 — 끝에서 [messagesPerRoom]개.
+  /// 서버에서 받은 메시지 페이지(최근 페이지든 더 오래된 페이지든)를 DB에 넣는다(같은 id면 바꾼다).
   void saveMessages(String roomId, List<Object?> raw) {
-    final list = raw.length > messagesPerRoom
-        ? raw.sublist(raw.length - messagesPerRoom)
-        : raw;
-    write(messagesName(roomId), list);
+    _store?.upsertAll(roomId, [
+      for (final m in raw)
+        if (m is Map) Map<String, dynamic>.from(m),
+    ]);
   }
 
-  /// 실시간으로 받은 메시지 하나를 끝에 붙인다(같은 id면 바꾼다). 이 방을 한 번도 저장하지 않았으면 그것만으로 시작한다.
+  /// 실시간으로 받은 메시지 하나를 넣는다(같은 id면 바꾼다 — 수정된 메시지도).
   Future<void> appendMessage(String roomId, Map<String, dynamic> raw) async {
-    if (_dir == null) return;
-    final list = [...await messages(roomId)];
-    final id = raw['id'];
-    final i = list.indexWhere((m) => m['id'] == id);
-    if (i >= 0) {
-      list[i] = raw;
-    } else {
-      list.add(raw);
-    }
-    saveMessages(roomId, list);
+    _store?.upsertAll(roomId, [raw]);
   }
+
+  /// 저장된 메시지 하나를 고친다(공감·삭제 등 — [change]가 고친 JSON을 돌려준다). 없으면 그대로.
+  void updateMessage(
+    String messageId,
+    Map<String, dynamic> Function(Map<String, dynamic> raw) change,
+  ) => _store?.update(messageId, change);
 
   /// 그 방의 저장분을 지운다(방에서 나감·비밀 대화로 바뀜 등).
   Future<void> forgetRoom(String roomId) async {
+    _store?.forgetRoom(roomId);
     final name = messagesName(roomId);
     _pending.remove(name)?.cancel();
     _memory.remove(name);
     try {
       await _file(name)?.delete();
     } catch (_) {}
+  }
+
+  /// 메시지 DB를 닫는다(지우지 않음 — 앱을 끄거나 시험이 끝날 때).
+  void close() {
+    _store?.close();
+    _store = null;
   }
 
   /// 로그아웃 — 이 사람의 저장분을 모두 지운다(공용 PC에 대화가 남지 않게).
@@ -162,12 +195,21 @@ class OfflineCache {
     }
     _pending.clear();
     _memory.clear();
+    _store?.close();
+    _store = null;
     final dir = _dir;
     _dir = null;
     _scope = null;
     if (dir == null) return;
     try {
       if (await dir.exists()) await dir.delete(recursive: true);
-    } catch (_) {}
+    } catch (_) {
+      // 통째로 못 지우면(Windows에서 다른 곳이 DB를 아직 쥐고 있음 등) 지울 수 있는 파일은 하나씩이라도 — 목록·메시지가 남지 않게.
+      try {
+        await for (final e in dir.list(recursive: true)) {
+          if (e is File) await e.delete().catchError((_) => e);
+        }
+      } catch (_) {}
+    }
   }
 }

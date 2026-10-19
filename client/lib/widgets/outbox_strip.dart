@@ -4,8 +4,10 @@ import '../services/message_outbox.dart';
 import '../services/session.dart';
 import '../l10n/tr.dart';
 
-/// 대화방 아래(입력칸 바로 위)의 보내기 대기열 — 아직 서버에 닿지 않은 내 메시지를 오른쪽 말풍선으로 보여 준다. 보내는 중·연결을
-/// 기다림(붙으면 보냄)·실패(서버가 거절 — 이유와 다시 보내기·지우기). 서버에 닿으면 대화 목록에 진짜 메시지로 나타나고 여기서 사라진다.
+/// 대화방 아래(입력칸 바로 위)의 보내기 대기열 — 아직 서버에 닿지 않은 내 메시지(올리지 못한 첨부 포함)와 고치기·지우기를 오른쪽
+/// 말풍선으로 보여 준다. 보내는 중·연결을 기다림(붙으면 보냄)·실패(서버가 거절 — 이유와 다시 보내기·지우기). 서버에 닿으면 대화 목록에
+/// 진짜 메시지로 나타나고 여기서 사라진다. 공감은 말풍선에 이미 보이므로 실패했을 때만 여기 나온다. 비밀 대화의 것은 "앱을 끄면
+/// 사라집니다"를 붙인다(평문이라 이 기기에 저장하지 않는다).
 class OutboxStrip extends StatelessWidget {
   final Session session;
   final String roomId;
@@ -16,7 +18,11 @@ class OutboxStrip extends StatelessWidget {
     return ListenableBuilder(
       listenable: session.outbox,
       builder: (context, _) {
-        final items = session.outbox.forRoom(roomId);
+        final items = [
+          for (final i in session.outbox.forRoom(roomId))
+            if (i.kind != OutboxKind.reaction || i.state == OutboxState.failed)
+              i,
+        ];
         if (items.isEmpty) return const SizedBox.shrink();
         return ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 220),
@@ -56,11 +62,25 @@ class _OutboxBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final failed = item.state == OutboxState.failed;
-    final status = switch (item.state) {
-      OutboxState.sending => tr('보내는 중…'),
-      OutboxState.waiting => tr('연결되면 보냅니다'),
-      OutboxState.failed => item.error ?? tr('보내지 못했습니다'),
+    final action = !item.isMessage;
+    final base = switch (item.state) {
+      OutboxState.sending =>
+        action
+            ? tr('반영하는 중…')
+            : item.files.isNotEmpty
+            ? tr('올리는 중…')
+            : tr('보내는 중…'),
+      OutboxState.waiting =>
+        action
+            ? tr('연결되면 반영합니다')
+            : item.files.isNotEmpty
+            ? tr('연결되면 올려서 보냅니다')
+            : tr('연결되면 보냅니다'),
+      OutboxState.failed => trServer(item.error ?? tr('보내지 못했습니다')),
     };
+    final status = item.secret && !failed
+        ? tr('{status} · 비밀 대화 — 앱을 끄면 사라집니다', {'status': base})
+        : base;
     return Padding(
       key: ValueKey('outbox-${item.clientId}'),
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -121,7 +141,7 @@ class _OutboxBubble extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                   ),
                   onPressed: onRetry,
-                  child: Text(tr('다시 보내기')),
+                  child: Text(action ? tr('다시 하기') : tr('다시 보내기')),
                 ),
                 TextButton(
                   key: ValueKey('outbox-discard-${item.clientId}'),

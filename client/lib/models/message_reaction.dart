@@ -24,6 +24,9 @@ class MessageReaction {
 
   int get count => userIds.length;
 
+  /// 서버가 주는 모양 그대로(이 기기 메시지 DB에 먼저 보인 공감을 적을 때).
+  Map<String, dynamic> toJson() => {'emoji': emoji, 'userIds': userIds};
+
   static MessageReaction? fromJson(Object? json) {
     if (json is! Map) return null;
     final emoji = json['emoji'];

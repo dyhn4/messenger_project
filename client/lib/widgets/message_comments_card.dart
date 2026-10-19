@@ -9,6 +9,7 @@ import '../models/comment.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../services/chat_image_cache.dart';
 import '../services/edit_policy.dart';
 import '../services/mention_logic.dart';
 import '../services/session.dart';
@@ -678,6 +679,10 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           session: widget.session,
           url: widget.resolveUrl(comment.fileUrl ?? ''),
           fileName: comment.fileName ?? 'image.png',
+          previewCacheKey: chatImageCacheKey(
+            'comment-${comment.id}',
+            thumbnail: comment.thumbnailUrl != null,
+          ),
           attachmentKey: comment.attachmentKey,
           attachmentNonce: comment.attachmentNonce,
           thumbnailUrl: comment.thumbnailUrl == null

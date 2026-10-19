@@ -5,7 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:flutter_cache_manager/flutter_cache_manager.dart'
-    show HttpExceptionWithStatus;
+    show BaseCacheManager, HttpExceptionWithStatus;
 
 /// 서버에 다시 연결되면(Session._resyncAfterReconnect) 올라가는 값 — 못 불러온 그림이 이 신호를 받으면 곧바로 다시 시도한다.
 final imageRetrySignal = ValueNotifier<int>(0);
@@ -26,6 +26,9 @@ Future<String> Function(String url)? fileUrlResigner;
 class RetryingNetworkImage extends StatefulWidget {
   final String imageUrl;
   final String? cacheKey;
+
+  /// 다른 캐시에 둘 때(대화 사진 — chat_image_cache.dart). 없으면 기본 캐시.
+  final BaseCacheManager? cacheManager;
   final double? width;
   final double? height;
   final BoxFit? fit;
@@ -44,6 +47,7 @@ class RetryingNetworkImage extends StatefulWidget {
     super.key,
     required this.imageUrl,
     this.cacheKey,
+    this.cacheManager,
     this.width,
     this.height,
     this.fit,
@@ -203,6 +207,7 @@ class _RetryingNetworkImageState extends State<RetryingNetworkImage> {
       key: ValueKey(_attempt),
       imageUrl: _url,
       cacheKey: widget.cacheKey,
+      cacheManager: widget.cacheManager,
       width: widget.width,
       height: widget.height,
       fit: widget.fit,

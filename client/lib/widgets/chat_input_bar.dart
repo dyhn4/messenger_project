@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -15,6 +16,7 @@ import '../services/api_client.dart'
 import '../services/app_platform.dart';
 import '../services/clipboard_paste.dart';
 import '../services/file_type_utils.dart';
+import '../services/connection_errors.dart';
 import '../services/image_thumbnail.dart';
 import '../services/photo_quality.dart';
 import '../services/memory_file.dart';
@@ -53,8 +55,15 @@ class _PendingAttachment {
   /// 업로드 진행률(바이트) — RoomChatController.uploadAttachment의 onProgress가 갱신한다.
   int sentBytes = 0;
 
-  /// 업로드가 끝나면 채워진다. null인 동안은 아직 업로드 중.
+  /// 업로드가 끝나면 채워진다. null인 동안은 아직 업로드 중(또는 [queued]).
   UploadedAttachment? result;
+
+  /// 연결이 끊겨 올리지 못했다 — 보내면 보내기 대기열에 넣어 연결되면 올린다(RoomChatController.queueAttachmentMessage).
+  bool queued = false;
+
+  /// 대기열에 넣을 때 쓸 내용(읽어 둔 바이트)과 형식.
+  Uint8List? bytes;
+  String? mimeType;
 
   _PendingAttachment({
     required this.file,
@@ -131,7 +140,10 @@ class ChatInputBarState extends State<ChatInputBar> {
   /// 첨부 중 하나라도 아직 업로드가 안 끝났으면 true — "보내기"를 비활성화하는 데 쓴다
   /// (사용자가 큰 파일을 올리는 동안 텍스트만 먼저 보내는 것도 헷갈릴 수 있어, 업로드가 다
   /// 끝날 때까지 통째로 막는 쪽을 택했다).
-  bool get _uploading => _attachments.any((a) => a.result == null);
+  bool get _uploading => _attachments.any((a) => a.result == null && !a.queued);
+
+  /// 올리지 못한 첨부를 대기열에 담을 수 있는지 — 비밀 대화(암호화한 파일)·웹(앱 폴더 없음)은 안 된다.
+  bool get _canQueueFiles => !widget.room.isSecret && !kIsWeb;
 
   /// 이모티콘 패널에서 하나를 고르면(chat_panel.dart의 _selectSticker) 부모가 GlobalKey로
   /// 이걸 불러 입력칸에 포커스를 되돌린다 — 안 그러면 이모티콘을 클릭한 뒤 곧바로 Enter를
@@ -639,8 +651,16 @@ class ChatInputBarState extends State<ChatInputBar> {
       thumbnailBytes: thumbBytes,
       cancelToken: UploadCancelToken(),
     );
+    attachment
+      ..bytes = bytes
+      ..mimeType = file.mimeType;
     setState(() => _attachments.add(attachment));
 
+    // 서버와 끊겨 있으면 올려 보지 않고 바로 "연결되면 올립니다"로 둔다.
+    if (_canQueueFiles && widget.session.knownOffline) {
+      setState(() => attachment.queued = true);
+      return;
+    }
     try {
       final uploaded = await widget.controller.uploadAttachment(
         file,
@@ -654,11 +674,19 @@ class ChatInputBarState extends State<ChatInputBar> {
         cancelToken: attachment.cancelToken,
       );
       if (!mounted) return;
-      setState(() => attachment.result = uploaded);
+      setState(() {
+        attachment.result = uploaded;
+        attachment.bytes = null; // 다 올렸으니 들고 있지 않는다.
+      });
     } on UploadCancelledException {
       // 조용히 무시 — X 버튼으로 이미 목록에서 제거됨(_cancelAttachment 참고).
     } catch (e) {
       if (!mounted) return;
+      if (_canQueueFiles && isConnectionError(e)) {
+        // 연결 문제 — 버리지 않고 두었다가 보낼 때 대기열에 넣는다.
+        setState(() => attachment.queued = true);
+        return;
+      }
       setState(() => _attachments.remove(attachment));
       ScaffoldMessenger.of(
         context,
@@ -726,17 +754,17 @@ class ChatInputBarState extends State<ChatInputBar> {
         // 파일도 여러 개면 한 말풍선에 목록으로 모아 보낸다(아래 "전체 다운로드"가 붙는다).
         final images = [
           for (final a in toSend)
-            if (a.result!.isImage) a.result!,
+            if (a.isImage) a,
         ];
         final files = [
           for (final a in toSend)
-            if (!a.result!.isImage) a.result!,
+            if (!a.isImage) a,
         ];
         var caption = text;
         List<TextFormatRun>? captionFormat = format;
         List<Mention>? captionMentions = mentions;
         if (images.isNotEmpty) {
-          await widget.controller.sendUploadedAttachments(
+          await _sendGroup(
             images,
             caption: caption,
             captionFormat: captionFormat,
@@ -747,7 +775,7 @@ class ChatInputBarState extends State<ChatInputBar> {
           captionMentions = null;
         }
         if (files.isNotEmpty) {
-          await widget.controller.sendUploadedAttachments(
+          await _sendGroup(
             files,
             caption: caption.isEmpty ? null : caption,
             captionFormat: captionFormat,
@@ -767,6 +795,46 @@ class ChatInputBarState extends State<ChatInputBar> {
         _focusNode.requestFocus();
       }
     }
+  }
+
+  /// 첨부 묶음(사진끼리·파일끼리) 하나를 한 메시지로 — 모두 올렸으면 바로, 연결이 끊겨 올리지 못한 것이 있으면 보내기 대기열에
+  /// 넣어 연결되면 올려서 보낸다(RoomChatController.queueAttachmentMessage).
+  Future<void> _sendGroup(
+    List<_PendingAttachment> group, {
+    String? caption,
+    List<TextFormatRun>? captionFormat,
+    List<Mention>? captionMentions,
+  }) async {
+    final uploaded = [for (final a in group) ?a.result];
+    final queued = [
+      for (final a in group)
+        if (a.result == null && a.queued && a.bytes != null) a,
+    ];
+    if (queued.isEmpty) {
+      await widget.controller.sendUploadedAttachments(
+        uploaded,
+        caption: caption,
+        captionFormat: captionFormat,
+        captionMentions: captionMentions,
+      );
+      return;
+    }
+    final ok = await widget.controller.queueAttachmentMessage(
+      uploaded: uploaded,
+      pending: [
+        for (final a in queued)
+          (
+            bytes: a.bytes!,
+            name: a.displayName,
+            mimeType: a.mimeType,
+            isImage: a.isImage,
+          ),
+      ],
+      caption: caption,
+      captionFormat: captionFormat,
+      captionMentions: captionMentions,
+    );
+    if (!ok) throw Exception(tr('첨부를 대기열에 넣지 못했습니다.'));
   }
 
   /// 단추 줄에 멘션(@)·투표 단추를 따로 놓을 자리가 있는지 — 단추 줄은 고정 폭 단추들이라 좁은 화면(휴대폰에
@@ -1043,6 +1111,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                                 totalBytes: a.totalBytes,
                                 sentBytes: a.sentBytes,
                                 completed: a.result != null,
+                                queued: a.queued,
                                 onCancel: () => _cancelAttachment(a),
                               ),
                             );

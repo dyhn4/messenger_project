@@ -361,6 +361,10 @@ class FcmSettings {
   final String appId;
   final String projectId;
   final String messagingSenderId;
+
+  /// 아이폰 앱(같은 Firebase 프로젝트에 등록한 iOS 앱 — GoogleService-Info.plist)의 API 키·앱 ID. 비면 아이폰은 앱이 꺼져 있을 때 알림이 없다.
+  final String iosApiKey;
+  final String iosAppId;
   final bool serviceAccountConfigured;
   final String? serviceAccountEmail;
 
@@ -369,6 +373,8 @@ class FcmSettings {
     required this.appId,
     required this.projectId,
     required this.messagingSenderId,
+    this.iosApiKey = '',
+    this.iosAppId = '',
     required this.serviceAccountConfigured,
     this.serviceAccountEmail,
   });
@@ -378,6 +384,9 @@ class FcmSettings {
     appId: json['appId'] as String? ?? '',
     projectId: json['projectId'] as String? ?? '',
     messagingSenderId: json['messagingSenderId'] as String? ?? '',
+    // 예전 서버는 이 둘을 모른다 — 빈 값(아이폰 설정 안 됨)으로 본다.
+    iosApiKey: json['iosApiKey'] as String? ?? '',
+    iosAppId: json['iosAppId'] as String? ?? '',
     serviceAccountConfigured:
         json['serviceAccountConfigured'] as bool? ?? false,
     serviceAccountEmail: json['serviceAccountEmail'] as String?,

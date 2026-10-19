@@ -43,7 +43,7 @@ import {
 import { findUserById } from './db/queries/users.js';
 import { parseRekeyPayload, rekeyAckRelay, rekeyProposeRelay } from './secretContextRules.js';
 import { messageRateLimitText, messageSendLimiter, sendCarriesFiles } from './messageLimits.js';
-import { broadcastPresence, markConnected, markDisconnected } from './presence.js';
+import { broadcastPresence, markConnected, markDisconnected, setDeviceBackground } from './presence.js';
 import { notifyIncomingCall, roomTagFor } from './push.js';
 import { sendUserMessage } from './sendMessage.js';
 import { registerWikiSocket } from './wiki.js';
@@ -139,6 +139,13 @@ export function registerSocket(io) {
         console.error('[socket] message:send 처리 실패:', err?.message ?? err);
         reply({ ok: false, error: '메시지를 보내지 못했습니다. 잠시 후 다시 시도하세요.' });
       }
+    });
+
+    // payload: { background } — 아이폰 앱이 뒤로 갔다/돌아왔다. 뒤에 있는 동안은 소켓이 붙어 있어도 이 기기로 푸시(APNs)를
+    // 보낸다(presence.js pushesToDevice — iOS가 곧 앱을 멈춰 소켓 알림을 못 그린다). 인증된 기기의 소켓만 받는다.
+    socket.on('app:background', (payload) => {
+      if (!socket.data.deviceId || typeof payload?.background !== 'boolean') return;
+      setDeviceBackground(socket.data.deviceId, payload.background);
     });
 
     // payload: { roomId } — 지금 이 방을 보고 있다는 뜻. 다른 멤버들이 안읽음 카운터를 갱신할 수 있도록 브로드캐스트한다.

@@ -58,11 +58,19 @@
 	<!-- 사내 와이파이의 서버(192.168.x.x 등)에 붙으려면 iOS 14부터 "로컬 네트워크" 권한이 있어야 한다. -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>사내 네트워크에 있는 TangoTalk 서버에 접속합니다.</string>
-	<!-- 화상회의·음성 통화 중에 다른 앱으로 가거나 화면을 꺼도 소리가 끊기지 않게. -->
+	<!-- audio: 화상회의·음성 통화 중에 다른 앱으로 가거나 화면을 꺼도 소리가 끊기지 않게(화면 공유 방송도 이 동안 이어진다).
+	     remote-notification: 푸시(APNs — FCM)를 받는다. 서버는 OS가 그리는 알림으로 보낸다(server/src/fcmMessage.js). -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>remote-notification</string>
 	</array>
+	<!-- 화면 공유 — 방송 확장(BroadcastExtension)이 앱 그룹 폴더의 소켓으로 화면을 보내면 flutter_webrtc가 받는다. 앱 그룹은
+	     Runner·BroadcastExtension 엔타이틀먼트와, 확장 번들 ID는 Xcode 프로젝트의 PRODUCT_BUNDLE_IDENTIFIER와 같아야 한다. -->
+	<key>RTCAppGroupIdentifier</key>
+	<string>group.com.teamtalk.messenger</string>
+	<key>RTCScreenSharingExtension</key>
+	<string>com.teamtalk.messenger.BroadcastExtension</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

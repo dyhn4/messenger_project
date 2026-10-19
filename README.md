@@ -47,7 +47,7 @@ Flutter(PC + Android) 클라이언트와 Node.js(Express + Socket.io + PostgreSQ
 ## 소개
 
 Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/macOS/Web만 지원), 인증·채팅·파일
-전송을 전부 자체 Node.js 서버 하나로 통합했습니다. FCM(푸시 알림)만 Android 클라이언트에서
+전송을 전부 자체 Node.js 서버 하나로 통합했습니다. FCM(푸시 알림)만 Android·아이폰 앱에서
 선택적으로 사용합니다.
 
 | | 역할 |
@@ -422,7 +422,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 사내망 밖(LTE/5G)에서도 됨(외부 접속을 설정한 서버 — [환경 변수 설정](#환경-변수-설정)의 "외부(LTE/5G)에서 접속하기")
 
 **알림**
-- FCM 푸시(Android 전용 — Windows는 미지원, 코드에서 `Platform.isAndroid`로 분기): 소켓이 붙어 있지 않은(=완전히 종료된) 기기에만 발송, data-only 페이로드를 클라이언트가 직접 렌더링
+- FCM 푸시(Android·아이폰 — Windows는 미지원, 코드에서 `AppPlatform.isAndroid`/`isIOS`로 분기): 소켓이 붙어 있지 않은(=완전히 종료된) 기기에만 발송, 안드로이드는 data-only 페이로드를 클라이언트가 직접 렌더링하고 아이폰은 OS가 그리는 APNs 알림(뒤로 간 아이폰 앱은 소켓이 붙어 있어도 발송 — [아이폰 앱(iOS)](#아이폰-앱ios))
 - **다른 기기 접속 중에도 휴대폰 알림** — 접속 여부는 기기마다 따로 봅니다(`server/src/presence.js`의 `isDeviceConnected` — 소켓 인증에서
   확인된 기기 기준). 환경설정 > 메신저 설정 > 휴대폰 알림의 "다른 기기 접속 중에도 휴대폰 알림 받기"(`notification_settings.pushWhileOnline`,
   **기본 켬** — 다른 항목처럼 "저장하기"를 눌러야 서버에 저장)가 켜져 있으면
@@ -1591,9 +1591,10 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다(한 �
 
 ### 1순위 — 없으면 도입을 망설이게 되는 것
 
-- **아이폰 앱 마무리** — 앱 프로젝트(`client/ios`)와 맥 없는 클라우드 빌드는 만들어 두었습니다([아이폰 앱(iOS)](#아이폰-앱ios)).
-  **Apple 개발자 등록 뒤에** 남은 일: 서명(TestFlight·App Store 배포), **앱이 꺼져 있을 때의 푸시**(APNs — 그 전에는 앱이 앞에 있거나 막
-  뒤로 갔을 때만 알림이 옴), 화면 공유(방송 확장). macOS·Linux 데스크톱 앱은 없습니다.
+- **아이폰 앱 실기기 확인** — 앱 프로젝트(`client/ios`), 맥 없는 클라우드 빌드, 서명·TestFlight 업로드 워크플로, 앱이 꺼져 있을 때의 푸시(APNs),
+  화면 공유(방송 확장)까지 코드는 다 들어가 있습니다([아이폰 앱(iOS)](#아이폰-앱ios)). **Apple 개발자 등록 뒤에** 남은 일: 인증서·프로파일·
+  API 키를 만들어 GitHub Secrets에 넣고(["Apple 개발자 등록 뒤 할 일"](#apple-개발자-등록-뒤-할-일)) `testflight`로 빌드해 실제 아이폰에서
+  푸시·화면 공유를 확인하는 것 — 서명된 빌드는 아직 한 번도 돌려 보지 못했습니다. macOS·Linux 데스크톱 앱은 없습니다.
 
 ### 2순위 — 그룹웨어로서 부족한 것
 
@@ -1670,7 +1671,7 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다(한 �
 - 첨부파일은 고정 공개 URL이 아니라 짧게 만료되는 서명 링크(`/files/<token>`)로만 내려갑니다.
 - `.env`에 `WEB_DOMAIN`을 넣으면 같은 Express 앱이 `WEB_HTTPS_PORT`(기본 443)에서 Let's Encrypt 공인 인증서로 한 번 더 열립니다 —
   브라우저(아이폰 Safari의 웹 앱)용이고 앱의 핀닝과는 별개입니다([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)).
-- FCM은 Android 클라이언트 → Firebase → 서버(발송) → 다시 FCM → Android 기기 순으로만 쓰이고,
+- FCM은 Android·아이폰 앱 → Firebase(토큰) → 서버(발송) → 다시 FCM(아이폰은 APNs를 거쳐) → 기기 순으로만 쓰이고,
   Windows 클라이언트는 관여하지 않습니다.
 
 ## 기술 스택
@@ -2284,46 +2285,97 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 ## 아이폰 앱(iOS)
 
 `client/ios`가 아이폰 앱 프로젝트입니다. 화면·기능은 안드로이드 앱과 같은 Dart 코드를 그대로 쓰고, 아이폰에 맞춰 다른 곳은
-아래뿐입니다. **맥이 없어도** GitHub의 macOS 러너로 빌드할 수 있고, **Apple 개발자 등록(연 $99) 전에는 서명 없는 빌드까지**만 됩니다.
+아래뿐입니다. **맥이 없어도** GitHub의 macOS 러너로 빌드·서명·TestFlight 업로드까지 합니다(`.github/workflows/ios-build.yml`).
+**Apple 개발자 등록(연 $99) 전에는 서명 없는 빌드까지**만 되고, 등록 뒤에 아래 [Apple 개발자 등록 뒤 할 일](#apple-개발자-등록-뒤-할-일)의
+값을 넣으면 나머지(서명·푸시·화면 공유)가 그대로 켜집니다 — 코드는 다 들어가 있습니다.
 
-**지금 되는 것**
+**되는 것**
 
 - 로그인·채팅·파일·캘린더·프로젝트·그룹웨어 등 안드로이드 앱과 같은 기능. 사내 와이파이의 서버에 붙을 때 처음 한 번 "로컬
   네트워크" 권한을 묻습니다(`NSLocalNetworkUsageDescription`).
 - 자체 서명 인증서 핀닝 — 앱의 HTTPS·소켓·화상회의 신호가 모두 Dart 네트워크라 안드로이드와 같은 방식으로 서버 인증서를 확인합니다
   (iOS의 ATS는 Dart 연결에 걸리지 않음).
 - 화상회의·음성 참여(카메라·마이크 권한, 통화 중에 다른 앱으로 가도 소리가 이어지게 `UIBackgroundModes: audio`).
-- 알림 — 앱이 앞에 있거나 막 뒤로 갔을 때(소켓이 살아 있는 동안) 앱이 직접 띄웁니다(처음 켤 때 권한을 묻고, 같은 방 알림은 한
-  묶음). 받은 파일은 앱의 Documents에 저장돼 **"파일" 앱 > 나의 iPhone > TangoTalk**에 보입니다(폴더를 고르지 않음).
+- **알림** — 앱이 앞에 있을 때는 소켓으로 받아 앱이 직접 띄웁니다(처음 켤 때 권한을 묻고, 같은 방 알림은 한 묶음). **앱이 뒤로 가거나
+  꺼져 있을 때는 푸시(APNs)** 로 옵니다 — 서버가 FCM으로 보내고 iOS가 바로 그립니다(아래 "푸시가 오는 방식"). 서명된 빌드 + 서버
+  관리자 콘솔의 아이폰 값이 있어야 하고, 없으면 예전처럼 앱이 앞에 있거나 막 뒤로 갔을 때만 알림이 옵니다.
+- **화면 공유** — 통화 화면의 [화면 공유]를 누르면 iOS의 "화면 방송" 창이 뜨고 [방송 시작]을 누르면 **화면 전체**(다른 앱으로 가도)가
+  나갑니다. 방송 확장(`client/ios/BroadcastExtension` — Broadcast Upload Extension)이 화면을 찍어 앱 그룹(`group.com.teamtalk.messenger`)
+  폴더의 소켓으로 앱에 넘기고, 앱(flutter_webrtc·LiveKit)이 화면 공유로 올립니다. 멈추기는 [화면 공유]를 다시 누르거나 제어 센터·빨간
+  상태 막대에서. 소리는 보내지 않습니다(마이크가 따로 나감). 앱 그룹이 든 서명이 있어야 하므로 서명 없는 빌드에서는 창은 떠도 공유가 되지 않습니다.
+- 받은 파일은 앱의 Documents에 저장돼 **"파일" 앱 > 나의 iPhone > TangoTalk**에 보입니다(폴더를 고르지 않음).
 - 초대 링크(`tangotalk://`)로 열기, "로그인한 기기"에 **iPhone 앱**으로 보임(기기 종류 `ios`).
 
-**아직 안 되는 것(개발자 등록 뒤)**
+**안 되는 것**
 
-- **앱을 닫았을 때의 푸시** — 아이폰은 앱이 뒤로 가면 곧 멈춰서 소켓이 끊기고, 그 뒤에 알림을 받으려면 APNs(Apple 푸시)가 있어야
-  합니다. 개발자 등록 뒤 APNs 키를 만들어 Firebase에 올리고, 서버의 FCM 설정에 iOS 앱 값(`GoogleService-Info.plist`의 앱 ID 등)을
-  더한 뒤 `main.dart`의 FCM 초기화(지금은 안드로이드만)를 아이폰에도 켭니다.
-- **화면 공유** — 화면 전체를 보내려면 방송 확장(Broadcast Upload Extension)과 앱 그룹이 필요해 지금은 막아 두었습니다(누르면 안내).
 - **앱 안 업데이트** — 아이폰은 서버가 설치 파일을 줄 수 없어 업데이트 안내를 띄우지 않습니다(TestFlight·App Store로 업데이트).
 - 모바일 데이터 경고(연결 종류 확인은 안드로이드 전용).
+- 전화처럼 울리는 수신 화면(CallKit) — 화상회의 요청은 소리 나는 알림으로 오고(45초 지나면 버림), 누르면 그 통화로 들어갑니다.
+- 아이폰 푸시 알림에는 보낸 사람 아바타·자물쇠 그림을 합성하지 못합니다(비밀 대화는 웹 알림처럼 제목 앞에 🔒).
+
+**푸시가 오는 방식** — 안드로이드는 data만 받아 앱이 직접 그리지만(아바타·자물쇠 배지), 아이폰은 뒤로 간 앱을 iOS가 몇 초 안에 멈춰서
+그럴 수 없습니다. 그래서 서버가 기기 종류(`devices.kind = 'ios'`)를 보고 **OS가 바로 그리는 알림**(APNs alert — 제목·미리보기 200자·소리,
+같은 방은 한 묶음)으로 보내고, 누를 때 열 곳만 data에 싣습니다(`server/src/fcmMessage.js`, 앱 `NotificationService.fcmTapPayload`).
+또 멈춘 앱의 소켓은 서버가 핑 시간 초과로 끊을 때까지(수십 초) 붙어 있는 것처럼 보여 그사이 알림이 사라지므로, **아이폰 앱은 화면에서
+사라질 때 서버에 알리고**(소켓 `app:background`) 서버는 그동안 소켓이 붙어 있어도 그 기기로 푸시를 보냅니다(`server/src/presence.js`
+`pushesToDevice`). 그동안 앱은 소켓으로 받은 알림을 그리지 않습니다(두 번 뜨지 않게 — 통화 중에는 앱이 계속 돌아 예전처럼). 이 전환은
+그 기기의 푸시 토큰을 등록했을 때만 합니다.
 
 **빌드(맥 없이)**
 
-1. 이 저장소를 GitHub에 올린 뒤 **Actions → iOS build → Run workflow**(`.github/workflows/ios-build.yml` — 비공개 저장소의 macOS
-   러너는 분당 요금이 리눅스의 10배라 손으로만 실행).
-2. 끝나면 실행 화면의 Artifacts에 **TangoTalk-unsigned-ipa**(서명 안 된 IPA)와 **TangoTalk-simulator**(맥 시뮬레이터용 `Runner.app`)가
-   올라갑니다. 서명 안 된 IPA는 그대로는 아이폰에 깔리지 않고, 무료 Apple ID로 서명해 주는 도구(Sideloadly·AltStore 등 — 7일마다
-   다시 서명)로 개발용 설치를 해 볼 수 있습니다.
-3. 빌드는 개발 PC와 같은 Flutter(3.47.5)를 쓰고, 최소 iOS는 15.0입니다(`ios/Podfile`·Xcode 프로젝트). 번들 ID는 안드로이드와 같은
-   `com.teamtalk.messenger`, 앱 이름은 TangoTalk입니다.
+1. 이 저장소를 GitHub에 올린 뒤 **Actions → iOS build → Run workflow**에서 `unsigned`(서명 없이 빌드만) 또는 `testflight`(서명해서
+   TestFlight에 올리기)를 고릅니다. 비공개 저장소의 macOS 러너는 분당 요금이 리눅스의 10배라 손으로만 실행합니다.
+2. `unsigned`는 Artifacts에 **TangoTalk-unsigned-ipa**(서명 안 된 IPA)와 **TangoTalk-simulator**(맥 시뮬레이터용 `Runner.app`)를 올립니다.
+   서명 안 된 IPA는 그대로는 아이폰에 깔리지 않고, 무료 Apple ID로 서명해 주는 도구(Sideloadly·AltStore 등 — 7일마다 다시 서명)로
+   개발용 설치를 해 볼 수 있습니다(푸시·화면 공유는 안 됨).
+3. `testflight`는 서명한 IPA를 **TangoTalk-appstore-ipa**로 남기고 App Store Connect에 올립니다. 처리(10~30분)가 끝나면 TestFlight에
+   보입니다. 빌드 번호는 워크플로 실행 번호, 버전 이름은 `client/pubspec.yaml`의 version입니다.
+4. 빌드는 개발 PC와 같은 Flutter(3.47.5)와 러너의 최신 정식 Xcode를 쓰고(App Store가 최신 SDK 빌드만 받음), 최소 iOS는 15.0입니다
+   (`ios/Podfile`·Xcode 프로젝트). 번들 ID는 안드로이드와 같은 `com.teamtalk.messenger`(화면 공유 확장은 `com.teamtalk.messenger.BroadcastExtension`),
+   앱 이름은 TangoTalk입니다.
 
-**Apple 개발자 등록 뒤 할 일**
+### Apple 개발자 등록 뒤 할 일
 
-1. developer.apple.com에서 App ID(`com.teamtalk.messenger`)를 만들고 Push Notifications를 켭니다.
-2. 배포 인증서(.p12)와 App Store 프로비저닝 프로파일을 받아 GitHub 저장소의 Secrets에 넣고, 워크플로를 `flutter build ipa`(서명)로
-   바꿔 TestFlight에 올립니다(Codemagic을 쓰면 이 과정을 화면에서 할 수 있음).
-3. 위 "앱을 닫았을 때의 푸시"(APNs)와 화면 공유 확장을 넣습니다.
-4. App Store에 낼 때는 수출 규정 질문(암호화 — HTTPS와 비밀 대화의 표준 암호화)을 답하고, 아이콘 원본을 1024px 이상으로 바꿉니다
-   (지금 아이콘은 웹의 512px 그림을 키운 것 — `dart run tool/make_ios_icons.dart <원본.png>`로 다시 만듦).
+맥 없이 Windows에서 합니다. 인증서 요청·.p12는 `client/tool/ios_signing.ps1`(Git for Windows의 openssl을 씀)이 만들어 줍니다.
+
+1. **앱 그룹·App ID** — developer.apple.com → Certificates, Identifiers & Profiles → Identifiers에서
+   - App Groups: `group.com.teamtalk.messenger` 만들기
+   - App ID `com.teamtalk.messenger`: **Push Notifications**와 **App Groups**(위 그룹 선택) 켜기
+   - App ID `com.teamtalk.messenger.BroadcastExtension`: **App Groups**(같은 그룹) 켜기
+2. **배포 인증서** — PowerShell에서 `.\client\tool\ios_signing.ps1 csr -Email <개발자 계정 이메일>` → 만든 `ios_dist.csr`을
+   Certificates → [+] → **Apple Distribution**에 올리고 받은 `distribution.cer`을 같은 폴더(`%USERPROFILE%\ios-signing`)에 둡니다.
+3. **프로비저닝 프로파일** — Profiles → [+] → **App Store Connect**로 위 두 App ID 각각에 하나씩(인증서는 2의 것) 만들어 받아 같은 폴더에 둡니다.
+   App ID의 기능을 바꾸면 프로파일을 다시 만들어야 합니다.
+4. `.\client\tool\ios_signing.ps1 p12` → .p12 암호를 정하면 `ios_dist.p12`와 Secrets에 넣을 `*.base64.txt`를 만듭니다. 개인 키(`ios_dist.key`)와
+   `.p12`는 따로 보관하세요(잃으면 인증서를 새로 만들어야 함).
+5. **App Store Connect** — 앱을 새로 만들고(번들 ID `com.teamtalk.messenger`), 사용자 및 액세스 → 통합 → App Store Connect API에서
+   키(권한 "앱 관리" 이상)를 만들어 `.p8`을 받습니다(한 번만 받을 수 있음).
+6. **GitHub Secrets**(저장소 → Settings → Secrets and variables → Actions):
+
+   | 이름 | 값 |
+   |---|---|
+   | `IOS_DIST_CERT_P12` | `ios_dist.p12.base64.txt`의 내용 |
+   | `IOS_DIST_CERT_PASSWORD` | 4의 .p12 암호 |
+   | `IOS_PROFILE_APP` | `com.teamtalk.messenger` 프로파일의 `.base64.txt` 내용 |
+   | `IOS_PROFILE_BROADCAST` | `com.teamtalk.messenger.BroadcastExtension` 프로파일의 `.base64.txt` 내용 |
+   | `ASC_KEY_ID` · `ASC_ISSUER_ID` | 5의 키 ID·발급자 ID |
+   | `ASC_KEY_P8` | 5의 `.p8` 파일 내용 그대로(`-----BEGIN PRIVATE KEY-----`부터) |
+
+   팀 ID는 프로파일에서 읽으므로 따로 넣지 않습니다. 워크플로가 프로파일의 번들 ID·App Store용 여부·앱 그룹·푸시를 먼저 확인해
+   틀리면 무엇이 빠졌는지 알려 줍니다.
+7. **푸시(APNs)** — developer.apple.com → Keys → [+] → **Apple Push Notifications service (APNs)** 키를 만들어 `.p8`을 받고, Firebase 콘솔 →
+   (안드로이드와 **같은 프로젝트**) → 프로젝트 설정 → 일반에서 **iOS 앱 추가**(번들 ID `com.teamtalk.messenger`) → 클라우드 메시징 탭의
+   "APNs 인증 키"에 그 `.p8`과 키 ID·팀 ID를 올립니다. 받은 `GoogleService-Info.plist`는 앱에 넣지 않고 **서버 관리자 콘솔 → FCM 설정 →
+   GoogleService-Info.plist 열기**로 값만 서버에 저장합니다([FCM 푸시 알림 설정](#fcm-푸시-알림-설정)).
+8. Actions → iOS build → `testflight`로 실행 → TestFlight에서 설치해 확인합니다. 처음 올린 빌드는 App Store Connect에서 수출 규정 질문(암호화 —
+   HTTPS와 비밀 대화의 표준 암호화를 씀)에 답해야 테스트할 수 있습니다.
+9. App Store에 낼 때는 아이콘 원본을 1024px 이상으로 바꿉니다(지금 아이콘은 웹의 512px 그림을 키운 것 — `dart run tool/make_ios_icons.dart <원본.png>`로 다시 만듦).
+
+**서명 구성** — Xcode 프로젝트에는 팀·인증서를 적어 두지 않습니다. 워크플로가 빌드할 때만 `client/ios/Signing.xcconfig`(커밋하지 않음 —
+`ios/.gitignore`)를 만들어 `Flutter/Release.xcconfig`·`BroadcastExtension/BroadcastExtension.xcconfig`가 읽게 합니다(수동 서명,
+Apple Distribution, 타깃마다 자기 프로파일). 엔타이틀먼트는 배포용 `Runner/Runner.entitlements`(APNs production + 앱 그룹), 디버그용
+`Runner/RunnerDebug.entitlements`(APNs development), 확장용 `BroadcastExtension/BroadcastExtension.entitlements`(앱 그룹)입니다. 맥에서
+Xcode로 직접 빌드할 때는 Signing & Capabilities에서 팀을 고르면 자동 서명으로 됩니다.
 
 ## API 목록
 
@@ -2848,6 +2900,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 |---|---|---|
 | 클라이언트→서버 | `message:send` | 메시지 전송 — 응답(ack `{ ok, error? }`)은 서버 오류가 나도 늘 옴. `clientId`(글자·숫자·_- 8~64자, 보내기 대기열)를 실으면 같은 사람이 같은 값으로 다시 보낼 때 새로 만들지 않고 처음 메시지를 돌려줌(`duplicate: true`, 다시 방송하지 않음). 한 사람이 10초에 40통·10분에 600통(파일을 실은 메시지는 10분 창만), 512KB를 넘는 소켓 메시지는 서버가 받지 않음. 인용·전달은 원본 id(`quotedMessageId`·`quotedAnnouncementId`·`forwardedFromMessageId`)로 — 위 "메시지 인용 공유, 메시지 전달" |
 | 클라이언트→서버 | `room:read` | 읽음 처리 |
+| 클라이언트→서버 | `app:background` | 아이폰 앱이 화면에서 사라졌다/돌아왔다 `{ background }` — 그동안 서버는 소켓이 붙어 있어도 이 기기로 푸시(APNs)를 보낸다(인증된 기기의 소켓만, 기기의 소켓이 모두 끊기면 잊음 — `presence.js` `pushesToDevice`). 앱은 푸시 토큰을 등록한 아이폰에서만 보내고 다시 붙을 때마다 지금 상태를 다시 보낸다 |
 | 클라이언트→서버 | `secret:message-read` | 비밀 대화 메시지 읽음(자동 삭제 타이머 시작) |
 | 클라이언트→서버 | `secret:rekey-propose` / `secret:rekey-ack` | 비밀 대화 재키잉 `{ roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature, ephemeralContextSignature? }`(그 비밀 대화방 멤버만) — 예전 규약(v1)을 쓰는 **예전 앱만** 보낸다(새 앱은 재키잉을 하지 않고 이 이벤트를 듣지도 않음). 수락을 못 받은 예전 앱은 메시지마다 다시 제안하므로, 같은 방·같은 epoch의 아직 수락되지 않은 제안 행은 지우고 새로 적는다. 맥락 서명(v2, 예전 앱은 안 보냄)은 검증하지 않고 모양만 봐서 64바이트 서명의 base64가 아니면 이벤트를 버리고, `secret_rekeys`의 `proposer_context_signature`·`responder_context_signature`에 적는다. 받는 쪽에는 같은 이름의 이벤트로 제안은 `{ roomId, keyEpoch, proposerUserId, proposerEphemeralPublicKey, proposerEphemeralSignature, proposerContextSignature }`(방의 다른 소켓에), 수락은 `{ roomId, keyEpoch, responderUserId, responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature }`(방 전체에 — 수락 때 세션의 `key_epoch`도 올림)로 중계하고, 맥락 서명이 없으면 `null`. 보낸 사람 id는 payload가 아니라 그 소켓의 로그인 사용자 |
 | 서버→클라이언트 | `message:new` / `message:edited` / `message:deleted` / `message:expired` | 메시지 변경 브로드캐스트(파일 삭제도 `message:edited` — 첨부에 `deleted: true`). 앱이 보낸 메시지에는 보낼 때 붙인 `clientId`가 실려 보낸 기기가 대기 말풍선을 지운다 |
@@ -2980,8 +3033,8 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 
 ## FCM 푸시 알림 설정
 
-FCM은 **Android 전용**입니다(Windows는 Firebase가 공식 지원하지 않아, 코드에서
-`Platform.isAndroid`로 완전히 분기 — `client/lib/main.dart`, `server/src/push.js` 참고).
+FCM은 **Android·아이폰 앱**이 씁니다(Windows는 Firebase가 공식 지원하지 않아, 코드에서
+`AppPlatform.isAndroid`/`isIOS`로 분기 — `client/lib/main.dart`, `server/src/push.js` 참고. 웹 앱은 웹 푸시).
 Firebase 프로젝트를 아직 설정 안 했어도(또는 서비스 계정 키가 없어도) 서버/클라이언트 모두
 정상 동작하며, 그 경우 푸시 발송만 조용히 비활성화됩니다.
 
@@ -3012,6 +3065,10 @@ API 키는 패키지명+SHA-1로 제한돼 비밀값이 아닙니다)로 이 값
 
 4. Firebase 콘솔 → 프로젝트 설정 → 서비스 계정 → "새 비공개 키 생성" → 받은 JSON 파일 내용을
    그대로 복사해서 관리자 콘솔의 서비스 계정 입력창에 붙여넣고 저장
+   - **아이폰 앱**도 쓰려면 같은 프로젝트에 iOS 앱(번들 ID `com.teamtalk.messenger`)을 추가하고, 클라우드 메시징 탭에 Apple의
+     APNs 인증 키(.p8)를 올린 뒤, 받은 `GoogleService-Info.plist`를 **GoogleService-Info.plist 열기**로 불러와 저장합니다(API 키·앱 ID만
+     iOS 것으로 따로 저장 — `server_settings.fcm_ios_api_key`·`fcm_ios_app_id`, 다른 프로젝트의 파일이면 거절). 아이폰 값이 없으면
+     아이폰 앱은 FCM을 켜지 않습니다([아이폰 앱(iOS)](#아이폰-앱ios)의 "Apple 개발자 등록 뒤 할 일" 7번)
 5. 저장 즉시 반영됩니다(서버 재시작 불필요 — `push.js`가 캐시를 지우고 다음 발송부터 새 설정을
    씁니다). 클라이언트도 다음 로그인 시 새 값을 받아 초기화합니다.
 
@@ -3025,7 +3082,9 @@ API 키는 패키지명+SHA-1로 제한돼 비밀값이 아닙니다)로 이 값
 **설계 메모**: 알림은 `notification` 페이로드가 아니라 `data`(data-only)로만 보냅니다 — 그래야
 앱이 완전히 꺼져 있을 때도 OS가 자체 렌더링하지 않고 `onBackgroundMessage` 핸들러가 호출되어,
 실시간 소켓으로 받는 알림과 똑같은 모양(발신자 아바타, 자물쇠 배지 등)으로 그릴 수 있습니다. 이미
-소켓이 연결된(=앱이 떠있는) 기기에는 중복 발송하지 않습니다.
+소켓이 연결된(=앱이 떠있는) 기기에는 중복 발송하지 않습니다. **아이폰은 예외**로, 기기 종류가 `ios`인 기기에는 OS가 바로 그리는
+알림(APNs alert)으로 보내고, 뒤로 간 아이폰 앱은 소켓이 붙어 있어도 보냅니다(`server/src/fcmMessage.js`·`presence.js` — 자세한 것은
+[아이폰 앱(iOS)](#아이폰-앱ios)의 "푸시가 오는 방식").
 
 ## 화상회의(LiveKit)
 

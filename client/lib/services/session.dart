@@ -2700,14 +2700,21 @@ class Session extends ChangeNotifier {
   /// 앱 사용 자체는 계속돼야 하므로 전부 조용히 무시한다 — 소켓이 붙어있는 동안은 기존
   /// 방식으로도 알림이 정상적으로 오고, FCM은 "앱이 완전히 꺼졌을 때"를 위한 보강일 뿐이다.
   Future<void> _registerFcmToken() async {
-    if (!AppPlatform.isAndroid) return;
+    if (!AppPlatform.isAndroid && !AppPlatform.isIOS) return;
     try {
       if (!await _ensureFirebaseInitialized()) return;
       final messaging = FirebaseMessaging.instance;
       await messaging.requestPermission();
+      // 아이폰은 APNs 토큰이 먼저 와야 FCM 토큰이 나온다(없으면 getToken이 던진다) — 권한을 받은 직후엔 아직 없을 수 있어
+      // 잠깐 기다린다. 끝내 없으면(서명 안 된 빌드·푸시 권한이 없는 프로비저닝 등) 다음 로그인 때 다시 해 본다.
+      if (AppPlatform.isIOS && !await _waitForApnsToken(messaging)) return;
       final token = await messaging.getToken();
       if (token != null) {
         await api!.registerFcmToken(deviceIdentity!.deviceId, token);
+        if (AppPlatform.isIOS) {
+          _iosPushRegistered = true;
+          _syncIosBackgroundPush();
+        }
       }
 
       await _fcmTokenRefreshSub?.cancel();
@@ -2720,6 +2727,45 @@ class Session extends ChangeNotifier {
       // 다음 로그인/토큰 갱신 때 다시 시도된다 — 그래도 원인을 눈으로 확인할 수 있게 로그는 남긴다.
       debugPrint('[fcm] 토큰 등록 실패: $e');
     }
+  }
+
+  /// 아이폰 — APNs 토큰이 생길 때까지 1초마다 10번 본다.
+  Future<bool> _waitForApnsToken(FirebaseMessaging messaging) async {
+    for (var i = 0; i < 10; i++) {
+      if (await messaging.getAPNSToken() != null) return true;
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    return false;
+  }
+
+  /// 아이폰 — 이 기기의 FCM(APNs) 토큰을 서버에 등록했는지. 등록했을 때만 "뒤로 가면 푸시로" 바꾼다([setAppHidden]) —
+  /// 등록 못 한 기기(서버에 아이폰 값이 없음 등)는 예전처럼 소켓이 살아 있는 동안 앱이 직접 알림을 그린다.
+  bool _iosPushRegistered = false;
+  bool _appHidden = false;
+
+  /// 앱이 화면에서 사라졌다(hidden·paused)/다시 보인다 — main.dart의 생명 주기. 아이폰만 쓴다: iOS는 뒤로 간 앱을 몇 초 안에
+  /// 멈춰서 소켓으로 받은 알림을 그리지 못하고, 서버는 멈춘 소켓을 한동안 붙어 있는 것으로 본다 — 그사이 온 알림이 사라진다.
+  /// 그래서 뒤에 있는 동안은 서버에 알려 이 기기에도 푸시(APNs — OS가 그린다)를 보내게 하고, 앱이 직접 그리는 알림은 끈다
+  /// (둘 다 뜨지 않게). 통화 중에는 소리 때문에 앱이 계속 돌아 그대로 둔다.
+  void setAppHidden(bool hidden) {
+    if (!AppPlatform.isIOS) return;
+    if (!_iosCallWatched) {
+      // 뒤에 있는 동안 통화가 끝나면(상대가 끊음) 그때부터 푸시로 — 값이 바뀔 때만 서버에 알린다(ChatSocket.setAppBackground).
+      _iosCallWatched = true;
+      callController.addListener(_syncIosBackgroundPush);
+    }
+    _appHidden = hidden;
+    _syncIosBackgroundPush();
+  }
+
+  bool _iosCallWatched = false;
+
+  void _syncIosBackgroundPush() {
+    if (!AppPlatform.isIOS) return;
+    final viaPush =
+        _iosPushRegistered && _appHidden && callController.roomId == null;
+    notifications.deferToRemotePush = viaPush;
+    chatSocket.setAppBackground(viaPush);
   }
 
   /// 웹 앱의 웹 푸시 구독을 서버에 등록한다 — 앱(탭)을 닫아도 알림이 오게 하는, 안드로이드 FCM의 웹판
@@ -2795,19 +2841,17 @@ class Session extends ChangeNotifier {
   Future<bool> _ensureFirebaseInitialized() async {
     if (Firebase.apps.isNotEmpty) return true;
     final config = await api?.fetchFirebaseClientConfig();
-    final options = FcmConfigCache.fromValues(
-      apiKey: config?['apiKey'],
-      appId: config?['appId'],
-      projectId: config?['projectId'],
-      senderId: config?['messagingSenderId'],
+    final options = FcmConfigCache.fromServerConfig(
+      config,
+      ios: AppPlatform.isIOS,
     );
     if (options == null) return false;
     await FcmConfigCache.save(
       _prefs,
-      apiKey: config!['apiKey']!,
-      appId: config['appId']!,
-      projectId: config['projectId']!,
-      senderId: config['messagingSenderId']!,
+      apiKey: options.apiKey,
+      appId: options.appId,
+      projectId: options.projectId,
+      senderId: options.messagingSenderId,
     );
     await Firebase.initializeApp(options: options);
     return true;
@@ -6025,6 +6069,9 @@ class Session extends ChangeNotifier {
       }
     }
     await _fcmTokenRefreshSub?.cancel();
+    // 다음 계정이 로그인해 토큰을 다시 등록할 때까지는 예전처럼(앱이 직접 알림).
+    _iosPushRegistered = false;
+    _syncIosBackgroundPush();
     await _prefs.remove(_kToken);
     await _prefs.remove(_kRefreshToken);
     await _prefs.remove(_kUserId);

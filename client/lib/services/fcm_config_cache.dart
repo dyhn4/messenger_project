@@ -1,12 +1,13 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 안드로이드에서만 쓰는 FCM(Firebase) 초기화 값의 로컬 캐시.
+/// 안드로이드·아이폰 앱이 쓰는 FCM(Firebase) 초기화 값의 로컬 캐시.
 ///
 /// google-services.json을 앱 빌드에 박아넣는 예전 방식 대신, 고객사가 관리자 콘솔에서 자기
 /// Firebase 프로젝트 값을 직접 입력하고(server/src/admin.js의 /admin/fcm-settings), 앱은
 /// 그 값을 서버에서 받아와(GET /firebase-client-config) 여기 캐싱해둔다 — 그래야 APK 하나로
-/// 모든 고객사가 쓸 수 있다.
+/// 모든 고객사가 쓸 수 있다. 아이폰도 같다(GoogleService-Info.plist를 앱에 넣지 않는다) — 같은
+/// 프로젝트에 따로 등록한 iOS 앱의 API 키·앱 ID만 다르다([fromServerConfig]).
 ///
 /// 캐싱이 꼭 필요한 이유: 앱이 완전히 꺼진 뒤 FCM data-only 메시지를 받으면 OS가 새 격리
 /// (isolate)에서 main()을 처음부터 다시 실행하는데(main.dart의
@@ -42,6 +43,18 @@ class FcmConfigCache {
       projectId: projectId,
     );
   }
+
+  /// 서버가 준 값(ApiClient.fetchFirebaseClientConfig) 중 이 기기 것 — [ios]면 iOS 앱의 API 키·앱 ID(iosApiKey·iosAppId),
+  /// 아니면 안드로이드 앱의 것. 프로젝트 ID·발신자 번호는 같다. 이 기기 값이 없으면(아이폰 값을 아직 안 넣은 서버, 예전 서버) null.
+  static FirebaseOptions? fromServerConfig(
+    Map<String, String?>? config, {
+    required bool ios,
+  }) => fromValues(
+    apiKey: config?[ios ? 'iosApiKey' : 'apiKey'],
+    appId: config?[ios ? 'iosAppId' : 'appId'],
+    projectId: config?['projectId'],
+    senderId: config?['messagingSenderId'],
+  );
 
   /// 일반 앱 실행 경로(main(), Session)에서 쓰는 legacy SharedPreferences로 캐싱된 값을 읽는다.
   static FirebaseOptions? read(SharedPreferences prefs) => fromValues(

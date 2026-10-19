@@ -1,1 +1,5 @@
+// Swift Package로 못 들어오는 플러그인이 있으면 Flutter가 CocoaPods로 받는다 — 그때 그 설정을 붙인다(없으면 무시).
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
 #include "Generated.xcconfig"
+// 배포 서명(TestFlight·App Store) — GitHub 워크플로(.github/workflows/ios-build.yml)가 빌드할 때만 만드는 파일이라 평소에는 없다(ios/.gitignore).
+#include? "../Signing.xcconfig"

@@ -203,14 +203,18 @@ Future<void> main() async {
   // 관리자 콘솔에서 고객사가 직접 넣은 값 — fcm_config_cache.dart 참고)으로 초기화한다. 아직
   // 한 번도 못 받아왔으면(첫 실행, 아직 로그인 전, 관리자가 설정 전 등) 조용히 건너뛴다 — 이후
   // 로그인에 성공하면 session.dart의 _registerFcmToken이 서버에서 받아와 즉시 초기화한다.
-  if (AppPlatform.isAndroid) {
+  // 아이폰도 같은 방식으로 켠다(캐시에는 iOS 앱 값이 들어 있다 — FcmConfigCache.fromServerConfig). 다만 아이폰 푸시는 OS가
+  // 바로 그리는 알림(server/src/fcmMessage.js)이라 백그라운드 핸들러는 안드로이드만 건다 — 아이폰에서 불리면 같은 알림을 한 번 더 그린다.
+  if (AppPlatform.isAndroid || AppPlatform.isIOS) {
     final prefs = await SharedPreferences.getInstance();
     final fcmOptions = FcmConfigCache.read(prefs);
     if (fcmOptions != null) {
       await Firebase.initializeApp(options: fcmOptions);
-      FirebaseMessaging.onBackgroundMessage(
-        _firebaseMessagingBackgroundHandler,
-      );
+      if (AppPlatform.isAndroid) {
+        FirebaseMessaging.onBackgroundMessage(
+          _firebaseMessagingBackgroundHandler,
+        );
+      }
     }
   }
   // 창 닫기(X)를 눌러도 앱이 종료되지 않고 시스템 트레이로 내려가도록(백그라운드에서 계속
@@ -309,7 +313,7 @@ class _MyAppState extends State<MyApp>
     }
   }
 
-  /// 안드로이드 — OS가 그린 FCM 알림(결재처럼 서버가 notification을 실어 보내는 것)을 눌러 앱이 열렸을 때를 듣고 있는지.
+  /// OS가 그린 FCM 알림(안드로이드는 결재처럼 서버가 notification을 실어 보내는 것, 아이폰은 모든 푸시)을 눌러 앱이 열렸을 때를 듣고 있는지.
   /// Firebase는 캐시된 설정이 있으면 main()에서, 처음 로그인이면 그 뒤 Session이 초기화하므로 [_hookFcmTaps]가 늦게도 건다.
   bool _fcmTapsHooked = false;
   StreamSubscription<RemoteMessage>? _fcmOpenedSub;
@@ -450,10 +454,12 @@ class _MyAppState extends State<MyApp>
     _tryOpenPendingLaunchRoom();
   }
 
-  /// FCM 알림을 눌러 앱이 열린 경우(꺼져 있다 켜짐 · 뒤에 있다 앞으로 옴)를 듣는다 — 대화 알림은 앱이 직접 그려
-  /// flutter_local_notifications의 payload로 오지만, 결재 알림은 OS가 그려서 FCM의 data로만 알 수 있다.
+  /// FCM 알림을 눌러 앱이 열린 경우(꺼져 있다 켜짐 · 뒤에 있다 앞으로 옴)를 듣는다 — 안드로이드의 대화 알림은 앱이 직접 그려
+  /// flutter_local_notifications의 payload로 오지만, 결재 알림과 아이폰의 모든 푸시는 OS가 그려서 FCM의 data로만 알 수 있다.
   void _hookFcmTaps() {
-    if (_fcmTapsHooked || !AppPlatform.isAndroid || Firebase.apps.isEmpty) {
+    if (_fcmTapsHooked ||
+        !(AppPlatform.isAndroid || AppPlatform.isIOS) ||
+        Firebase.apps.isEmpty) {
       return;
     }
     _fcmTapsHooked = true;
@@ -469,17 +475,9 @@ class _MyAppState extends State<MyApp>
   }
 
   void _onFcmOpened(RemoteMessage message) {
-    final data = message.data;
-    if (data['kind'] == 'mail') {
-      _pendingLaunchRoomId = NotificationService.mailPayload;
-      _tryOpenPendingLaunchRoom();
-      return;
-    }
-    if (data['kind'] != 'groupware') return;
-    _pendingLaunchRoomId = NotificationService.approvalPayload(
-      data['documentId'] as String? ?? '',
-      data['teamId'] as String?,
-    );
+    final payload = NotificationService.fcmTapPayload(message.data);
+    if (payload == null) return;
+    _pendingLaunchRoomId = payload;
     _tryOpenPendingLaunchRoom();
   }
 
@@ -503,6 +501,12 @@ class _MyAppState extends State<MyApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     session.setAppInForeground(state == AppLifecycleState.resumed);
+    // 화면에서 사라졌는지(아이폰만 쓴다 — Session.setAppHidden). 제어 센터를 내리는 것 같은 inactive는 아직 보이는 것으로 둔다.
+    session.setAppHidden(
+      state == AppLifecycleState.hidden ||
+          state == AppLifecycleState.paused ||
+          state == AppLifecycleState.detached,
+    );
   }
 
   Future<void> _openRoomFromNotification(String payload) async {

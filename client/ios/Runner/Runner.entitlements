@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 배포(TestFlight·App Store — Release·Profile) 빌드. 디버그 빌드는 RunnerDebug.entitlements(개발용 APNs). -->
+	<!-- 앱이 꺼져 있을 때의 푸시(APNs — FCM이 보낸다). App ID에 Push Notifications를 켜야 프로비저닝 프로파일에 들어간다. -->
+	<key>aps-environment</key>
+	<string>production</string>
+	<!-- 화면 공유 방송 확장(BroadcastExtension)과 같이 쓰는 앱 그룹 — Info.plist의 RTCAppGroupIdentifier와 같다. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.teamtalk.messenger</string>
+	</array>
+</dict>
+</plist>

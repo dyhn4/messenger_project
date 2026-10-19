@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 앱과 같은 앱 그룹 — 화면 프레임을 보내는 소켓 파일(rtc_SSFD)이 이 그룹 폴더에 있다. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.teamtalk.messenger</string>
+	</array>
+</dict>
+</plist>

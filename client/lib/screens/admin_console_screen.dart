@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../models/admin.dart';
 import '../models/team.dart';
 import '../services/api_client.dart' show PositionOption;
+import '../services/google_service_info.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/admin_org_edit_dialog.dart';
@@ -696,6 +697,9 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
   final _appId = TextEditingController();
   final _projectId = TextEditingController();
   final _senderId = TextEditingController();
+  // 아이폰 앱(GoogleService-Info.plist) — 같은 Firebase 프로젝트의 iOS 앱 값. 프로젝트 ID·발신자 번호는 위와 같다.
+  final _iosApiKey = TextEditingController();
+  final _iosAppId = TextEditingController();
   final _serviceAccountJson = TextEditingController();
 
   @override
@@ -710,6 +714,8 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
     _appId.dispose();
     _projectId.dispose();
     _senderId.dispose();
+    _iosApiKey.dispose();
+    _iosAppId.dispose();
     _serviceAccountJson.dispose();
     super.dispose();
   }
@@ -724,6 +730,8 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
         _appId.text = settings.appId;
         _projectId.text = settings.projectId;
         _senderId.text = settings.messagingSenderId;
+        _iosApiKey.text = settings.iosApiKey;
+        _iosAppId.text = settings.iosAppId;
       });
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -788,6 +796,60 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
     }
   }
 
+  /// 아이폰 앱의 GoogleService-Info.plist를 읽어 iOS 값을 채워 넣기만 한다(google-services.json과 같이 저장은 따로). 안드로이드와
+  /// 같은 Firebase 프로젝트의 파일이어야 한다 — 서버가 보내는 서비스 계정이 그 프로젝트 하나라서. 안드로이드 값이 아직 없으면
+  /// 프로젝트 ID·발신자 번호도 이 파일에서 채운다.
+  Future<void> _pickGoogleServiceInfoPlist() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['plist'],
+    );
+    final file = result?.files.single;
+    if (file == null || (file.path == null && file.bytes == null)) return;
+    try {
+      final info = parseGoogleServiceInfoPlist(await file.xFile.readAsString());
+      if (info == null) {
+        throw tr(
+          '필요한 값(API_KEY/GOOGLE_APP_ID/PROJECT_ID/GCM_SENDER_ID)을 찾지 못했습니다.',
+        );
+      }
+      final projectId = _projectId.text.trim();
+      if (projectId.isNotEmpty && projectId != info.projectId) {
+        throw tr(
+          '안드로이드와 다른 Firebase 프로젝트({p0})의 파일입니다. 같은 프로젝트({p1})에 아이폰 앱을 등록하세요.',
+          {'p0': info.projectId, 'p1': projectId},
+        );
+      }
+      if (info.bundleId != null && info.bundleId != iosBundleId) {
+        throw tr('번들 ID가 {p0}인 앱의 파일입니다. {p1}로 등록한 아이폰 앱의 파일을 여세요.', {
+          'p0': info.bundleId!,
+          'p1': iosBundleId,
+        });
+      }
+      setState(() {
+        _iosApiKey.text = info.apiKey;
+        _iosAppId.text = info.appId;
+        if (projectId.isEmpty) {
+          _projectId.text = info.projectId;
+          _senderId.text = info.senderId;
+        }
+      });
+      if (mounted) {
+        showAppToast(
+          context,
+          tr('GoogleService-Info.plist에서 값을 불러왔습니다. 확인 후 저장을 누르세요.'),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppToast(
+          context,
+          tr('GoogleService-Info.plist를 읽지 못했습니다: {e}', {'e': e}),
+        );
+      }
+    }
+  }
+
   /// firebase-service-account.json을 읽어서 붙여넣기 칸에 채워 넣기만 한다(바로 저장하지
   /// 않음) — 실제 형식 검증(type/private_key/client_email)은 저장 시 서버가 한다.
   Future<void> _pickServiceAccountJson() async {
@@ -823,6 +885,8 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
         appId: _appId.text.trim(),
         projectId: _projectId.text.trim(),
         messagingSenderId: _senderId.text.trim(),
+        iosApiKey: _iosApiKey.text.trim(),
+        iosAppId: _iosAppId.text.trim(),
         serviceAccountJson: serviceAccountJson.isEmpty
             ? null
             : serviceAccountJson,
@@ -880,6 +944,35 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
                 : null,
             fontWeight: FontWeight.w600,
           ),
+        ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _pickGoogleServiceInfoPlist,
+            icon: const Icon(Icons.folder_open, size: 18),
+            label: Text(tr('GoogleService-Info.plist 열기')),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // 아이폰 앱 — 같은 Firebase 프로젝트에 iOS 앱(번들 ID com.teamtalk.messenger)을 등록하고 APNs 인증 키를 올려 둬야 한다.
+        Text(
+          _iosAppId.text.isEmpty
+              ? tr('아이폰 앱 설정: 설정 안 됨 — 아이폰은 앱이 꺼져 있을 때 알림을 받지 못합니다.')
+              : tr('아이폰 앱 설정: 설정됨'),
+          style: TextStyle(
+            color: _iosAppId.text.isEmpty
+                ? Theme.of(context).colorScheme.error
+                : null,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          tr(
+            'Firebase 콘솔에서 같은 프로젝트에 iOS 앱(번들 ID com.teamtalk.messenger)을 추가해 GoogleService-Info.plist를 받고, 프로젝트 설정 > 클라우드 메시징에 Apple 개발자 계정의 APNs 인증 키(.p8)를 올려 두어야 아이폰으로 푸시가 갑니다.',
+          ),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: hint),
         ),
         const SizedBox(height: 16),
         Align(

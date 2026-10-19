@@ -92,7 +92,8 @@ test('push.js: 사람 단위로는 skipsPush로만 빼고, FCM 토큰은 접속�
   assert.equal(/\bisOnline\b/.test(push), false, '사람 단위 isOnline으로 거르는 곳이 남으면 안 된다');
   const listCalls = push.match(/listFcmTokensForUser\(/g) ?? [];
   assert.equal(listCalls.length, 1, 'FCM 토큰은 pushableFcmTokens 한 곳에서만 읽는다');
-  assert.match(push, /async function pushableFcmTokens\(userId\) \{\s*return \(await listFcmTokensForUser\(userId\)\)\.filter\(\(\{ deviceId \}\) => !isDeviceConnected\(deviceId\)\);/);
+  // 접속해 있지 않은 기기 — 아이폰 앱이 뒤로 간 기기는 붙어 있어도 넣는다(presence.js pushesToDevice, test/iosPush.test.js).
+  assert.match(push, /async function pushableFcmTokens\(userId\) \{\s*return \(await listFcmTokensForUser\(userId\)\)\.filter\(\(\{ deviceId \}\) => pushesToDevice\(deviceId\)\);/);
   assert.equal((push.match(/await pushableFcmTokens\(/g) ?? []).length, 6); // 채팅·프로젝트·결재·메일·통화·비밀 대화
   assert.equal((push.match(/skipsPush\(/g) ?? []).length, 6);
 });

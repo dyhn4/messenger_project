@@ -282,6 +282,9 @@ export function createAdminRouter(io) {
       appId: settings.fcmAppId ?? '',
       projectId: settings.fcmProjectId ?? '',
       messagingSenderId: settings.fcmMessagingSenderId ?? '',
+      // 아이폰 앱(GoogleService-Info.plist) — 비밀값이 아닌 것은 안드로이드 값과 같다(번들 ID로 제한).
+      iosApiKey: settings.fcmIosApiKey ?? '',
+      iosAppId: settings.fcmIosAppId ?? '',
       serviceAccountConfigured: !!settings.fcmServiceAccountJson,
       serviceAccountEmail,
     });
@@ -294,7 +297,7 @@ export function createAdminRouter(io) {
   router.patch('/admin/fcm-settings', async (req, res) => {
     const body = req.body ?? {};
     const fields = {};
-    for (const key of ['apiKey', 'appId', 'projectId', 'messagingSenderId']) {
+    for (const key of ['apiKey', 'appId', 'projectId', 'messagingSenderId', 'iosApiKey', 'iosAppId']) {
       if (key in body) {
         if (typeof body[key] !== 'string') {
           return res.status(400).json({ error: `${key}는 문자열이어야 합니다.` });

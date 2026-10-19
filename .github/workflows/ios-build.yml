@@ -1,19 +1,30 @@
-# 아이폰 앱 빌드 — 맥 없이 GitHub의 macOS 러너에서 서명 없이(--no-codesign) 빌드해 본다.
+# 아이폰 앱 빌드 — 맥 없이 GitHub의 macOS 러너에서 빌드한다. 두 가지 중에서 고른다(Actions → "iOS build" → Run workflow).
 #
-# 쓰는 법: GitHub 저장소 → Actions → "iOS build" → Run workflow. 끝나면 실행 화면 아래 Artifacts에
-#   - TangoTalk-unsigned-ipa : 서명 안 된 IPA(Payload/Runner.app을 zip으로 묶은 것)
-#   - TangoTalk-simulator    : 맥의 iOS 시뮬레이터에 끌어다 놓아 실행해 볼 수 있는 Runner.app
-# 이 올라간다.
-#
-# 서명이 안 된 IPA는 그대로는 아이폰에 깔리지 않는다. Apple 개발자 등록(연 $99)을 하면 이 워크플로에 인증서·프로비저닝
-# 프로파일을 넣어 TestFlight/App Store용으로 서명하게 바꾼다(README "아이폰 앱" 참고). 그 전에는 무료 Apple ID로 서명해 주는
-# 도구(Sideloadly·AltStore 등 — 7일마다 다시 서명)로 개발용 설치는 해 볼 수 있다.
+#   unsigned   : 서명 없이(--no-codesign) 빌드만 해 본다 — Apple 개발자 등록 전에도 된다. 끝나면 Artifacts에
+#                TangoTalk-unsigned-ipa(서명 안 된 IPA — Sideloadly·AltStore 같은 무료 Apple ID 서명 도구로 개발용 설치, 7일마다
+#                다시 서명)와 TangoTalk-simulator(맥의 iOS 시뮬레이터에 끌어다 놓는 Runner.app)가 올라간다.
+#   testflight : 배포 인증서·프로비저닝 프로파일로 서명한 IPA를 만들어 App Store Connect(TestFlight)에 올린다. 저장소 Secrets에
+#                아래 값이 있어야 한다(만드는 법은 README "아이폰 앱"과 client/tool/ios_signing.ps1).
+#                  IOS_DIST_CERT_P12        배포 인증서(Apple Distribution) .p12를 base64로
+#                  IOS_DIST_CERT_PASSWORD   그 .p12의 암호
+#                  IOS_PROFILE_APP          com.teamtalk.messenger의 App Store 프로비저닝 프로파일을 base64로
+#                  IOS_PROFILE_BROADCAST    com.teamtalk.messenger.BroadcastExtension(화면 공유)의 App Store 프로파일을 base64로
+#                  ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8   App Store Connect API 키(ID·발급자 ID·.p8 파일 내용 그대로)
+#                올린 빌드는 App Store Connect에서 처리(10~30분)가 끝나면 TestFlight에 보이고, 심사에 낼 수도 있다.
 #
 # 비공개 저장소에서 macOS 러너는 분 단위 요금이 리눅스의 10배라 자동으로 돌리지 않고 손으로만 실행한다.
 name: iOS build
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'unsigned = 서명 없이 빌드만 · testflight = 서명해서 TestFlight에 올리기'
+        type: choice
+        options:
+          - unsigned
+          - testflight
+        default: unsigned
 
 jobs:
   build:
@@ -22,8 +33,18 @@ jobs:
     defaults:
       run:
         working-directory: client
+    env:
+      # 비밀값이 로그에 남지 않게 단계마다 필요한 것만 env로 넘긴다(아래). 번들 ID는 Xcode 프로젝트와 같다.
+      APP_BUNDLE_ID: com.teamtalk.messenger
+      BROADCAST_BUNDLE_ID: com.teamtalk.messenger.BroadcastExtension
+      APP_GROUP: group.com.teamtalk.messenger
     steps:
       - uses: actions/checkout@v4
+
+      # App Store Connect는 그해 Apple이 정한 최신 SDK(Xcode)로 만든 빌드만 받는다 — 러너에 깔린 가장 새 정식 Xcode를 쓴다.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       - uses: subosito/flutter-action@v2
         with:
@@ -39,26 +60,170 @@ jobs:
       - name: 분석
         run: flutter analyze
 
+      # ─────────────── unsigned ───────────────
+
       - name: 아이폰용 빌드(서명 없이)
+        if: inputs.mode != 'testflight'
         run: flutter build ios --release --no-codesign
 
       - name: 서명 안 된 IPA로 묶기
+        if: inputs.mode != 'testflight'
         run: |
           mkdir -p build/ipa/Payload
           cp -R build/ios/iphoneos/Runner.app build/ipa/Payload/
           cd build/ipa && zip -qr TangoTalk-unsigned.ipa Payload
 
       - name: 시뮬레이터용 빌드
+        if: inputs.mode != 'testflight'
         run: flutter build ios --simulator --debug
 
       - uses: actions/upload-artifact@v4
+        if: inputs.mode != 'testflight'
         with:
           name: TangoTalk-unsigned-ipa
           path: client/build/ipa/TangoTalk-unsigned.ipa
           retention-days: 14
 
       - uses: actions/upload-artifact@v4
+        if: inputs.mode != 'testflight'
         with:
           name: TangoTalk-simulator
           path: client/build/ios/iphonesimulator/Runner.app
           retention-days: 14
+
+      # ─────────────── testflight ───────────────
+
+      # 인증서는 이 실행에만 쓰는 임시 키체인에 넣고, 프로파일은 Xcode가 찾는 폴더에 둔다. 프로파일에서 팀 ID·이름을 읽어
+      # ios/Signing.xcconfig(Release.xcconfig·BroadcastExtension.xcconfig가 있으면 읽는다)와 내보내기 설정을 만든다 — 팀 ID를
+      # 따로 넣을 필요가 없다. 프로파일이 다른 앱 것이거나 푸시·앱 그룹이 빠졌으면 빌드 전에 알아보기 쉬운 오류로 멈춘다.
+      - name: 서명 준비(인증서·프로비저닝 프로파일)
+        if: inputs.mode == 'testflight'
+        env:
+          CERT_P12: ${{ secrets.IOS_DIST_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          PROFILE_APP: ${{ secrets.IOS_PROFILE_APP }}
+          PROFILE_BROADCAST: ${{ secrets.IOS_PROFILE_BROADCAST }}
+        run: |
+          set -euo pipefail
+          [ -n "$CERT_P12" ] || { echo "::error::저장소 Secrets에 IOS_DIST_CERT_P12가 없습니다(README '아이폰 앱')."; exit 1; }
+          [ -n "$PROFILE_APP" ] || { echo "::error::저장소 Secrets에 IOS_PROFILE_APP이 없습니다."; exit 1; }
+          [ -n "$PROFILE_BROADCAST" ] || { echo "::error::저장소 Secrets에 IOS_PROFILE_BROADCAST가 없습니다."; exit 1; }
+
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/dist.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/dist.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN" | grep -q "Apple Distribution" \
+            || { echo "::error::IOS_DIST_CERT_P12에 Apple Distribution 인증서(개인 키 포함)가 없습니다."; exit 1; }
+
+          # $1 = base64 프로파일, $2 = 번들 ID, $3 = 푸시가 꼭 있어야 하면 1 — 설치하고 "이름|팀 ID"를 출력한다.
+          install_profile() {
+            local file="$RUNNER_TEMP/$2.mobileprovision" info="$RUNNER_TEMP/$2.plist"
+            printf '%s' "$1" | base64 --decode > "$file"
+            security cms -D -i "$file" > "$info"
+            local uuid name team appid groups
+            uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$info")
+            name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$info")
+            team=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$info")
+            appid=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$info")
+            if [ "$appid" != "$team.$2" ]; then
+              echo "::error::프로파일 '$name'은 $appid 것입니다 — $2의 프로파일을 넣으세요." >&2; return 1
+            fi
+            if /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$info" > /dev/null 2>&1; then
+              echo "::error::프로파일 '$name'은 개발·Ad Hoc용입니다 — App Store용(Distribution → App Store Connect)을 넣으세요." >&2; return 1
+            fi
+            groups=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.security.application-groups' "$info" 2>/dev/null || true)
+            if ! grep -q "$APP_GROUP" <<< "$groups"; then
+              echo "::error::프로파일 '$name'에 앱 그룹 $APP_GROUP이 없습니다 — App ID에 App Groups를 켜고 그 그룹을 고른 뒤 프로파일을 다시 만드세요." >&2; return 1
+            fi
+            if [ "$3" = 1 ] && ! /usr/libexec/PlistBuddy -c 'Print :Entitlements:aps-environment' "$info" > /dev/null 2>&1; then
+              echo "::error::프로파일 '$name'에 푸시(aps-environment)가 없습니다 — App ID에 Push Notifications를 켠 뒤 프로파일을 다시 만드세요." >&2; return 1
+            fi
+            # Xcode 16부터는 UserData 쪽을, 그 전 도구는 MobileDevice 쪽을 본다.
+            for dir in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+              mkdir -p "$dir"
+              cp "$file" "$dir/$uuid.mobileprovision"
+            done
+            printf '%s|%s' "$name" "$team"
+          }
+          APP=$(install_profile "$PROFILE_APP" "$APP_BUNDLE_ID" 1)
+          EXT=$(install_profile "$PROFILE_BROADCAST" "$BROADCAST_BUNDLE_ID" 0)
+          APP_PROFILE="${APP%|*}"; TEAM_ID="${APP#*|}"
+          EXT_PROFILE="${EXT%|*}"
+          [ "${EXT#*|}" = "$TEAM_ID" ] || { echo "::error::두 프로파일의 팀이 다릅니다."; exit 1; }
+
+          # 빌드 설정 — Runner와 화면 공유 확장이 각자 자기 프로파일을 쓴다(TARGET_NAME으로 고른다).
+          {
+            echo "DEVELOPMENT_TEAM = $TEAM_ID"
+            echo "CODE_SIGN_STYLE = Manual"
+            echo "CODE_SIGN_IDENTITY = Apple Distribution"
+            echo "CODE_SIGN_IDENTITY[sdk=iphoneos*] = Apple Distribution"
+            echo "TT_PROFILE_Runner = $APP_PROFILE"
+            echo "TT_PROFILE_BroadcastExtension = $EXT_PROFILE"
+            echo 'PROVISIONING_PROFILE_SPECIFIER = $(TT_PROFILE_$(TARGET_NAME))'
+          } > ios/Signing.xcconfig
+
+          # 내보내기 설정(flutter build ipa --export-options-plist).
+          xml() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$APP_BUNDLE_ID</key><string>$(xml "$APP_PROFILE")</string>
+              <key>$BROADCAST_BUNDLE_ID</key><string>$(xml "$EXT_PROFILE")</string>
+            </dict>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          EOF
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          echo "팀 $TEAM_ID · 앱 프로파일 '$APP_PROFILE' · 화면 공유 프로파일 '$EXT_PROFILE'"
+
+      # 빌드 번호(CFBundleVersion)는 이 워크플로의 실행 번호 — TestFlight는 같은 버전 안에서 번호가 늘어나야 받는다. 버전 이름은
+      # pubspec.yaml의 version 그대로.
+      - name: 아이폰용 빌드(서명 — App Store)
+        if: inputs.mode == 'testflight'
+        run: flutter build ipa --release --build-number=${{ github.run_number }} --export-options-plist="$RUNNER_TEMP/ExportOptions.plist"
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.mode == 'testflight'
+        with:
+          name: TangoTalk-appstore-ipa
+          path: client/build/ios/ipa/*.ipa
+          retention-days: 14
+
+      - name: TestFlight에 올리기
+        if: inputs.mode == 'testflight'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_KEY_P8" ] \
+            || { echo "::error::저장소 Secrets에 ASC_KEY_ID·ASC_ISSUER_ID·ASC_KEY_P8이 있어야 올릴 수 있습니다(IPA는 Artifacts에 있다)."; exit 1; }
+          # altool은 이 폴더에서 AuthKey_<키 ID>.p8을 찾는다.
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          printf '%s\n' "$ASC_KEY_P8" > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          IPA=$(ls build/ios/ipa/*.ipa | head -n 1)
+          xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: 서명 정리
+        if: always() && inputs.mode == 'testflight'
+        run: |
+          [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
+          rm -f ios/Signing.xcconfig "$HOME/.appstoreconnect/private_keys/"*.p8

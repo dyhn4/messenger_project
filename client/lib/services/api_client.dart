@@ -706,6 +706,9 @@ class ApiClient {
         'appId': body['appId'] as String?,
         'projectId': body['projectId'] as String?,
         'messagingSenderId': body['messagingSenderId'] as String?,
+        // 아이폰 앱용(GoogleService-Info.plist) — 예전 서버는 주지 않는다(아이폰은 FCM을 켜지 않는다).
+        'iosApiKey': body['iosApiKey'] as String?,
+        'iosAppId': body['iosAppId'] as String?,
       };
     } catch (_) {
       return null;
@@ -2258,6 +2261,8 @@ class ApiClient {
     String? appId,
     String? projectId,
     String? messagingSenderId,
+    String? iosApiKey,
+    String? iosAppId,
     String? serviceAccountJson,
   }) async {
     await _patch('/api/admin/fcm-settings', {
@@ -2265,6 +2270,8 @@ class ApiClient {
       'appId': ?appId,
       'projectId': ?projectId,
       'messagingSenderId': ?messagingSenderId,
+      'iosApiKey': ?iosApiKey,
+      'iosAppId': ?iosAppId,
       'serviceAccountJson': ?serviceAccountJson,
     });
   }

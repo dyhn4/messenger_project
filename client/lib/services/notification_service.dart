@@ -39,6 +39,10 @@ class NotificationService {
   /// PC 알림 창(notification_popup.dart)의 모양 — 앱 테마와 환경설정의 카드 크기·최대 개수(Session이 채운다).
   NotificationPopupStyle Function()? popupStyle;
 
+  /// 아이폰 앱이 뒤로 가 있어 알림을 서버 푸시(APNs — OS가 그린다)로 받는 중이면 true(Session.setAppHidden). 그동안은 소켓으로
+  /// 받은 메시지·통화·프로젝트·결재·메일 알림을 앱이 그리지 않는다 — 같은 알림이 두 번 뜨지 않게.
+  bool deferToRemotePush = false;
+
   /// [requestPermission]을 false로 주면 권한 요청을 건너뛴다 — main.dart의 FCM 백그라운드
   /// 핸들러(앱이 완전히 꺼진 상태에서 별도의 헤드리스 isolate로 실행됨)에서 쓰는 경로다.
   /// 그 isolate엔 화면/Activity가 없어서 권한 요청 다이얼로그를 띄울 수 없고, 실제로
@@ -108,6 +112,33 @@ class NotificationService {
     return details?.notificationResponse?.payload;
   }
 
+  /// OS가 그린 FCM 알림(아이폰의 모든 푸시 — server/src/fcmMessage.js, 안드로이드의 결재·메일·프로젝트)을 눌렀을 때 열 곳 —
+  /// 앱이 그린 알림의 payload와 같은 모양으로 바꾼다(main.dart _openRoomFromNotification). [data]는 서버가 실은 FCM data
+  /// ({kind, roomId, projectId, documentId, teamId}). 열 곳을 모르면 null.
+  static String? fcmTapPayload(Map<String, dynamic> data) {
+    final roomId = data['roomId'] as String?;
+    switch (data['kind']) {
+      case 'mail':
+        return mailPayload;
+      case 'groupware':
+        return approvalPayload(
+          data['documentId'] as String? ?? '',
+          data['teamId'] as String?,
+        );
+      case 'project':
+        final projectId = data['projectId'] as String?;
+        return projectId == null || projectId.isEmpty
+            ? null
+            : '$projectPayloadPrefix$projectId';
+      case 'call':
+        return roomId == null || roomId.isEmpty
+            ? null
+            : '$callPayloadPrefix$roomId';
+    }
+    // 메시지·댓글·공지·멘션·게시글 수정·비밀 대화 요청 — 그 방을 연다(비밀 대화 요청은 여는 쪽이 수락 창을 띄운다).
+    return roomId == null || roomId.isEmpty ? null : roomId;
+  }
+
   /// 새 메일 알림 payload — 누르면 메일 화면을 연다(main.dart _openRoomFromNotification, 웹은 web/sw.js도 같은 값).
   static const mailPayload = 'mail:';
 
@@ -116,6 +147,7 @@ class NotificationService {
     required String title,
     required String body,
   }) async {
+    if (deferToRemotePush) return; // 아이폰이 뒤에 있다 — 서버 푸시가 그린다.
     if (kIsWeb) {
       return showWebNotification(
         title: title,
@@ -163,6 +195,7 @@ class NotificationService {
     required String body,
     required String projectId,
   }) async {
+    if (deferToRemotePush) return; // 아이폰이 뒤에 있다 — 서버 푸시가 그린다.
     if (kIsWeb) {
       return showWebNotification(
         title: title,
@@ -225,6 +258,7 @@ class NotificationService {
     required String documentId,
     String? teamId,
   }) async {
+    if (deferToRemotePush) return; // 아이폰이 뒤에 있다 — 서버 푸시가 그린다.
     final payload = approvalPayload(documentId, teamId);
     if (kIsWeb) {
       return showWebNotification(
@@ -277,6 +311,7 @@ class NotificationService {
     required String callerName,
     String? conversationTitle,
   }) async {
+    if (deferToRemotePush) return; // 아이폰이 뒤에 있다 — 서버 푸시가 그린다.
     if (kIsWeb) {
       return showWebNotification(
         title: callerName,
@@ -400,6 +435,7 @@ class NotificationService {
     bool flashTaskbarUntilRoomOpened = false,
     bool flashWindowFrame = true,
   }) async {
+    if (deferToRemotePush) return; // 아이폰이 뒤에 있다 — 서버 푸시가 그린다.
     if (kIsWeb) {
       // 브라우저 알림은 그림을 합성해 넣을 수 없어서 Windows처럼 자물쇠를 이름 앞 글자로 붙인다.
       return showWebNotification(

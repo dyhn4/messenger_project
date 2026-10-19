@@ -1434,7 +1434,14 @@ class ChatSocket {
       );
     });
     socket.onReconnect((_) => _reconnectController.add(null));
-    socket.onConnect((_) => _connectionController.add(true));
+    socket.onConnect((_) {
+      // 서버는 기기의 소켓이 모두 끊기면 "뒤에 있음"을 잊는다 — 다시 붙을 때마다 지금 상태를 알린다(아이폰만 — setAppBackground).
+      final background = _appBackground;
+      if (background != null) {
+        socket.emit('app:background', {'background': background});
+      }
+      _connectionController.add(true);
+    });
     socket.onDisconnect((_) => _connectionController.add(false));
     void onFailure(dynamic err) => _looksLikeAuthError(err)
         ? _authErrorController.add(null)
@@ -1669,6 +1676,18 @@ class ChatSocket {
     'call:mic',
     {'roomId': roomId, 'targetId': targetId, 'on': on},
   );
+
+  /// 아이폰 앱이 뒤로 가 알림을 푸시(APNs)로 받는 중인지 — null이면 한 번도 알린 적 없음(아이폰이 아니거나 아직). 서버는 이
+  /// 값이 true인 동안 소켓이 붙어 있어도 이 기기로 푸시를 보낸다(server/src/presence.js pushesToDevice).
+  bool? _appBackground;
+
+  /// [background]가 바뀔 때만 서버에 알린다(Session._syncIosBackgroundPush는 통화 상태가 바뀔 때마다 부른다). 처음 알리는
+  /// false도 보낸다 — 앞선 소켓이 남긴 "뒤에 있음"을 지우게.
+  void setAppBackground(bool background) {
+    if (_appBackground == background) return;
+    _appBackground = background;
+    _socket?.emit('app:background', {'background': background});
+  }
 
   /// 비밀 대화 메시지가 실제로 화면에 노출됐다는 신호 — 자동 삭제 타이머가 이 시점부터 시작된다.
   void markSecretMessageRead(String roomId, String messageId) {

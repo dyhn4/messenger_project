@@ -41,14 +41,15 @@ const ACCOUNT_ACTIVE = '("users"."suspended_at" is null and "users"."deleted_at"
 test('listFcmTokensForUser: 정지·탈퇴한 계정이면 아무 기기도 고르지 않는다(최근 기기 상한은 그대로)', async (t) => {
   const queries = recordQueries(t, {
     rows: [
-      ['phone', 'token-1'],
-      ['old-phone', ''], // 빈 토큰은 보내지 않는다.
+      ['phone', 'token-1', 'android'],
+      ['old-phone', '', 'ios'], // 빈 토큰은 보내지 않는다.
     ],
   });
-  assert.deepEqual(await listFcmTokensForUser(USER), [{ deviceId: 'phone', fcmToken: 'token-1' }]);
+  // 기기 종류도 같이 준다 — 아이폰은 알림 모양이 다르다(fcmMessage.js).
+  assert.deepEqual(await listFcmTokensForUser(USER), [{ deviceId: 'phone', fcmToken: 'token-1', kind: 'android' }]);
   assert.equal(queries.length, 1);
   const [{ text, values }] = queries;
-  assert.ok(text.startsWith(`select "devices"."id", "devices"."fcm_token" from "devices" ${ACCOUNT_JOIN} where (`), text);
+  assert.ok(text.startsWith(`select "devices"."id", "devices"."fcm_token", "devices"."kind" from "devices" ${ACCOUNT_JOIN} where (`), text);
   assert.ok(
     text.includes(
       `"devices"."user_id" = $1 and "devices"."revoked_at" is null and "devices"."fcm_token" is not null and ${ACCOUNT_ACTIVE}`,

@@ -538,6 +538,11 @@ export const serverSettings = pgTable('server_settings', {
   fcmProjectId: text('fcm_project_id'),
   fcmMessagingSenderId: text('fcm_messaging_sender_id'),
   fcmServiceAccountJson: text('fcm_service_account_json'),
+  // 아이폰 앱의 Firebase 초기화 값 — 같은 Firebase 프로젝트에 iOS 앱(번들 ID com.teamtalk.messenger)을 따로 등록하면 받는
+  // GoogleService-Info.plist의 API_KEY·GOOGLE_APP_ID(프로젝트 ID·발신자 번호는 위와 같다). API 키는 번들 ID로 제한돼 비밀값이
+  // 아니라 위 4개와 같이 인증 없이 내준다(GET /firebase-client-config). 없으면 아이폰 앱은 FCM을 켜지 않는다(꺼져 있을 때 알림 없음).
+  fcmIosApiKey: text('fcm_ios_api_key'),
+  fcmIosAppId: text('fcm_ios_app_id'),
   // DDNS(DuckDNS) 자동 갱신 — 공유기의 공인 IP가 바뀌어도 외부 접속 주소(xxx.duckdns.org)가 이 서버를 가리키게 서버가
   // 주기적으로 DuckDNS에 알린다(ddnsService.js). 도메인은 ".duckdns.org"를 뗀 이름을 쉼표로 이어 둔다. 토큰은 그
   // 계정의 모든 도메인을 바꿀 수 있는 비밀값이라 암호화해 둔다(crypto.js encryptField) — 관리자 콘솔에도 다시

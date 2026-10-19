@@ -10,7 +10,8 @@ import { findTeamById } from './db/queries/teams.js';
 import { listActiveUsersByIds } from './db/queries/users.js';
 import { isUserInDnd } from './statusRules.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
-import { isDeviceConnected, skipsPush } from './presence.js';
+import { fcmMessageFor } from './fcmMessage.js';
+import { pushesToDevice, skipsPush } from './presence.js';
 import { signFileUrl } from './upload.js';
 import { sendWebPushToUser } from './webPush.js';
 
@@ -34,11 +35,30 @@ let messagingCache; // undefined = 아직 로드 전; 로드 후엔 항상 { mes
 let currentApp = null;
 
 /**
- * 이 사람의 FCM 토큰 중 지금 보낼 것 — 소켓이 붙어 있는 기기는 뺀다(소켓으로 알림을 받는다). 그래서 PC 앱이 켜져 있어도
- * 접속해 있지 않은 휴대폰에는 간다("다른 기기 접속 중에도 푸시" — 끈 사람은 호출부가 skipsPush로 이미 뺐다).
+ * 이 사람의 FCM 기기({ deviceId, fcmToken, kind }) 중 지금 보낼 것 — 소켓이 붙어 있는 기기는 뺀다(소켓으로 알림을 받는다).
+ * 그래서 PC 앱이 켜져 있어도 접속해 있지 않은 휴대폰에는 간다("다른 기기 접속 중에도 푸시" — 끈 사람은 호출부가 skipsPush로
+ * 이미 뺐다). 아이폰 앱이 뒤로 간 기기는 소켓이 붙어 있어도 보낸다(presence.js pushesToDevice).
  */
 async function pushableFcmTokens(userId) {
-  return (await listFcmTokensForUser(userId)).filter(({ deviceId }) => !isDeviceConnected(deviceId));
+  return (await listFcmTokensForUser(userId)).filter(({ deviceId }) => pushesToDevice(deviceId));
+}
+
+/**
+ * [devices]에 한 통씩 보낸다 — [content]는 fcmMessageFor의 { android, ios }(기기 종류마다 모양이 다르다). 앱을 지웠거나 다시 깔아
+ * 토큰이 없어졌으면 그 기기의 토큰을 지워 다음부터 헛발송하지 않는다. [label]은 실패 로그에 남길 알림 종류(영문 — 앱 번역 대상이 아니다).
+ */
+async function sendToDevices(messaging, userId, devices, content, label) {
+  await Promise.all(
+    devices.map((device) =>
+      messaging.send(fcmMessageFor(device, content)).catch(async (err) => {
+        if (err?.code === 'messaging/registration-token-not-registered') {
+          await setDeviceFcmToken(device.deviceId, userId, null).catch(() => {});
+          return;
+        }
+        console.error(`[push] ${label} 알림 발송 실패:`, err?.message ?? err);
+      }),
+    ),
+  );
 }
 
 export function invalidateMessagingCache() {
@@ -83,7 +103,10 @@ async function getMessagingInstance() {
 /** 클라이언트가 Firebase.initializeApp()에 쓸 4개 값 — Android 클라이언트 API 키는
  * 패키지명+SHA-1로 제한돼 비밀값이 아니므로(구글 공식 안내) 인증 없이 공개한다(GET /version과
  * 같은 성격). 관리자가 아직 설정 안 했으면 전부 null을 돌려주고, 클라이언트는 이 경우 FCM을
- * 그냥 비활성 상태로 둔다(main.dart/session.dart 참고). */
+ * 그냥 비활성 상태로 둔다(main.dart/session.dart 참고).
+ *
+ * 아이폰 앱은 같은 Firebase 프로젝트에 따로 등록한 iOS 앱의 API 키·앱 ID(GoogleService-Info.plist — 번들 ID로 제한된다)를
+ * 쓴다(iosApiKey·iosAppId — 프로젝트 ID·발신자 번호는 같다). 예전 앱은 이 둘을 모른 채 위 4개만 읽는다. */
 export const firebaseConfigRouter = Router();
 firebaseConfigRouter.get('/firebase-client-config', async (req, res) => {
   const settings = await getServerSettings();
@@ -92,6 +115,8 @@ firebaseConfigRouter.get('/firebase-client-config', async (req, res) => {
     appId: settings.fcmAppId ?? null,
     projectId: settings.fcmProjectId ?? null,
     messagingSenderId: settings.fcmMessagingSenderId ?? null,
+    iosApiKey: settings.fcmIosApiKey ?? null,
+    iosAppId: settings.fcmIosAppId ?? null,
   });
 });
 
@@ -221,47 +246,38 @@ async function sendChatDataPush({ targets: requested, room, sender, senderName, 
     body: preview,
   };
 
+  const content = {
+    android: {
+      // data-only(알림 payload 없음) — 클라이언트가 flutter_local_notifications로
+      // 직접 그려야 기존 로컬 알림(자물쇠 배지 등)과 모양이 같아진다. notification
+      // 필드를 같이 넣으면 앱이 꺼져있을 때 OS가 그 필드로 자체 렌더링해버려서
+      // onBackgroundMessage 핸들러가 아예 안 불릴 수 있다.
+      data: {
+        kind,
+        roomId: room.id,
+        title,
+        body: preview,
+        senderName,
+        ...(conversationTitle
+          ? { conversationTitle: teamName ? `${conversationTitle} · ${teamName}` : conversationTitle }
+          : {}),
+        isSecret: String(!!room.isSecret),
+        avatarType: sender?.avatarType ?? 'initial',
+        ...(sender?.avatarEmoji ? { avatarEmoji: sender.avatarEmoji } : {}),
+        ...(sender?.avatarColor ? { avatarColor: sender.avatarColor } : {}),
+        ...(avatarUrl ? { avatarUrl } : {}),
+      },
+      android: { priority: 'high' },
+    },
+    // 아이폰은 OS가 그린다 — 아바타를 합성할 수 없어 웹 알림처럼 비밀 대화는 제목 앞에 자물쇠, 같은 방 알림은 한 묶음.
+    ios: { title: webPayload.title, body: preview, threadId: room.id, data: { kind, roomId: room.id } },
+  };
+
   await Promise.all(
     targets.map(async (userId) => {
       await sendWebPushToUser(userId, webPayload);
       if (!messaging) return;
-      const tokens = await pushableFcmTokens(userId);
-      await Promise.all(
-        tokens.map(({ deviceId, fcmToken }) =>
-          messaging
-            .send({
-              token: fcmToken,
-              // data-only(알림 payload 없음) — 클라이언트가 flutter_local_notifications로
-              // 직접 그려야 기존 로컬 알림(자물쇠 배지 등)과 모양이 같아진다. notification
-              // 필드를 같이 넣으면 앱이 꺼져있을 때 OS가 그 필드로 자체 렌더링해버려서
-              // onBackgroundMessage 핸들러가 아예 안 불릴 수 있다.
-              data: {
-                kind,
-                roomId: room.id,
-                title,
-                body: preview,
-                senderName,
-                ...(conversationTitle
-                  ? { conversationTitle: teamName ? `${conversationTitle} · ${teamName}` : conversationTitle }
-                  : {}),
-                isSecret: String(!!room.isSecret),
-                avatarType: sender?.avatarType ?? 'initial',
-                ...(sender?.avatarEmoji ? { avatarEmoji: sender.avatarEmoji } : {}),
-                ...(sender?.avatarColor ? { avatarColor: sender.avatarColor } : {}),
-                ...(avatarUrl ? { avatarUrl } : {}),
-              },
-              android: { priority: 'high' },
-            })
-            .catch(async (err) => {
-              // 토큰이 만료/폐기됐으면(재설치, 앱 삭제 등) 정리해서 다음부터 헛발송 안 하게.
-              if (err?.code === 'messaging/registration-token-not-registered') {
-                await setDeviceFcmToken(deviceId, userId, null).catch(() => {});
-                return;
-              }
-              console.error('[push] 발송 실패:', err?.message ?? err);
-            }),
-        ),
-      );
+      await sendToDevices(messaging, userId, await pushableFcmTokens(userId), content, 'chat');
     }),
   );
 }
@@ -276,24 +292,13 @@ export async function notifyProjectPush({ userId, title, body, projectId, taskId
   await sendWebPushToUser(userId, { kind: 'project', projectId, title, body });
   const { messaging } = await getMessagingInstance();
   if (!messaging) return;
-  const tokens = await pushableFcmTokens(userId);
-  await Promise.all(
-    tokens.map(({ deviceId, fcmToken }) =>
-      messaging
-        .send({
-          token: fcmToken,
-          notification: { title, body },
-          data: { kind: 'project', projectId, ...(taskId ? { taskId } : {}) },
-          android: { priority: 'high' },
-        })
-        .catch(async (err) => {
-          if (err?.code === 'messaging/registration-token-not-registered') {
-            await setDeviceFcmToken(deviceId, userId, null).catch(() => {});
-            return;
-          }
-          console.error('[push] 프로젝트 알림 발송 실패:', err?.message ?? err);
-        }),
-    ),
+  const data = { kind: 'project', projectId, ...(taskId ? { taskId } : {}) };
+  await sendToDevices(
+    messaging,
+    userId,
+    await pushableFcmTokens(userId),
+    { android: { notification: { title, body }, data, android: { priority: 'high' } }, ios: { title, body, data } },
+    'project',
   );
 }
 
@@ -308,24 +313,13 @@ export async function notifyGroupwarePush({ userId, title, body, documentId, tea
   await sendWebPushToUser(userId, { kind: 'groupware', documentId, teamId: teamId ?? '', title, body });
   const { messaging } = await getMessagingInstance();
   if (!messaging) return;
-  const tokens = await pushableFcmTokens(userId);
-  await Promise.all(
-    tokens.map(({ deviceId, fcmToken }) =>
-      messaging
-        .send({
-          token: fcmToken,
-          notification: { title, body },
-          data: { kind: 'groupware', documentId, teamId: teamId ?? '' },
-          android: { priority: 'high' },
-        })
-        .catch(async (err) => {
-          if (err?.code === 'messaging/registration-token-not-registered') {
-            await setDeviceFcmToken(deviceId, userId, null).catch(() => {});
-            return;
-          }
-          console.error('[push] 결재 알림 발송 실패:', err?.message ?? err);
-        }),
-    ),
+  const data = { kind: 'groupware', documentId, teamId: teamId ?? '' };
+  await sendToDevices(
+    messaging,
+    userId,
+    await pushableFcmTokens(userId),
+    { android: { notification: { title, body }, data, android: { priority: 'high' } }, ios: { title, body, data } },
+    'groupware',
   );
 }
 
@@ -339,24 +333,16 @@ export async function notifyMailPush({ userId, title, body }) {
   await sendWebPushToUser(userId, { kind: 'mail', title, body });
   const { messaging } = await getMessagingInstance();
   if (!messaging) return;
-  const tokens = await pushableFcmTokens(userId);
-  await Promise.all(
-    tokens.map(({ deviceId, fcmToken }) =>
-      messaging
-        .send({
-          token: fcmToken,
-          notification: { title, body },
-          data: { kind: 'mail' },
-          android: { priority: 'high' },
-        })
-        .catch(async (err) => {
-          if (err?.code === 'messaging/registration-token-not-registered') {
-            await setDeviceFcmToken(deviceId, userId, null).catch(() => {});
-            return;
-          }
-          console.error('[push] 메일 알림 발송 실패:', err?.message ?? err);
-        }),
-    ),
+  const data = { kind: 'mail' };
+  await sendToDevices(
+    messaging,
+    userId,
+    await pushableFcmTokens(userId),
+    {
+      android: { notification: { title, body }, data, android: { priority: 'high' } },
+      ios: { title, body, data, threadId: 'mail' },
+    },
+    'mail',
   );
 }
 
@@ -383,54 +369,36 @@ export async function notifyIncomingCall({ memberIds, callerId, caller, room, ro
   const callerName = caller?.name ?? caller?.username ?? '알 수 없음';
   const { name: teamName, badge: teamBadge } = await teamBadgeFor(room.teamId);
   const avatarUrl = caller?.avatarUrl ? signFileUrl(caller.avatarUrl) : null;
+  const title = `${callerName}${teamBadge}`;
+  const longBody = roomTag ? `${roomTag} · 화상회의 요청` : '화상회의 요청';
+  const content = {
+    android: {
+      data: {
+        kind: 'call',
+        roomId: room.id,
+        title,
+        body: '화상회의 요청',
+        senderName: callerName,
+        ...(roomTag ? { conversationTitle: teamName ? `${roomTag} · ${teamName}` : roomTag } : {}),
+        // 비밀 대화는 통화를 걸 수 없지만(callAccess.js callRoomDenial) 방의 실제 값을 보낸다.
+        isSecret: String(!!room.isSecret),
+        avatarType: caller?.avatarType ?? 'initial',
+        ...(caller?.avatarEmoji ? { avatarEmoji: caller.avatarEmoji } : {}),
+        ...(caller?.avatarColor ? { avatarColor: caller.avatarColor } : {}),
+        ...(avatarUrl ? { avatarUrl } : {}),
+      },
+      android: { priority: 'high', ttl: 45_000 },
+    },
+    // 아이폰은 전체화면 수신 화면(CallKit) 없이 알림만 — 누르면 앱이 그 방의 통화로 간다(웹 앱과 같다). 늦은 전화는 45초만.
+    ios: { title, body: longBody, data: { kind: 'call', roomId: room.id }, ttlSeconds: 45 },
+  };
 
   await Promise.all(
     targets.map(async (userId) => {
       // 웹 앱은 전화 화면 없이 알림만 — 눌러서 열면 통화에 참여한다(sw.js의 'call:' payload). 늦은 전화는 의미가 없어 45초만.
-      await sendWebPushToUser(
-        userId,
-        {
-          kind: 'call',
-          roomId: room.id,
-          title: `${callerName}${teamBadge}`,
-          body: roomTag ? `${roomTag} · 화상회의 요청` : '화상회의 요청',
-        },
-        { ttl: 45 },
-      );
+      await sendWebPushToUser(userId, { kind: 'call', roomId: room.id, title, body: longBody }, { ttl: 45 });
       if (!messaging) return;
-      const tokens = await pushableFcmTokens(userId);
-      await Promise.all(
-        tokens.map(({ deviceId, fcmToken }) =>
-          messaging
-            .send({
-              token: fcmToken,
-              data: {
-                kind: 'call',
-                roomId: room.id,
-                title: `${callerName}${teamBadge}`,
-                body: '화상회의 요청',
-                senderName: callerName,
-                ...(roomTag
-                  ? { conversationTitle: teamName ? `${roomTag} · ${teamName}` : roomTag }
-                  : {}),
-                // 비밀 대화는 통화를 걸 수 없지만(callAccess.js callRoomDenial) 방의 실제 값을 보낸다.
-                isSecret: String(!!room.isSecret),
-                avatarType: caller?.avatarType ?? 'initial',
-                ...(caller?.avatarEmoji ? { avatarEmoji: caller.avatarEmoji } : {}),
-                ...(caller?.avatarColor ? { avatarColor: caller.avatarColor } : {}),
-                ...(avatarUrl ? { avatarUrl } : {}),
-              },
-              android: { priority: 'high', ttl: 45_000 },
-            })
-            .catch(async (err) => {
-              if (err?.code === 'messaging/registration-token-not-registered') {
-                await setDeviceFcmToken(deviceId, userId, null).catch(() => {});
-                return;
-              }
-              console.error('[push] 통화 알림 발송 실패:', err?.message ?? err);
-            }),
-        ),
-      );
+      await sendToDevices(messaging, userId, await pushableFcmTokens(userId), content, 'call');
     }),
   );
 }
@@ -456,34 +424,36 @@ export async function notifySecretChatInvite({ targetUserId, initiator, roomId, 
   const tokens = await pushableFcmTokens(targetUserId);
   if (tokens.length === 0) return;
   const avatarUrl = initiator?.avatarUrl ? signFileUrl(initiator.avatarUrl) : null;
+  const body = '비밀 대화(종단간 암호화)를 요청했습니다.';
 
-  await Promise.all(
-    tokens.map(({ deviceId, fcmToken }) =>
-      messaging
-        .send({
-          token: fcmToken,
-          data: {
-            kind: 'secretInvite',
-            roomId,
-            title: `${senderName} [비밀대화 요청]${teamBadge}`,
-            body: '비밀 대화(종단간 암호화)를 요청했습니다.',
-            senderName,
-            conversationTitle: teamName ? `비밀대화 요청 · ${teamName}` : '비밀대화 요청',
-            isSecret: 'true',
-            avatarType: initiator?.avatarType ?? 'initial',
-            ...(initiator?.avatarEmoji ? { avatarEmoji: initiator.avatarEmoji } : {}),
-            ...(initiator?.avatarColor ? { avatarColor: initiator.avatarColor } : {}),
-            ...(avatarUrl ? { avatarUrl } : {}),
-          },
-          android: { priority: 'high' },
-        })
-        .catch(async (err) => {
-          if (err?.code === 'messaging/registration-token-not-registered') {
-            await setDeviceFcmToken(deviceId, targetUserId, null).catch(() => {});
-            return;
-          }
-          console.error('[push] 비밀대화 요청 발송 실패:', err?.message ?? err);
-        }),
-    ),
+  await sendToDevices(
+    messaging,
+    targetUserId,
+    tokens,
+    {
+      android: {
+        data: {
+          kind: 'secretInvite',
+          roomId,
+          title: `${senderName} [비밀대화 요청]${teamBadge}`,
+          body,
+          senderName,
+          conversationTitle: teamName ? `비밀대화 요청 · ${teamName}` : '비밀대화 요청',
+          isSecret: 'true',
+          avatarType: initiator?.avatarType ?? 'initial',
+          ...(initiator?.avatarEmoji ? { avatarEmoji: initiator.avatarEmoji } : {}),
+          ...(initiator?.avatarColor ? { avatarColor: initiator.avatarColor } : {}),
+          ...(avatarUrl ? { avatarUrl } : {}),
+        },
+        android: { priority: 'high' },
+      },
+      ios: {
+        title: `🔒 ${senderName} [비밀대화 요청]${teamBadge}`,
+        body,
+        threadId: roomId,
+        data: { kind: 'secretInvite', roomId },
+      },
+    },
+    'secretInvite',
   );
 }

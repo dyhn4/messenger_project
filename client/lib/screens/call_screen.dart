@@ -169,15 +169,10 @@ class _CallScreenState extends State<CallScreen> {
       _showToast(tr('아이폰·아이패드 브라우저에서는 화면 공유를 할 수 없습니다.'));
       return;
     }
-    if (AppPlatform.isIOS) {
-      // 아이폰 앱이 화면 전체를 보내려면 방송 확장(Broadcast Upload Extension)이 따로 있어야 하는데, 그건 Apple 개발자
-      // 등록(앱 그룹·서명) 뒤에 넣는다 — 그 전에는 이 앱 화면밖에 못 보내서 막아 둔다.
-      _showToast(tr('아이폰 앱에서는 아직 화면 공유를 할 수 없습니다.'));
-      return;
-    }
     try {
       // Windows는 어느 창을 공유할지 우리가 직접 고르게 하고(OS가 안 물어봄), Android는
-      // MediaProjection 시스템 화면이 알아서 뜬다.
+      // MediaProjection 시스템 화면이 알아서 뜬다. 아이폰은 iOS의 "화면 방송" 창이 뜨고 [방송 시작]을 누르면
+      // 방송 확장(client/ios/BroadcastExtension)이 화면 전체를 보낸다 — 멈추기는 이 단추나 제어 센터·빨간 상태 막대로.
       if (!controller.screenShareEnabled && AppPlatform.isWindows) {
         final sourceId = await showScreenSharePicker(context);
         if (sourceId == null) return;

@@ -8,6 +8,11 @@ const deviceConnectionCounts = new Map(); // deviceId -> 활성 소켓 개수
 // "다른 기기 접속 중에도 푸시"(notification_settings.pushWhileOnline) — 접속해 있는 동안만 의미가 있어서(접속해 있지
 // 않으면 어차피 보낸다) 접속할 때 읽어 두고, 마지막 연결이 끊기면 지운다. 접속 중에 바꾸면 setPushWhileOnline.
 const pushWhileOnlineByUser = new Map(); // userId -> boolean
+// 아이폰 앱이 뒤로 간 기기(소켓은 아직 붙어 있다) — iOS는 뒤로 간 앱을 몇 초 안에 멈춰서 소켓으로 받은 알림을 앱이 그리지
+// 못하고, 멈춘 앱의 소켓은 서버가 핑 시간 초과로 끊을 때까지(수십 초) 붙어 있는 것처럼 보인다. 그사이 온 알림이 사라지지
+// 않게 이 기기는 붙어 있어도 푸시(APNs)로 보낸다(push.js). 앱이 알려 주고(socket.js 'app:background'), 기기의 마지막 소켓이
+// 끊기면 지운다.
+const backgroundDevices = new Set(); // deviceId
 
 /**
  * 소켓이 연결됐을 때 호출. 반환값이 true면 방금 오프라인→온라인으로 막 바뀐 것(첫 연결). [deviceId]는 인증된 기기(없으면
@@ -25,8 +30,12 @@ export function markConnected(userId, { deviceId = null, pushWhileOnline } = {})
 export function markDisconnected(userId, deviceId = null) {
   if (deviceId) {
     const deviceNext = Math.max(0, (deviceConnectionCounts.get(deviceId) ?? 0) - 1);
-    if (deviceNext === 0) deviceConnectionCounts.delete(deviceId);
-    else deviceConnectionCounts.set(deviceId, deviceNext);
+    if (deviceNext === 0) {
+      deviceConnectionCounts.delete(deviceId);
+      backgroundDevices.delete(deviceId);
+    } else {
+      deviceConnectionCounts.set(deviceId, deviceNext);
+    }
   }
   const current = connectionCounts.get(userId) ?? 0;
   const next = Math.max(0, current - 1);
@@ -42,6 +51,21 @@ export function markDisconnected(userId, deviceId = null) {
 /** 이 기기에 지금 소켓이 붙어 있는지 — 붙어 있으면 소켓으로 알림을 받으니 그 기기로는 푸시를 보내지 않는다(push.js). */
 export function isDeviceConnected(deviceId) {
   return deviceConnectionCounts.has(deviceId);
+}
+
+/**
+ * 아이폰 앱이 뒤로 갔다(true)/돌아왔다(false) — 소켓이 붙어 있는 기기만 받는다(끊긴 기기는 어차피 푸시로 간다). 같은 기기의
+ * 소켓이 둘이어도(재연결 겹침) 기기 단위로 하나다 — 앱은 다시 붙을 때마다 지금 상태를 다시 알린다.
+ */
+export function setDeviceBackground(deviceId, background) {
+  if (!deviceId) return;
+  if (background && deviceConnectionCounts.has(deviceId)) backgroundDevices.add(deviceId);
+  else backgroundDevices.delete(deviceId);
+}
+
+/** 이 기기로 푸시를 보낼지 — 소켓이 붙어 있지 않거나, 붙어 있어도 아이폰 앱이 뒤로 가 있으면 보낸다(push.js). */
+export function pushesToDevice(deviceId) {
+  return !deviceConnectionCounts.has(deviceId) || backgroundDevices.has(deviceId);
 }
 
 /**

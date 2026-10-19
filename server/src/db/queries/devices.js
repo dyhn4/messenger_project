@@ -136,10 +136,11 @@ export async function setDeviceFcmToken(id, userId, token) {
 /** 오프라인(소켓 미연결)인 사용자에게 FCM 푸시를 보낼 때 쓴다 — 폐기되지 않은 기기 중
  * 토큰이 등록된 것만(같은 사람이 여러 기기를 갖고 있으면 다 받는다). 단 최근에 쓴 기기부터
  * PUSH_DEVICES_PER_USER개까지 — 등록할 때도 이만큼만 남기지만, 그 전에 쌓인 행까지 여기서 한 번 더 묶는다.
- * 정지·탈퇴한 계정이면 아무 기기도 돌려주지 않는다(pushableAccount). */
+ * 정지·탈퇴한 계정이면 아무 기기도 돌려주지 않는다(pushableAccount). 기기 종류(kind)도 같이 준다 — 아이폰('ios')은 알림
+ * 모양이 다르다(fcmMessage.js). */
 export function listFcmTokensForUser(userId) {
   return db
-    .select({ deviceId: devices.id, fcmToken: devices.fcmToken })
+    .select({ deviceId: devices.id, fcmToken: devices.fcmToken, kind: devices.kind })
     .from(devices)
     .innerJoin(users, eq(users.id, devices.userId))
     .where(and(eq(devices.userId, userId), isNull(devices.revokedAt), isNotNull(devices.fcmToken), pushableAccount()))

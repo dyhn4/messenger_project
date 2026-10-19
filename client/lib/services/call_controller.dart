@@ -155,6 +155,12 @@ class CallController extends ChangeNotifier {
           // 카메라는 1080p로 찍는다 — 실제로 보내는 최대 해상도는 화질 단계(videoTier)가 정한다(_applyVideoCaps).
           defaultCameraCaptureOptions: callCameraCaptureOptions,
           defaultVideoPublishOptions: callVideoPublishOptions,
+          // 아이폰은 사용자가 iOS의 "방송 시작"을 누른 뒤에 LiveKit이 이 기본 옵션으로 화면 공유를 올린다(toggleScreenShare 참고) —
+          // 방송 확장(client/ios/BroadcastExtension)이 찍은 화면을 받게 한다. 다른 플랫폼은 늘 옵션을 넘겨 이 값을 쓰지 않는다.
+          defaultScreenShareCaptureOptions: ScreenShareCaptureOptions(
+            useiOSBroadcastExtension: true,
+            params: callVideoSpecFor(videoTier).screen,
+          ),
         ),
       );
       // Room은 ChangeNotifier라 UI가 직접 구독한다 — 여기서도 연결 상태 변화를 그대로
@@ -169,8 +175,13 @@ class CallController extends ChangeNotifier {
         ..on<RoomDisconnectedEvent>((e) => _onRoomDisconnected(room, e))
         // 끊겼다가 다시 이어지면 서버에 참여를 다시 알릴 기회를 준다(onReconnected).
         ..on<RoomReconnectedEvent>((_) => _onRoomReconnected(room))
-        // 새로 올린 영상(카메라를 켜거나 화면 공유를 시작)에도 지금 화질 단계를 맞춘다.
-        ..on<LocalTrackPublishedEvent>((_) => unawaited(_applyVideoCaps()));
+        // 새로 올린 영상(카메라를 켜거나 화면 공유를 시작)에도 지금 화질 단계를 맞춘다. 아이폰 화면 공유는 누른 뒤가 아니라
+        // iOS 방송이 시작·종료될 때(제어 센터에서 멈춤 포함) 올라가고 내려가서, 그때 화면의 공유 단추도 다시 그린다.
+        ..on<LocalTrackPublishedEvent>((_) {
+          unawaited(_applyVideoCaps());
+          notifyListeners();
+        })
+        ..on<LocalTrackUnpublishedEvent>((_) => notifyListeners());
       await room.connect(credentials.url, credentials.token);
       _room = room;
       final me = room.localParticipant;
@@ -489,11 +500,15 @@ class CallController extends ChangeNotifier {
         includeMediaProjection: true,
       );
     }
+    // 아이폰 — 켜면 iOS의 "화면 방송" 창이 뜨고 여기서는 아무것도 올리지 않는다. 사용자가 [방송 시작]을 누르면 방송 확장이
+    // 앱 그룹의 소켓으로 화면을 보내기 시작하고, LiveKit(BroadcastManager)이 그때 공유를 올린다(RoomOptions의 기본 옵션).
+    // 끄면 공유를 내리고, 그러면 방송 확장도 연결이 끊겨 방송을 마친다.
     await me.setScreenShareEnabled(
       enable,
       // 지금 화질 단계의 화면 공유 해상도·프레임(fhd면 1080p 30fps)으로 찍는다.
       screenShareCaptureOptions: ScreenShareCaptureOptions(
         sourceId: sourceId,
+        useiOSBroadcastExtension: AppPlatform.isIOS,
         params: callVideoSpecFor(videoTier).screen,
       ),
     );

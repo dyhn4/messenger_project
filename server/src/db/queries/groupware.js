@@ -26,9 +26,9 @@ import {
 /**
  * 문서·결재선·참조자를 한 번에 넣는다. 첫 단계(합의면 여럿)가 바로 차례(pending)다. [approvers]는 `[{ id, name, role?, stage? }]`
  * (단계가 없으면 순서대로 한 사람씩). [numberOf](year, seq)를 주면 같은 트랜잭션에서 범위·해마다 번호를 하나 올려 문서 번호를 매긴다.
- * 넣은 문서 행.
+ * [afterInsert](tx, row)는 같은 트랜잭션에서 더 할 일. 넣은 문서 행.
  */
-export async function insertApprovalDocument({ doc, approvers, ccIds, numberOf = null, year = new Date().getFullYear() }) {
+export async function insertApprovalDocument({ doc, approvers, ccIds, numberOf = null, year = new Date().getFullYear(), afterInsert = null }) {
   return db.transaction(async (tx) => {
     let docNumber = null;
     if (numberOf) {
@@ -60,6 +60,8 @@ export async function insertApprovalDocument({ doc, approvers, ccIds, numberOf =
       })),
     );
     if (ccIds.length > 0) await tx.insert(approvalCc).values(ccIds.map((userId) => ({ documentId: row.id, userId })));
+    // 같은 트랜잭션에서 더 할 일(법인카드 사용 건 청구 — 던지면 문서도 만들지 않는다).
+    if (afterInsert) await afterInsert(tx, row);
     return row;
   });
 }

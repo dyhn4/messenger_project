@@ -1,4 +1,5 @@
 import '../models/groupware.dart';
+import '../models/groupware_finance.dart';
 import '../models/groupware_forms.dart';
 import '../models/groupware_resources.dart';
 import '../models/groupware_work.dart';
@@ -1099,4 +1100,357 @@ class GroupwareApi {
 
   Future<void> deleteWorkReport(String id) =>
       _api.requestJson('DELETE', '/api/groupware/work-reports/$id${_query()}');
+
+  // ── 급여명세서(server/src/payroll.js) ──
+
+  Future<Map<String, dynamic>> _send(
+    String method,
+    String path, [
+    Map<String, dynamic> body = const {},
+  ]) async => ((await _api.requestJson(method, path, body: _body(body))) as Map)
+      .cast<String, dynamic>();
+
+  /// 내 명세서들(보낸 대장의 것 — 합계만)과 내가 급여를 다루는지.
+  Future<({List<Payslip> items, bool canManage})> myPayslips() async {
+    final map = await _getMap('/api/groupware/payroll/mine${_query()}');
+    return (
+      items: [
+        for (final m in (map['items'] as List? ?? const []))
+          Payslip.fromJson((m as Map).cast<String, dynamic>()),
+      ],
+      canManage: map['canManage'] == true,
+    );
+  }
+
+  /// 명세서 하나(받는 사람이 처음 열면 서버가 "확인"을 남긴다).
+  Future<Payslip> payslip(String id) async => Payslip.fromJson(
+    await _getMap('/api/groupware/payroll/payslips/$id${_query()}'),
+  );
+
+  Future<PayrollSettings> payrollSettings() async => PayrollSettings.fromJson(
+    await _getMap('/api/groupware/payroll/settings${_query()}'),
+  );
+
+  /// 급여 설정 — 보낸 칸만 바꾼다([staffIds]는 그룹웨어 관리자만).
+  Future<PayrollSettings> savePayrollSettings({
+    List<String>? staffIds,
+    String? companyName,
+    List<PayrollItem>? templateEarnings,
+    List<PayrollItem>? templateDeductions,
+    Map<String, Object?>? insurance,
+    Map<String, String>? employeeNos,
+  }) async => PayrollSettings.fromJson(
+    await _send('PUT', '/api/groupware/payroll/settings', {
+      'staffIds': ?staffIds,
+      'companyName': ?companyName,
+      if (templateEarnings != null || templateDeductions != null)
+        'template': {
+          'earnings': [
+            for (final i in templateEarnings ?? const []) i.toJson(),
+          ],
+          'deductions': [
+            for (final i in templateDeductions ?? const []) i.toJson(),
+          ],
+        },
+      'insurance': ?insurance,
+      'employeeNos': ?employeeNos,
+    }),
+  );
+
+  Future<List<PayrollRun>> payrollRuns() async => [
+    for (final m in await _getList('/api/groupware/payroll/runs${_query()}'))
+      PayrollRun.fromJson(m),
+  ];
+
+  /// 대장 만들기 — [copyFromRunId]면 그 대장의 항목·금액을 이어받는다.
+  Future<PayrollRun> createPayrollRun({
+    required String payMonth,
+    required String payDate,
+    String? title,
+    String? note,
+    String? copyFromRunId,
+  }) async => PayrollRun.fromJson(
+    await _send('POST', '/api/groupware/payroll/runs', {
+      'payMonth': payMonth,
+      'payDate': payDate,
+      'title': ?title,
+      'note': ?note,
+      'copyFromRunId': ?copyFromRunId,
+    }),
+  );
+
+  Future<PayrollRunDetail> payrollRun(String id) async =>
+      PayrollRunDetail.fromJson(
+        await _getMap('/api/groupware/payroll/runs/$id${_query()}'),
+      );
+
+  Future<PayrollRun> updatePayrollRun(
+    String id, {
+    String? title,
+    String? payDate,
+    String? note,
+  }) async => PayrollRun.fromJson(
+    await _send('PATCH', '/api/groupware/payroll/runs/$id', {
+      'title': ?title,
+      'payDate': ?payDate,
+      'note': ?note,
+    }),
+  );
+
+  Future<void> deletePayrollRun(String id) =>
+      _api.requestJson('DELETE', '/api/groupware/payroll/runs/$id${_query()}');
+
+  Future<PayrollRun> publishPayrollRun(String id) async => PayrollRun.fromJson(
+    await _send('POST', '/api/groupware/payroll/runs/$id/publish'),
+  );
+
+  Future<PayrollRun> unpublishPayrollRun(String id, String reason) async =>
+      PayrollRun.fromJson(
+        await _send('POST', '/api/groupware/payroll/runs/$id/unpublish', {
+          'reason': reason,
+        }),
+      );
+
+  Future<void> addPayslips(String runId, List<String> userIds) => _send(
+    'POST',
+    '/api/groupware/payroll/runs/$runId/payslips',
+    {'userIds': userIds},
+  );
+
+  Future<void> deletePayslip(String id) => _api.requestJson(
+    'DELETE',
+    '/api/groupware/payroll/payslips/$id${_query()}',
+  );
+
+  /// 명세서 고치기 — 보낸 대장이면 [reason](정정 사유)이 꼭 있어야 한다.
+  Future<Payslip> savePayslip(
+    String id, {
+    required List<PayrollItem> earnings,
+    required List<PayrollItem> deductions,
+    PayrollWork? work,
+    String? memo,
+    String? employeeNo,
+    String? reason,
+  }) async => Payslip.fromJson(
+    await _send('PUT', '/api/groupware/payroll/payslips/$id', {
+      'earnings': [for (final i in earnings) i.toJson()],
+      'deductions': [for (final i in deductions) i.toJson()],
+      'work': work?.toJson(),
+      'memo': memo,
+      'employeeNo': ?employeeNo,
+      'reason': ?reason,
+    }),
+  );
+
+  /// 근태에서 채우기 — 바꾼 명세서 수와 통상시급이 있어 수당까지 넣은 수.
+  Future<({int updated, int withAllowance})> fillPayrollAttendance(
+    String runId,
+  ) async {
+    final map = await _send(
+      'POST',
+      '/api/groupware/payroll/runs/$runId/fill-attendance',
+    );
+    return (
+      updated: (map['updated'] as num?)?.toInt() ?? 0,
+      withAllowance: (map['withAllowance'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// 4대보험 공제 어림(참고용) — 바꾼 명세서 수.
+  Future<int> calcPayrollDeductions(String runId) async =>
+      ((await _send(
+                'POST',
+                '/api/groupware/payroll/runs/$runId/calc-deductions',
+              ))['updated']
+              as num?)
+          ?.toInt() ??
+      0;
+
+  /// 급여대장 엑셀 경로(Session.downloadAuthedFile).
+  String payrollExportPath(String runId) =>
+      '/api/groupware/payroll/runs/$runId/export${_query()}';
+
+  /// 급여대장 엑셀·CSV 가져오기 — [dryRun]이면 미리 보기만. 줄마다의 오류가 있어도 결과로 돌려준다.
+  Future<PayrollImportResult> importPayroll(
+    String runId,
+    List<int> bytes, {
+    required bool dryRun,
+    String contentType = 'application/octet-stream',
+  }) async => PayrollImportResult.fromJson(
+    await _api.postBytes(
+      '/api/groupware/payroll/runs/$runId/import${_query({'dryRun': dryRun ? '1' : null})}',
+      bytes,
+      contentType: contentType,
+      resultKey: 'applied',
+    ),
+  );
+
+  // ── 법인카드·영수증 읽기(server/src/corporateCards.js) ──
+
+  /// 카드들 — 관리자는 모두(그 달 사용 합계와 함께), 사용자는 내가 쓰는 카드.
+  Future<List<CorporateCard>> corporateCards({String? month}) async {
+    final map = await _getMap(
+      '/api/groupware/cards${_query({'month': month})}',
+    );
+    return [
+      for (final m in (map['cards'] as List? ?? const []))
+        CorporateCard.fromJson((m as Map).cast<String, dynamic>()),
+    ];
+  }
+
+  /// 카드 등록·바꾸기(관리자) — [id]가 없으면 새로.
+  Future<CorporateCard> saveCorporateCard({
+    String? id,
+    required String name,
+    required String issuer,
+    required String last4,
+    required List<String> holderIds,
+    int? monthlyLimit,
+    String? memo,
+    bool enabled = true,
+  }) async => CorporateCard.fromJson(
+    await _send(
+      id == null ? 'POST' : 'PATCH',
+      id == null ? '/api/groupware/cards' : '/api/groupware/cards/$id',
+      {
+        'name': name,
+        'issuer': issuer,
+        'last4': last4,
+        'holderIds': holderIds,
+        'monthlyLimit': monthlyLimit,
+        'memo': memo ?? '',
+        'enabled': enabled,
+      },
+    ),
+  );
+
+  Future<void> deleteCorporateCard(String id) =>
+      _api.requestJson('DELETE', '/api/groupware/cards/$id${_query()}');
+
+  /// 사용 건 — [month]('YYYY-MM' 또는 'open' — 기간 없이 청구 안 한 내 것), [mine]이면 관리자도 내 것만.
+  Future<CardTransactionPage> cardTransactions({
+    String? month,
+    String? cardId,
+    bool mine = false,
+  }) async => CardTransactionPage.fromJson(
+    await _getMap(
+      '/api/groupware/card-transactions${_query({'month': month, 'cardId': cardId, 'mine': mine ? '1' : null})}',
+    ),
+  );
+
+  /// 사용 건 고치기 — 용도·분류·영수증, [mine]이면 "내가 씀"(true)·"내 것 아님"(false), [userId]는 관리자의 사용자 지정.
+  Future<CardTransaction> updateCardTransaction(
+    String id, {
+    String? memo,
+    String? category,
+    List<ReceiptFile>? receipts,
+    bool? mine,
+    String? userId,
+    bool setUser = false,
+  }) async => CardTransaction.fromJson(
+    await _send('PATCH', '/api/groupware/card-transactions/$id', {
+      'memo': ?memo,
+      'category': ?category,
+      if (receipts != null) 'receipts': [for (final r in receipts) r.toJson()],
+      'mine': ?mine,
+      if (setUser) 'userId': userId,
+    }),
+  );
+
+  /// 사용 건 직접 넣기(관리자).
+  Future<CardTransaction> addCardTransaction({
+    required String cardId,
+    required String date,
+    String? time,
+    required String merchant,
+    required int amount,
+    String? approvalNo,
+  }) async => CardTransaction.fromJson(
+    await _send('POST', '/api/groupware/card-transactions', {
+      'cardId': cardId,
+      'date': date,
+      'time': ?time,
+      'merchant': merchant,
+      'amount': amount,
+      'approvalNo': ?approvalNo,
+    }),
+  );
+
+  Future<CardTransaction> excludeCardTransaction(
+    String id,
+    String reason,
+  ) async => CardTransaction.fromJson(
+    await _send('POST', '/api/groupware/card-transactions/$id/exclude', {
+      'reason': reason,
+    }),
+  );
+
+  Future<CardTransaction> restoreCardTransaction(String id) async =>
+      CardTransaction.fromJson(
+        ((await _api.requestJson(
+                  'DELETE',
+                  '/api/groupware/card-transactions/$id/exclude${_query()}',
+                ))
+                as Map)
+            .cast<String, dynamic>(),
+      );
+
+  Future<void> deleteCardTransaction(String id) => _api.requestJson(
+    'DELETE',
+    '/api/groupware/card-transactions/$id${_query()}',
+  );
+
+  /// 카드사 이용내역 가져오기(관리자) — [cardId]를 주면 모든 줄을 그 카드로.
+  Future<CardImportResult> importCardStatement(
+    List<int> bytes, {
+    String? cardId,
+    required bool dryRun,
+    String contentType = 'application/octet-stream',
+  }) async => CardImportResult.fromJson(
+    await _api.postBytes(
+      '/api/groupware/card-transactions/import${_query({'cardId': cardId, 'dryRun': dryRun ? '1' : null})}',
+      bytes,
+      contentType: contentType,
+    ),
+  );
+
+  /// 미정산 알림 — 알린 사람 수.
+  Future<int> remindCardTransactions({String? month}) async =>
+      ((await _send('POST', '/api/groupware/card-transactions/remind', {
+                'month': ?month,
+              }))['notified']
+              as num?)
+          ?.toInt() ??
+      0;
+
+  String cardTransactionsExportPath(String month) =>
+      '/api/groupware/card-transactions/export${_query({'month': month})}';
+
+  Future<CardFeedKey> cardFeedKey() async => CardFeedKey.fromJson(
+    await _getMap('/api/groupware/card-feed${_query()}'),
+  );
+
+  /// 연동 키 새로 만들기 — 키 값은 이 응답에서 한 번만 온다([CardFeedKey.token]).
+  Future<CardFeedKey> rotateCardFeedKey() async =>
+      CardFeedKey.fromJson(await _send('POST', '/api/groupware/card-feed'));
+
+  Future<void> deleteCardFeedKey() =>
+      _api.requestJson('DELETE', '/api/groupware/card-feed${_query()}');
+
+  /// 영수증 읽기 — 내가 올린 파일([fileUrl]) 또는 사용 건에 붙은 영수증([transactionId]·[receiptIndex]).
+  Future<ReceiptScanResult> scanReceipt({
+    String? fileUrl,
+    String? fileName,
+    String? mimeType,
+    String? transactionId,
+    int? receiptIndex,
+  }) async => ReceiptScanResult.fromJson(
+    await _send('POST', '/api/groupware/receipts/scan', {
+      'fileUrl': ?fileUrl,
+      'fileName': ?fileName,
+      'mimeType': ?mimeType,
+      'transactionId': ?transactionId,
+      'receiptIndex': ?receiptIndex,
+    }),
+  );
 }

@@ -166,6 +166,19 @@ import {
 } from './workRules.js';
 import { notifyGroupwarePush } from './push.js';
 import { signFileUrl } from './upload.js';
+import { checkClaim } from './cardRules.js';
+import { attachTransactionsToExpense, findTransaction, listCards, lockTransactionsForClaim } from './db/queries/corporateCards.js';
+import { findPayrollSettings } from './db/queries/payroll.js';
+import { canManagePayroll } from './payrollRules.js';
+import { receiptOcrEnabled } from './receiptOcr.js';
+
+/** 법인카드 청구가 넣는 순간 어긋남(다른 결재가 먼저 청구 등) — 문서 트랜잭션을 되돌리고 그 오류로 답한다. */
+class ClaimConflict extends Error {
+  constructor(outcome) {
+    super(outcome.error);
+    this.outcome = outcome;
+  }
+}
 
 /**
  * 그룹웨어 — 전자결재(휴가·지출·근태 수정), 법정 연차, 출퇴근 기록. 규칙은 approvalRules.js·annualLeave.js·attendanceRules.js,
@@ -313,6 +326,15 @@ function attachmentDtos(list) {
   }));
 }
 
+/** 문서 payload를 앱에 — 법인카드 청구의 사용 건마다 붙은 영수증(미서명 경로)을 서명 링크로. */
+function payloadDto(payload) {
+  if (!Array.isArray(payload?.cardTransactions)) return payload;
+  return {
+    ...payload,
+    cardTransactions: payload.cardTransactions.map((t) => ({ ...t, receipts: attachmentDtos(t.receipts) })),
+  };
+}
+
 /** 앱에 내려줄 문서 모양 — [viewerId] 기준으로 지금 내 차례인지·회수·취소할 수 있는지를 함께. */
 function documentDto({ doc, steps }, viewerId, { isManager = false, cc = null, proxySources = [], settlements = null } = {}) {
   // 차례인 칸 — 진행 중이면 그 단계, 승인됐으면 아직 확인하지 않은 후결 칸.
@@ -332,7 +354,7 @@ function documentDto({ doc, steps }, viewerId, { isManager = false, cc = null, p
     docNumber: doc.docNumber ?? null,
     title: doc.title,
     body: doc.body ?? null,
-    payload: doc.payload,
+    payload: payloadDto(doc.payload),
     attachments: attachmentDtos(doc.attachments),
     status: doc.status,
     authorId: doc.authorId,
@@ -598,7 +620,7 @@ async function announceLeaveCalendar(io, doc, event) {
 }
 
 /** 지출 영수증 등 첨부 → 저장할 값 `{ attachments }` 또는 `{ error }`. 직접 올린 파일만(fileRefs.js). */
-async function parseAttachments(input, senderId) {
+export async function parseAttachments(input, senderId) {
   if (input === undefined || input === null) return { attachments: [] };
   if (!Array.isArray(input) || input.length > ATTACHMENTS_MAX) return { error: `첨부는 ${ATTACHMENTS_MAX}개까지입니다.` };
   const rows = [];
@@ -615,6 +637,97 @@ async function parseAttachments(input, senderId) {
   return {
     attachments: rows.map((r) => ({ fileUrl: checked.paths.get(r.raw), fileName: r.fileName, fileSize: r.fileSize, mimeType: r.mimeType })),
   };
+}
+
+/** [from]~[to]에 걸친 탄력·선택근무 기간들의 근로시간(기간 전체를 읽는다). */
+async function periodsOf(ctx, userId, schedule, from, to) {
+  const periods = schedule?.periodType ? periodsOverlapping(schedule, from, to) : [];
+  if (!periods.length) return [];
+  const records = await listAttendanceInRange({
+    scopeKey: ctx.scopeKey,
+    from: periods[0].start,
+    to: addDaysKey(periods[periods.length - 1].end, -1),
+    userId,
+  });
+  return periods.map((p) => periodSummary(records, p, { holidays: HOLIDAY_DATES }));
+}
+
+/**
+ * 한 사람의 [from]~[to] 가산 수당(참고용) — 통상시급이 없으면 null. 탄력·선택근무는 날마다의 연장 대신 이 기간 안에 끝나는 정산 기간의
+ * 연장을 센다(정산 기간이 끝난 달에).
+ */
+async function allowanceFor(ctx, userId, schedule, records, from, to, wage = undefined) {
+  const hourlyWage = wage === undefined ? ((await findWorkWage(ctx.scopeKey, userId))?.hourlyWage ?? null) : wage;
+  if (!hourlyWage) return null;
+  let overtimeMinutes = null;
+  if (schedule?.periodType) {
+    const ending = (await periodsOf(ctx, userId, schedule, from, to)).filter((p) => addDaysKey(p.end, -1) >= from && addDaysKey(p.end, -1) <= to);
+    overtimeMinutes = ending.reduce((s, p) => s + p.overtimeMinutes, 0);
+  }
+  return allowanceOf({ records, wage: hourlyWage, rates: ctx.options.payRates, holidays: HOLIDAY_DATES, overtimeMinutes });
+}
+
+/** 구성원별 한 달 근태 요약(관리자 — 근태 관리 탭·엑셀, 급여명세서의 "근태에서 채우기"). */
+export async function monthSummaries(ctx, month) {
+  const days = monthDays(month);
+  const from = days[0];
+  const to = days[days.length - 1];
+  const members = (await listGroupwareMembers({ scope: ctx.scope, teamId: ctx.teamId })).filter((m) => !m.suspendedAt);
+  const memberIds = members.map((m) => m.id);
+  const [records, leaves, trips, overtime, wages, schedules] = await Promise.all([
+    listAttendanceInRange({ scopeKey: ctx.scopeKey, from, to }),
+    listApprovedLeaves({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
+    listApprovedTrips({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
+    listApprovedOvertime({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
+    listWorkWages(ctx.scopeKey),
+    listWorkSchedules(ctx.scopeKey),
+  ]);
+  const hoursOf = await hoursByUser(ctx);
+  const today = localDateKey(new Date());
+  const wageOf = new Map(wages.map((w) => [w.userId, w.hourlyWage]));
+  const scheduleOf = new Map(schedules.map((s) => [s.userId, s]));
+  // 가산 수당(통상시급을 정한 사람만 — 탄력·선택근무는 정산 기간을 따로 읽는다).
+  const allowances = new Map();
+  for (const m of members) {
+    if (!wageOf.has(m.id)) continue;
+    const mine = records.filter((r) => r.userId === m.id);
+    allowances.set(m.id, await allowanceFor(ctx, m.id, scheduleOf.get(m.id) ?? null, mine, from, to, wageOf.get(m.id)));
+  }
+  return members
+    .map((m) => {
+      const leaveByDate = new Map();
+      for (const l of leaves.filter((x) => x.authorId === m.id)) leaveDaysOf(l, leaveByDate);
+      const mine = records.filter((r) => r.userId === m.id);
+      const tripDates = new Set();
+      for (const t of trips.filter((x) => x.authorId === m.id)) tripDaysOf(t, tripDates);
+      const overtimeByDate = overtimeByDateOf(overtime.filter((x) => x.authorId === m.id));
+      return {
+        userId: m.id,
+        name: m.name,
+        username: m.username,
+        records: mine,
+        leaveByDate,
+        hours: hoursOf(m.id),
+        allowance: allowances.get(m.id) ?? null,
+        summary: {
+          ...summarizeMonth({
+            monthKey: month,
+            records: mine,
+            leaveByDate,
+            tripDates,
+            overtimeByDate,
+            holidays: HOLIDAY_DATES,
+            workStart: hoursOf(m.id).workStart,
+            workEnd: hoursOf(m.id).workEnd,
+            checkLate: hoursOf(m.id).checkLate,
+            checkEarly: hoursOf(m.id).checkEarly,
+            today,
+          }),
+          ...monthBreakdown(mine, { holidays: HOLIDAY_DATES }),
+        },
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
 }
 
 export function createGroupwareRouter(io) {
@@ -658,9 +771,12 @@ export function createGroupwareRouter(io) {
     '/groupware/context',
     withContext(async (req, res, ctx) => {
       const proxySources = await proxySourcesOf(ctx.scopeKey, ctx.user.id);
-      const [pendingForMe, hireDate] = await Promise.all([
+      const [pendingForMe, hireDate, payroll, cards] = await Promise.all([
         countPendingApprovals(ctx.scopeKey, ctx.user.id, proxySources),
         findHireDate({ scope: ctx.scope, teamId: ctx.teamId, userId: ctx.user.id }),
+        // 급여명세서·법인카드(마이그레이션 0137 전이면 없는 것으로).
+        findPayrollSettings(ctx.scopeKey).catch(() => undefined),
+        listCards(ctx.scopeKey).catch(() => null),
       ]);
       res.json({
         scope: ctx.scope,
@@ -687,6 +803,16 @@ export function createGroupwareRouter(io) {
         inLan: isLanAddress(clientIp(req)),
         // 내 서명·도장(서명 링크) — 결재할 때 결재 칸에 들어간다.
         signatureUrl: ctx.user.signaturePath ? (signFileUrl(ctx.user.signaturePath) ?? null) : null,
+        // 급여명세서(payroll.js) — 쓸 수 있는지(마이그레이션 뒤)와 내가 급여를 다룰 수 있는지(관리자·급여 담당자).
+        payroll:
+          payroll === undefined
+            ? null
+            : { canManage: canManagePayroll({ isManager: ctx.isManager, userId: ctx.user.id, staffIds: payroll?.staffIds ?? [] }) },
+        // 법인카드(corporateCards.js) — 이 범위 카드 수와 내가 쓰는 카드 수(0이면 지출 탭에 "내 법인카드"를 숨긴다 — 끈 카드도 센다: 끄면
+        // 연동만 받지 않을 뿐 남은 사용 건은 청구해야 한다).
+        cards: cards === null ? null : { total: cards.length, mine: cards.filter((c) => (c.holderIds ?? []).includes(ctx.user.id)).length },
+        // 영수증 읽기(receiptOcr.js — 관리자가 서비스를 정했을 때만).
+        receiptOcr: receiptOcrEnabled(),
       });
     }),
   );
@@ -1251,6 +1377,20 @@ export function createGroupwareRouter(io) {
         settlesId = source.id;
       }
 
+      // 법인카드 청구 — 지출 결재가 내 카드 사용 건들(cardTransactionIds)을 가리키면 금액이 그 합계와 같아야 하고, 그때의 사용 건(가맹점·
+      // 시각·금액·영수증)을 payload.cardTransactions에 적는다. 넣을 때 같은 트랜잭션에서 사용 건을 잠그고 다시 확인해 잇는다(아래 afterInsert).
+      let cardClaim = null;
+      if (body.kind === 'expense' && Array.isArray(body.cardTransactionIds) && body.cardTransactionIds.length > 0) {
+        const ids = body.cardTransactionIds.filter(isUuid);
+        if (ids.length !== body.cardTransactionIds.length) return fail(res, { error: '카드 사용 건을 찾을 수 없습니다.', status: 404 });
+        const txs = (await Promise.all(ids.map((id) => findTransaction(id)))).filter(Boolean);
+        const cardsById = new Map((await listCards(ctx.scopeKey)).map((c) => [c.id, c]));
+        const checked = checkClaim({ ids, txs, cardsById, userId: ctx.user.id, scopeKey: ctx.scopeKey, amount: payload.amount });
+        if (checked.error) return fail(res, checked);
+        payload.cardTransactions = checked.snapshot;
+        cardClaim = { ids, cardsById };
+      }
+
       // 연장근무 신청 — 범위가 주 52시간을 지키게 했으면(결재를 받게·막기) 그 주를 넘기게 되는 신청은 받지 않는다(workPolicy.js).
       if (body.kind === 'overtime' && ctx.options.overtimeGuard !== 'warn') {
         const weekStart = weekStartOf(payload.workDate);
@@ -1320,23 +1460,45 @@ export function createGroupwareRouter(io) {
       });
       if (line.error) return fail(res, line);
 
-      const doc = await insertApprovalDocument({
-        numberOf: (year, seq) => docNumberOf(body.kind, year, seq),
-        doc: {
-          scopeKey: ctx.scopeKey,
-          teamId: ctx.teamId,
-          kind: body.kind,
-          authorId: ctx.user.id,
-          authorName: ctx.user.name ?? ctx.user.username,
-          title: text.title,
-          body: text.body,
-          payload,
-          attachments: files.attachments.length ? files.attachments : null,
-          settlesId,
-        },
-        approvers: line.line.map(({ userId, role, stage }) => ({ id: userId, name: candidates.get(userId).name, role, stage })),
-        ccIds: line.ccIds,
-      });
+      let doc;
+      try {
+        doc = await insertApprovalDocument({
+          numberOf: (year, seq) => docNumberOf(body.kind, year, seq),
+          doc: {
+            scopeKey: ctx.scopeKey,
+            teamId: ctx.teamId,
+            kind: body.kind,
+            authorId: ctx.user.id,
+            authorName: ctx.user.name ?? ctx.user.username,
+            title: text.title,
+            body: text.body,
+            payload,
+            attachments: files.attachments.length ? files.attachments : null,
+            settlesId,
+          },
+          approvers: line.line.map(({ userId, role, stage }) => ({ id: userId, name: candidates.get(userId).name, role, stage })),
+          ccIds: line.ccIds,
+          afterInsert: cardClaim
+            ? async (tx, row) => {
+                const locked = await lockTransactionsForClaim(tx, cardClaim.ids);
+                const again = checkClaim({
+                  ids: cardClaim.ids,
+                  txs: locked,
+                  cardsById: cardClaim.cardsById,
+                  userId: ctx.user.id,
+                  scopeKey: ctx.scopeKey,
+                  amount: payload.amount,
+                });
+                if (again.error) throw new ClaimConflict(again);
+                await attachTransactionsToExpense(tx, cardClaim.ids, { docId: row.id, userId: ctx.user.id });
+              }
+            : null,
+        });
+      } catch (err) {
+        if (err instanceof ClaimConflict) return fail(res, err.outcome);
+        throw err;
+      }
+      if (cardClaim) io.to(`user:${ctx.user.id}`).emit('groupware:changed', { cards: true, scopeKey: ctx.scopeKey });
       const found = await findApprovalDocument(doc.id);
       await announce(io, {
         ...found,
@@ -2036,96 +2198,6 @@ export function createGroupwareRouter(io) {
     return periodSummary(records, period, { holidays: HOLIDAY_DATES });
   }
 
-  /** [from]~[to]에 걸친 탄력·선택근무 기간들의 근로시간(기간 전체를 읽는다). */
-  async function periodsOf(ctx, userId, schedule, from, to) {
-    const periods = schedule?.periodType ? periodsOverlapping(schedule, from, to) : [];
-    if (!periods.length) return [];
-    const records = await listAttendanceInRange({
-      scopeKey: ctx.scopeKey,
-      from: periods[0].start,
-      to: addDaysKey(periods[periods.length - 1].end, -1),
-      userId,
-    });
-    return periods.map((p) => periodSummary(records, p, { holidays: HOLIDAY_DATES }));
-  }
-
-  /**
-   * 한 사람의 [from]~[to] 가산 수당(참고용) — 통상시급이 없으면 null. 탄력·선택근무는 날마다의 연장 대신 이 기간 안에 끝나는 정산 기간의
-   * 연장을 센다(정산 기간이 끝난 달에).
-   */
-  async function allowanceFor(ctx, userId, schedule, records, from, to, wage = undefined) {
-    const hourlyWage = wage === undefined ? ((await findWorkWage(ctx.scopeKey, userId))?.hourlyWage ?? null) : wage;
-    if (!hourlyWage) return null;
-    let overtimeMinutes = null;
-    if (schedule?.periodType) {
-      const ending = (await periodsOf(ctx, userId, schedule, from, to)).filter((p) => addDaysKey(p.end, -1) >= from && addDaysKey(p.end, -1) <= to);
-      overtimeMinutes = ending.reduce((s, p) => s + p.overtimeMinutes, 0);
-    }
-    return allowanceOf({ records, wage: hourlyWage, rates: ctx.options.payRates, holidays: HOLIDAY_DATES, overtimeMinutes });
-  }
-
-  /** 구성원별 한 달 근태 요약(관리자). */
-  async function monthSummaries(ctx, month) {
-    const days = monthDays(month);
-    const from = days[0];
-    const to = days[days.length - 1];
-    const members = (await listGroupwareMembers({ scope: ctx.scope, teamId: ctx.teamId })).filter((m) => !m.suspendedAt);
-    const memberIds = members.map((m) => m.id);
-    const [records, leaves, trips, overtime, wages, schedules] = await Promise.all([
-      listAttendanceInRange({ scopeKey: ctx.scopeKey, from, to }),
-      listApprovedLeaves({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
-      listApprovedTrips({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
-      listApprovedOvertime({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
-      listWorkWages(ctx.scopeKey),
-      listWorkSchedules(ctx.scopeKey),
-    ]);
-    const hoursOf = await hoursByUser(ctx);
-    const today = localDateKey(new Date());
-    const wageOf = new Map(wages.map((w) => [w.userId, w.hourlyWage]));
-    const scheduleOf = new Map(schedules.map((s) => [s.userId, s]));
-    // 가산 수당(통상시급을 정한 사람만 — 탄력·선택근무는 정산 기간을 따로 읽는다).
-    const allowances = new Map();
-    for (const m of members) {
-      if (!wageOf.has(m.id)) continue;
-      const mine = records.filter((r) => r.userId === m.id);
-      allowances.set(m.id, await allowanceFor(ctx, m.id, scheduleOf.get(m.id) ?? null, mine, from, to, wageOf.get(m.id)));
-    }
-    return members
-      .map((m) => {
-        const leaveByDate = new Map();
-        for (const l of leaves.filter((x) => x.authorId === m.id)) leaveDaysOf(l, leaveByDate);
-        const mine = records.filter((r) => r.userId === m.id);
-        const tripDates = new Set();
-        for (const t of trips.filter((x) => x.authorId === m.id)) tripDaysOf(t, tripDates);
-        const overtimeByDate = overtimeByDateOf(overtime.filter((x) => x.authorId === m.id));
-        return {
-          userId: m.id,
-          name: m.name,
-          username: m.username,
-          records: mine,
-          leaveByDate,
-          hours: hoursOf(m.id),
-          allowance: allowances.get(m.id) ?? null,
-          summary: {
-            ...summarizeMonth({
-              monthKey: month,
-              records: mine,
-              leaveByDate,
-              tripDates,
-              overtimeByDate,
-              holidays: HOLIDAY_DATES,
-              workStart: hoursOf(m.id).workStart,
-              workEnd: hoursOf(m.id).workEnd,
-              checkLate: hoursOf(m.id).checkLate,
-              checkEarly: hoursOf(m.id).checkEarly,
-              today,
-            }),
-            ...monthBreakdown(mine, { holidays: HOLIDAY_DATES }),
-          },
-        };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-  }
 
   router.get(
     '/groupware/attendance/summary',

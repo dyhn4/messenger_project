@@ -52,7 +52,7 @@ Future<void> leaveNoticePdf(
       employeeName: employeeName,
       scopeLabel: scopeLabel,
     );
-    final folder = await _downloadFolder();
+    final folder = await pdfDownloadFolder();
     if (folder.isEmpty && !kIsWeb) {
       // 받을 폴더를 모르면(환경 변수가 없는 기기 등) 공유·저장 창으로 넘긴다 — 저장을 막지 않는다.
       await Printing.sharePdf(bytes: bytes, filename: '$name.pdf');
@@ -87,7 +87,7 @@ Future<Uint8List> buildLeaveNoticePdf({
   PdfPageFormat format = PdfPageFormat.a4,
   pw.Font? font,
 }) async {
-  final base = font ?? await _koreanFont();
+  final base = font ?? await koreanPdfFont();
   final theme = pw.ThemeData.withFont(base: base, bold: base);
   final grey = PdfColor.fromInt(0xFF757575);
   final line = PdfColor.fromInt(0xFFBDBDBD);
@@ -281,9 +281,9 @@ Future<Uint8List> buildLeaveNoticePdf({
 
 // ── 도움 ─────────────────────────────────────────────────────────────────
 
-/// 한글 글꼴 — approval_print.dart와 같은 파일(옛한글까지 든 나눔바른고딕), 한 번만 읽어 둔다.
+/// 한글 글꼴 — approval_print.dart와 같은 파일(옛한글까지 든 나눔바른고딕), 한 번만 읽어 둔다(급여명세서 PDF도 쓴다).
 pw.Font? _font;
-Future<pw.Font> _koreanFont() async => _font ??= pw.Font.ttf(
+Future<pw.Font> koreanPdfFont() async => _font ??= pw.Font.ttf(
   await rootBundle.load('assets/fonts/NanumBarunGothic-YetHangul.ttf'),
 );
 
@@ -305,9 +305,9 @@ String _noticeFileName(LeavePromotion notice, String employeeName) {
   );
 }
 
-/// 받은 파일을 둘 폴더 — 환경설정의 다운로드 폴더(AppSettings.downloadFolder와 같은 규칙: 휴대폰은 정해진 폴더, 데스크톱은 저장한 폴더
+/// 받은 파일을 둘 폴더(급여명세서 PDF — payslip_view.dart도 쓴다) — 환경설정의 다운로드 폴더(AppSettings.downloadFolder와 같은 규칙: 휴대폰은 정해진 폴더, 데스크톱은 저장한 폴더
 /// 아니면 사용자 폴더의 Downloads). 이 함수는 [Session] 없이 불리므로(서명이 정해져 있다) 설정 값을 직접 읽는다.
-Future<String> _downloadFolder() async {
+Future<String> pdfDownloadFolder() async {
   if (AppPlatform.isAndroid || AppPlatform.isIOS) return mobileDownloadFolder();
   if (kIsWeb) return '';
   try {

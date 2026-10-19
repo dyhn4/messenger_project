@@ -892,6 +892,18 @@ class GroupwareContext {
   final int weeklyLimitMinutes;
   final int weeklyWarnMinutes;
 
+  /// 급여명세서(server/src/payroll.js) — 서버가 지원하는지(마이그레이션 0137 뒤)와 내가 급여를 다룰 수 있는지(관리자·급여 담당자).
+  final bool payrollAvailable;
+  final bool payrollCanManage;
+
+  /// 법인카드(corporateCards.js) — 서버가 지원하는지, 이 범위 카드 수와 내가 쓰는 카드 수.
+  final bool cardsAvailable;
+  final int cardsTotal;
+  final int cardsMine;
+
+  /// 영수증 읽기(receiptOcr.js — 관리자가 서비스를 정했을 때만).
+  final bool receiptOcr;
+
   const GroupwareContext({
     required this.scope,
     required this.scopeSetting,
@@ -915,6 +927,12 @@ class GroupwareContext {
     this.myWorkEnd,
     this.weeklyLimitMinutes = 52 * 60,
     this.weeklyWarnMinutes = 48 * 60,
+    this.payrollAvailable = false,
+    this.payrollCanManage = false,
+    this.cardsAvailable = false,
+    this.cardsTotal = 0,
+    this.cardsMine = 0,
+    this.receiptOcr = false,
   });
 
   /// 신청할 수 있는(켜진) 휴가 종류.
@@ -955,6 +973,12 @@ class GroupwareContext {
           (json['weeklyLimitMinutes'] as num?)?.toInt() ?? 52 * 60,
       weeklyWarnMinutes:
           (json['weeklyWarnMinutes'] as num?)?.toInt() ?? 48 * 60,
+      payrollAvailable: json['payroll'] is Map,
+      payrollCanManage: (json['payroll'] as Map?)?['canManage'] == true,
+      cardsAvailable: json['cards'] is Map,
+      cardsTotal: ((json['cards'] as Map?)?['total'] as num?)?.toInt() ?? 0,
+      cardsMine: ((json['cards'] as Map?)?['mine'] as num?)?.toInt() ?? 0,
+      receiptOcr: json['receiptOcr'] == true,
     );
   }
 

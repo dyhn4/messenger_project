@@ -108,6 +108,8 @@ import { createGroupwareResourcesRouter, startBookingReminderJob } from './group
 import { createRoomDisplayRouter } from './roomDisplay.js';
 import { createGroupwareSurveysRouter } from './groupwareSurveys.js';
 import { createGroupwareReportsRouter } from './groupwareReports.js';
+import { createPayrollRouter } from './payroll.js';
+import { createCardFeedRouter, createCorporateCardsRouter } from './corporateCards.js';
 import { createDriveRouter } from './drive.js';
 import { createWikiRouter, wikiDocs } from './wiki.js';
 import { createWebmailRouter, startMailCheckJob } from './webmail.js';
@@ -181,6 +183,8 @@ app.use('/auth', createSsoRouter({ io }));
 // 하드웨어 보안 키·패스키(WebAuthn — 웹 앱 주소의 페이지에서 등록·로그인·둘째 단계, webauthn.js).
 app.use('/auth', createWebauthnRouter());
 // 공개 API(개인 API 토큰·OAuth 토큰·봇 토큰 — publicApi.js) — 앱 토큰(requireAuth)이 아니라 API 토큰으로 열어서 아래 /api 묶음보다 먼저 건다.
+// 법인카드 연동(ttc_ 연동 키 — corporateCards.js) — 공개 API의 토큰 확인보다 먼저.
+app.use('/api/v1/corporate-cards', createCardFeedRouter(io));
 app.use('/api/v1', createPublicApiRouter(io));
 // OAuth 앱 — 승인 페이지(/oauth/authorize)·결과 묻기·토큰 받기는 로그인 없이(oauth.js — 사람은 앱에서 코드를 넣어 승인한다).
 app.use(createOAuthPublicRouter());
@@ -206,6 +210,9 @@ app.use('/api', requireAuth, createGroupwareResourcesRouter(io));
 // 그룹웨어 설문(여러 문항)과 업무일지(일일·주간 업무보고 — 상위자가 읽고 댓글).
 app.use('/api', requireAuth, createGroupwareSurveysRouter(io));
 app.use('/api', requireAuth, createGroupwareReportsRouter(io));
+// 급여명세서(payroll.js)·법인카드와 영수증 읽기(corporateCards.js).
+app.use('/api', requireAuth, createPayrollRouter(io));
+app.use('/api', requireAuth, createCorporateCardsRouter(io));
 // 팀 공유 드라이브 — 폴더·파일 판·휴지통(drive.js).
 app.use('/api', requireAuth, createDriveRouter(io));
 // 팀 위키 — 페이지 나무·판·휴지통(wiki.js). 동시 편집은 소켓(wiki:* — socket.js가 registerWikiSocket을 붙인다).

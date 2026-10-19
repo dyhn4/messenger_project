@@ -37,6 +37,18 @@ export const AUDIT = {
   groupwareCancel: 'groupware.cancel',
   // 결재 양식 만들기·바꾸기·지우기, 기본 양식 켜고 끄기(groupware.js /groupware/forms).
   groupwareForm: 'groupware.form',
+  // 급여명세서(payroll.js) — 급여 설정, 대장 보내기·되돌리기·지우기, 보낸 명세서 정정, 급여대장 엑셀 내려받기(금액은 남기지 않는다).
+  payrollSettings: 'payroll.settings',
+  payrollPublish: 'payroll.publish',
+  payrollUnpublish: 'payroll.unpublish',
+  payrollDelete: 'payroll.delete',
+  payrollCorrect: 'payroll.correct',
+  payrollExport: 'payroll.export',
+  // 법인카드(corporateCards.js) — 카드 등록·바꾸기·지우기, 이용내역 가져오기, 사용 건 제외, 연동 키 만들기·지우기.
+  cardManage: 'card.manage',
+  cardImport: 'card.import',
+  cardExclude: 'card.exclude',
+  cardFeedKey: 'card.feedKey',
   // 토픽 삭제(rooms.js DELETE /rooms/:id) — 메시지·파일이 전부 사라지는 되돌릴 수 없는 일이라 남긴다.
   topicDelete: 'topic.delete',
   // 그룹채팅 → 토픽 전환(rooms.js POST /rooms/:id/convert-to-topic) — 되돌릴 수 없는 일이라 남긴다.

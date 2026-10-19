@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import '../../models/groupware.dart';
+import '../../models/groupware_finance.dart';
 import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
@@ -1251,24 +1252,51 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
 /// 예산)를 보이고, 금액은 예산(구매 품목 합계·출장 예상 경비 — [settleBudgetOf], 없으면 빈 칸)으로, 내용은 "○○ 정산"으로 미리
 /// 채운다. 금액 아래에는 예산과의 차이를 바로바로 보여 주고, 올릴 때 `settlesId`를 함께 보내 서버가 두 결재를 잇는다(서버가
 /// 내 결재·승인됨·살아 있는 정산 없음을 다시 확인한다 — settlementRules.js checkSettlement).
+///
+/// [cardTransactions]를 주면 그 **법인카드 사용 건들을 청구**하는 지출이다(지출 탭의 "내 법인카드") — 금액은 사용 건 합계로 고정, 쓴 날은
+/// 가장 늦은 사용 날, 분류는 사용 건에 정한 분류로 채우고, 사용 건마다 붙인 영수증은 결재에 함께 적힌다(서버가 금액·내 것·미정산을 다시
+/// 확인하고 같은 트랜잭션에서 잇는다 — cardRules.js checkClaim). 영수증 읽기가 켜져 있으면([GroupwareContext.receiptOcr]) 영수증을 붙일 때
+/// 가맹점·날짜·금액을 읽어 비어 있는 칸만 채운다(사람이 고친 칸은 건드리지 않는다).
 Future<ApprovalDocument?> showExpenseRequestDialog(
   BuildContext context, {
   required GroupwareApi api,
   required GroupwareContext ctx,
   required Session session,
   ApprovalDocument? settles,
+  List<CardTransaction>? cardTransactions,
 }) {
   final budget = settles == null ? null : settleBudgetOf(settles);
+  final card = cardTransactions ?? const <CardTransaction>[];
+  final cardTotal = card.fold<int>(0, (s, t) => s + t.amount);
   final amount = TextEditingController(
-    text: budget != null && budget > 0 ? '$budget' : null,
+    text: card.isNotEmpty
+        ? '$cardTotal'
+        : budget != null && budget > 0
+        ? '$budget'
+        : null,
   );
   final title = TextEditingController();
-  var category = ctx.expenseCategories.isNotEmpty
-      ? ctx.expenseCategories.first
-      : tr('기타');
-  var spentOn = ctx.today;
+  final cardCategory = card
+      .map((t) => t.category)
+      .firstWhere(
+        (c) => c != null && ctx.expenseCategories.contains(c),
+        orElse: () => null,
+      );
+  var category =
+      cardCategory ??
+      (ctx.expenseCategories.isNotEmpty
+          ? ctx.expenseCategories.first
+          : tr('기타'));
+  var spentOn = card.isEmpty
+      ? ctx.today
+      : card.map((t) => t.usedOn).reduce((a, b) => a.compareTo(b) >= 0 ? a : b);
   final receipts = <({String url, String name, int size, String? mimeType})>[];
   var uploading = false;
+  // 영수증 읽기 — 읽은 값과, 사람이 직접 고친 칸(읽은 값으로 덮지 않는다).
+  ReceiptScanResult? scan;
+  var scanning = false;
+  var categoryTouched = cardCategory != null;
+  var dateTouched = card.isNotEmpty;
   return showDialog<ApprovalDocument>(
     context: context,
     builder: (dialogContext) => _DisposeWithRoute(
@@ -1285,12 +1313,18 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
         lineAmountOf: () => expenseAmountOf(amount.text),
         lineAmountChanges: amount,
         bodyLabel: tr('내용(어디에 무엇을)'),
-        initialBody: settles == null
+        initialBody: card.isNotEmpty
+            ? cardClaimBody(card)
+            : settles == null
             ? null
             : tr('{title} 정산', {'title': settles.title}),
         fields: (setState) => [
           if (settles != null) ...[
             _SettlesBanner(source: settles, budget: budget),
+            const SizedBox(height: 12),
+          ],
+          if (card.isNotEmpty) ...[
+            _CardClaimBanner(items: card),
             const SizedBox(height: 12),
           ],
           TextField(
@@ -1306,8 +1340,10 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
             key: const ValueKey('expense-amount'),
             controller: amount,
             keyboardType: TextInputType.number,
+            // 법인카드 청구는 사용 건 합계 그대로(서버도 같아야 받는다).
+            readOnly: card.isNotEmpty,
             decoration: InputDecoration(
-              labelText: tr('금액(원)'),
+              labelText: card.isNotEmpty ? tr('금액(원) — 카드 사용 합계') : tr('금액(원)'),
               border: OutlineInputBorder(),
               suffixText: tr('원'),
             ),
@@ -1348,7 +1384,10 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
                     for (final c in ctx.expenseCategories)
                       DropdownMenuItem(value: c, child: Text(c)),
                   ],
-                  onChanged: (v) => setState(() => category = v ?? category),
+                  onChanged: (v) => setState(() {
+                    category = v ?? category;
+                    categoryTouched = true;
+                  }),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1356,7 +1395,10 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
                 label: tr('쓴 날'),
                 value: spentOn,
                 lastDate: DateTime.now(),
-                onChanged: (v) => setState(() => spentOn = v),
+                onChanged: (v) => setState(() {
+                  spentOn = v;
+                  dateTouched = true;
+                }),
               ),
             ],
           ),
@@ -1409,6 +1451,58 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
                                 mimeType: up.mimeType,
                               )),
                             );
+                            // 영수증 읽기 — 법인카드 청구가 아니고 아직 읽은 것이 없을 때, 사진·PDF 하나를.
+                            final readable =
+                                (up.mimeType ?? '').startsWith('image/') ||
+                                (up.mimeType ?? '').contains('pdf');
+                            if (ctx.receiptOcr &&
+                                card.isEmpty &&
+                                scan == null &&
+                                readable) {
+                              setState(() => scanning = true);
+                              try {
+                                final result = await api.scanReceipt(
+                                  fileUrl: up.url,
+                                  fileName: up.fileName,
+                                  mimeType: up.mimeType,
+                                );
+                                setState(() {
+                                  scan = result;
+                                  final r = result.receipt;
+                                  if (!result.empty) {
+                                    if (expenseAmountOf(amount.text) == null &&
+                                        r.total != null &&
+                                        r.total! > 0) {
+                                      amount.text = '${r.total}';
+                                    }
+                                    if (!dateTouched &&
+                                        r.date != null &&
+                                        r.date!.compareTo(ctx.today) <= 0) {
+                                      spentOn = r.date!;
+                                    }
+                                    if (!categoryTouched &&
+                                        result.category != null) {
+                                      category = result.category!;
+                                    }
+                                    if (title.text.trim().isEmpty &&
+                                        r.merchant != null) {
+                                      title.text = tr('{merchant} 지출', {
+                                        'merchant': r.merchant,
+                                      });
+                                    }
+                                  }
+                                });
+                              } catch (e) {
+                                if (dialogContext.mounted) {
+                                  showAppToast(
+                                    dialogContext,
+                                    tr('영수증을 읽지 못했습니다: {e}', {'e': e}),
+                                  );
+                                }
+                              } finally {
+                                setState(() => scanning = false);
+                              }
+                            }
                           }
                         } catch (e) {
                           if (dialogContext.mounted) {
@@ -1424,11 +1518,41 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
               ),
             ],
           ),
+          if (card.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                tr('사용 건마다 붙인 영수증 {n}장이 결재에 함께 적힙니다. 더 낼 서류만 위에 첨부하세요.', {
+                  'n': card.fold<int>(0, (s, t) => s + t.receipts.length),
+                }),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(dialogContext).hintColor,
+                ),
+              ),
+            ),
+          if (scanning)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(tr('영수증을 읽는 중…'), style: const TextStyle(fontSize: 12)),
+                ],
+              ),
+            )
+          else if (scan != null)
+            _ReceiptScanBanner(scan: scan!),
         ],
         validate: () {
           final value = int.tryParse(amount.text.replaceAll(',', '').trim());
           if (value == null || value <= 0) return tr('금액을 원 단위 숫자로 넣으세요.');
-          if (uploading) return tr('영수증을 올리는 중입니다. 잠시 뒤 다시 누르세요.');
+          if (uploading || scanning) return tr('영수증을 올리는 중입니다. 잠시 뒤 다시 누르세요.');
           return null;
         },
         submit:
@@ -1445,6 +1569,9 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
                 'spentOn': spentOn,
                 // 정산 대상(승인된 구매 요청·출장 신청) — 서버가 확인하고 payload.settles로 적는다.
                 'settlesId': ?settles?.id,
+                // 법인카드 사용 건 — 서버가 합계·내 것·미정산을 다시 확인하고 payload.cardTransactions로 적는다.
+                if (card.isNotEmpty)
+                  'cardTransactionIds': [for (final t in card) t.id],
                 'attachments': [
                   for (final r in receipts)
                     {
@@ -1537,6 +1664,108 @@ class _SettlesBanner extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 법인카드 청구 지출의 처음 내용 — "법인카드 사용 3건: 스타벅스(거래처 미팅), 택시, …".
+String cardClaimBody(List<CardTransaction> items) =>
+    tr('법인카드 사용 {n}건: {list}', {
+      'n': items.length,
+      'list': [
+        for (final t in items)
+          t.memo == null ? t.merchant : '${t.merchant}(${t.memo})',
+      ].join(', '),
+    });
+
+/// 법인카드 청구 지출 창 맨 위의 띠 — 청구하는 사용 건들(날짜·가맹점·금액·영수증 수).
+class _CardClaimBanner extends StatelessWidget {
+  final List<CardTransaction> items;
+  const _CardClaimBanner({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      key: const ValueKey('expense-card-banner'),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.credit_card,
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                tr('법인카드 사용 {n}건 청구', {'n': items.length}),
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          for (final t in items)
+            Text(
+              [
+                '${t.usedAt.month}/${t.usedAt.day}',
+                t.merchant,
+                signedWonText(t.amount),
+                if (t.receipts.isEmpty)
+                  tr('영수증 없음')
+                else
+                  tr('영수증 {n}장', {'n': t.receipts.length}),
+              ].join(' · '),
+              style: TextStyle(fontSize: 12, color: theme.hintColor),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 영수증을 읽은 결과 띠 — "읽은 값 — 확인하세요", 맞을 법한 법인카드 사용 건이 있으면 그쪽으로 청구하라는 안내.
+class _ReceiptScanBanner extends StatelessWidget {
+  final ReceiptScanResult scan;
+  const _ReceiptScanBanner({required this.scan});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final match = scan.matches.isEmpty ? null : scan.matches.first.transaction;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        key: const ValueKey('expense-receipt-scan'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            scan.empty
+                ? tr('영수증에서 읽은 것이 없습니다 — 금액·날짜를 직접 넣으세요.')
+                : tr('영수증에서 읽음: {summary} — 비어 있던 칸을 채웠으니 확인하세요.', {
+                    'summary': scan.receipt.summary,
+                  }),
+            style: TextStyle(fontSize: 12, color: theme.hintColor),
+          ),
+          if (match != null)
+            Text(
+              tr(
+                '법인카드 사용 건({merchant} {won})과 맞습니다 — 법인카드로 쓴 것이면 지출 탭의 "내 법인카드"에서 청구하세요.',
+                {
+                  'merchant': match.merchant,
+                  'won': signedWonText(match.amount),
+                },
+              ),
+              style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+            ),
         ],
       ),
     );

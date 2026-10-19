@@ -3793,3 +3793,167 @@ export const callRecordings = pgTable(
   },
   (t) => [index('call_recordings_room_idx').on(t.roomId, t.startedAt), index('call_recordings_status_idx').on(t.status)],
 );
+
+/**
+ * 급여 설정(payroll.js) — 그룹웨어 범위마다. 급여 담당자(그룹웨어 관리자 말고도 급여를 다룰 사람), 새 명세서의 항목 틀, 4대보험 요율(참고용 공제
+ * 어림 — payrollRules.js DEFAULT_INSURANCE에 덧씀), 사번(사람을 특정하는 값 — 근로기준법 시행령 제27조의2).
+ */
+export const payrollSettings = pgTable('payroll_settings', {
+  scopeKey: text('scope_key').primaryKey(),
+  staffIds: jsonb('staff_ids').notNull().default([]),
+  // { earnings: [{ name, taxFree? }], deductions: [{ name }] } — null이면 기본 항목.
+  itemTemplate: jsonb('item_template'),
+  // { pension, health, longTermCare, employment, pensionMin, pensionMax, localTax } 중 바꾼 것.
+  insurance: jsonb('insurance'),
+  // { userId: '사번' }
+  employeeNos: jsonb('employee_nos').notNull().default({}),
+  // 명세서 머리에 적을 회사 이름(비우면 팀 이름).
+  companyName: text('company_name'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * 급여 대장 하나(한 달 정기 급여·상여 등) — 'draft'(작성 중 — 받는 사람에게 안 보임) → 'published'(보냄 — 받는 사람마다 푸시). 보낸 뒤 고치면
+ * 명세서마다 정정(payslips.revision·history)으로 남는다.
+ */
+export const payrollRuns = pgTable(
+  'payroll_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    payMonth: text('pay_month').notNull(),
+    payDate: date('pay_date', { mode: 'string' }).notNull(),
+    // 모두에게 보일 안내 글(예: "10월분 연장근로수당은 11월에 정산").
+    note: text('note'),
+    status: text('status').notNull().default('draft'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdByName: text('created_by_name').notNull(),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    publishedByName: text('published_by_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('payroll_runs_scope_month_idx').on(t.scopeKey, t.payMonth)],
+);
+
+/**
+ * 급여명세서 — 대장마다 사람마다 하나. [data]는 암호화한 JSON(crypto.js — { earnings, deductions, work, memo })이라 DB만 열어서는 급여를 볼 수
+ * 없다. 보낸 뒤 고치면 이전 내용을 [history](암호화한 JSON 목록 — { revision, data, correctedAt, correctedByName, reason })에 남기고 revision을
+ * 올린다. [viewedAt]은 받는 사람이 처음 연 시각(교부 확인).
+ */
+export const payslips = pgTable(
+  'payslips',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => payrollRuns.id, { onDelete: 'cascade' }),
+    scopeKey: text('scope_key').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // 만들 때의 이름·사번·부서·직책(명세서에 적힌 그대로 남게).
+    userName: text('user_name').notNull(),
+    employeeNo: text('employee_no'),
+    department: text('department'),
+    position: text('position'),
+    data: text('data').notNull(),
+    revision: integer('revision').notNull().default(1),
+    history: text('history'),
+    correctedAt: timestamp('corrected_at', { withTimezone: true }),
+    viewedAt: timestamp('viewed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('payslips_run_user_uq').on(t.runId, t.userId), index('payslips_user_idx').on(t.userId, t.scopeKey)],
+);
+
+/**
+ * 법인카드(corporateCards.js·cardRules.js) — 그룹웨어 범위마다. 카드 번호는 끝 4자리만. [holderIds]는 그 카드를 쓰는 사람들(한 명이면 그 카드의
+ * 사용 건이 저절로 그 사람 것, 여럿이면 쓴 사람이 "내가 씀"으로 가져간다).
+ */
+export const corporateCards = pgTable(
+  'corporate_cards',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    issuer: text('issuer').notNull().default('기타'),
+    last4: text('last4').notNull(),
+    holderIds: jsonb('holder_ids').notNull().default([]),
+    monthlyLimit: bigint('monthly_limit', { mode: 'number' }),
+    memo: text('memo'),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('corporate_cards_scope_idx').on(t.scopeKey)],
+);
+
+/**
+ * 법인카드 사용 건 — 카드사 이용내역(엑셀·CSV 가져오기)·연동(API)·관리자가 직접 넣은 것. [dedupeKey](cardRules.js txDedupeKey)로 같은 건은 한 번만.
+ * 쓴 사람이 영수증·용도를 붙여 지출 결재로 청구하면 [expenseDocId]가 그 결재를 가리키고, 상태는 그 결재의 상태로 정해진다(결재 중·승인 —
+ * 반려·회수되면 다시 청구할 수 있다). 승인 취소(음수)와 짝인 건·개인 사용 등은 [excludedAt]으로 뺀다.
+ */
+export const cardTransactions = pgTable(
+  'card_transactions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    cardId: uuid('card_id')
+      .notNull()
+      .references(() => corporateCards.id, { onDelete: 'cascade' }),
+    usedAt: timestamp('used_at', { withTimezone: true }).notNull(),
+    // 한국 날짜(달·기간으로 찾기).
+    usedOn: date('used_on', { mode: 'string' }).notNull(),
+    merchant: text('merchant').notNull(),
+    merchantBizNo: text('merchant_biz_no'),
+    amount: integer('amount').notNull(),
+    approvalNo: text('approval_no'),
+    // 'excel' | 'api' | 'manual'
+    source: text('source').notNull(),
+    dedupeKey: text('dedupe_key').notNull(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    memo: text('memo'),
+    category: text('category'),
+    // [{ fileUrl(미서명 /uploads/…), fileName, fileSize, mimeType }]
+    receipts: jsonb('receipts').notNull().default([]),
+    // 마지막으로 읽은 영수증(receiptOcrRules.js normalizeReceipt) — 사용 건과 어긋나는지 보여 준다.
+    receiptScan: jsonb('receipt_scan'),
+    expenseDocId: uuid('expense_doc_id').references(() => approvalDocuments.id, { onDelete: 'set null' }),
+    excludedAt: timestamp('excluded_at', { withTimezone: true }),
+    excludedReason: text('excluded_reason'),
+    excludedByName: text('excluded_by_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('card_transactions_card_dedupe_uq').on(t.cardId, t.dedupeKey),
+    index('card_transactions_scope_used_idx').on(t.scopeKey, t.usedOn),
+    index('card_transactions_user_idx').on(t.userId),
+    index('card_transactions_expense_idx').on(t.expenseDocId),
+  ],
+);
+
+/** 법인카드 연동 키(범위마다 하나 — ttc_…, lookupHash로만 둔다). 카드사 연동 서비스·회계 프로그램이 사용 건을 밀어 넣는 데 쓴다. */
+export const cardFeedKeys = pgTable('card_feed_keys', {
+  scopeKey: text('scope_key').primaryKey(),
+  tokenHash: text('token_hash').notNull(),
+  tokenHint: text('token_hint').notNull(),
+  teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+  createdByName: text('created_by_name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+});
+
+/** 영수증 읽기 결과(receiptOcr.js) — 올린 파일 이름마다 한 번만 바깥 서비스로 읽는다. */
+export const receiptScans = pgTable('receipt_scans', {
+  fileName: text('file_name').primaryKey(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  engine: text('engine').notNull(),
+  result: jsonb('result').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

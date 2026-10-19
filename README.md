@@ -1188,7 +1188,7 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 
 ## 그룹웨어(전자결재·연차·출퇴근)
 
-메뉴 → 툴 → **그룹웨어**(타일의 숫자는 내가 지금 결재할 문서 수). 탭: **결재 · 휴가 · 지출 · 출퇴근 · 예약 · 관리**(관리자만). 서버는
+메뉴 → 툴 → **그룹웨어**(타일의 숫자는 내가 지금 결재할 문서 수). 탭: **결재 · 휴가 · 지출 · 급여 · 출퇴근 · 예약 · 설문 · 업무일지 · 관리**(관리자만). 서버는
 `server/src/groupware.js`, 규칙은 `approvalRules.js`(결재)·`approvalForms.js`(결재 양식)·`approvalFormDefaults.js`(양식의 기본 결재선)·`settlementRules.js`(정산 연결)·`annualLeave.js`(휴가·법정 연차)·
 `attendanceRules.js`(출퇴근)·`workRules.js`(근로시간·유연근무·출근 알림)·`leavePromotion.js`(연차 촉진)·`groupwareOptions.js`(휴가 종류·지출 분류)·
 `resourceRules.js`(회의실·자원 예약)·`groupwareScope.js`(범위), 근태·휴가 관리 API는 `groupwareWork.js`, 회의실·자원 예약 API는 `groupwareResources.js`, 앱은
@@ -1460,6 +1460,82 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 - **받는 사람**은 조직도의 상위자(가까운 두 명 — 따로 정한 상위자, 없으면 부서장)와 결재·근태 관리자입니다. 처음 올리면 상위자에게 그룹웨어 푸시가 가고, 상위자가 열면 내 화면에 **확인: 이름**이 붙습니다.
 - **팀 현황**은 나를 상위자로 둔 사람(관리자는 범위 모두)의 그 기간 보고를 **안 쓴 사람이 위로** 보여 주고(제출 N/M), 누르면 본문을 읽고 **댓글**을 답니다(1000자 — 쓴 사람과 다른 상위자에게 푸시). 보고는 쓴 사람만 지웁니다.
 
+#### 급여명세서
+
+서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0137`)가 돌아야 **급여** 탭이 보입니다. 서버는 `server/src/payroll.js`, 규칙은 `payrollRules.js`, 앱은
+`client/lib/screens/groupware/payroll_tab.dart`(내 명세서·대장 목록)·`payroll_admin.dart`(대장·명세서 고치기·급여 설정)·`payslip_view.dart`(명세서·PDF).
+
+근로기준법 제48조 제2항(시행령 제27조의2)의 **임금명세서** — 성명·사번 등 사람을 특정하는 값, 지급일, 임금 총액, 기본급·수당·상여 등 항목별 금액,
+출근일수·시간에 따라 달라지는 항목의 **계산 방법**(연장·야간·휴일근로 시간 수 포함), 공제 항목별 금액과 총액 — 을 전자 문서로 줍니다.
+
+- **급여 담당자** — 그룹웨어 관리자와, 관리자가 **급여 설정**에서 정한 담당자(이 범위의 정회원 이상, 20명까지 — 담당자는 담당자를 바꾸지 못함)가 급여 탭의
+  **급여 관리**를 봅니다. 담당자는 모든 명세서를 봅니다.
+- **급여 대장** — **새 급여 대장**으로 귀속 월·지급일·제목(비우면 "2026년 10월 급여")·모두에게 보일 안내 글을 정하고, **지난 대장에서 이어받기**(사람마다 항목·금액
+  그대로 — 기본은 가장 최근 대장) 또는 **항목 틀로 새로**(금액 0) 만듭니다. 이 범위의 정회원 이상이 모두 들어가고 대장에서 빼거나 더합니다(2000명까지).
+  항목 틀의 기본은 지급 — 기본급·식대(비과세)·연장/야간/휴일근로수당, 공제 — 국민연금·건강보험·장기요양보험·고용보험·소득세·지방소득세이고 급여 설정에서 바꿉니다.
+- **명세서 고치기** — 지급·공제 항목(각 30개, 이름 30자, 금액 ±10억 원 — 환수 같은 음수도), 항목마다 **계산 방법**(100자)과 비과세 표시, 근무 내역(출근일수·
+  근로·연장·야간·휴일 시간), 사번, 받는 사람에게 보일 메모(1000자). 창 아래에 지급 − 공제 = 실수령을 바로 보여 줍니다.
+- **근태에서 채우기**(작성 중인 대장) — 대장의 달 근태 요약(출근일·실근로·실제 연장·야간·휴일 — 탄력·선택근무는 정산 기간이 끝난 달에 기간의 연장)을 근무
+  내역에 넣고, 관리 탭에서 **통상시급**을 정한 사람은 연장·야간·휴일근로수당 금액과 계산 방법("10시간 × 12,000원 × 1.5")을 가산 수당 참고 계산과 같은 규칙
+  (가산율·상시 5명 미만 — [근태 후속](#근태-후속--휴게위치시간-연차회계연도수당))으로 바꿉니다. 다른 항목은 그대로입니다.
+- **4대보험 공제 계산**(참고용) — 과세 대상(지급 총액 − 비과세)으로 국민연금(기준소득월액 — 천 원 미만 버림·상하한)·건강보험·장기요양(건강보험료 × 비율)·
+  고용보험을 10원 미만 버리고 넣고, 소득세가 있으면 지방소득세(소득세 × 10%)를 넣습니다. 기본 요율은 2026년(국민연금 4.75%, 건강보험 3.595%, 장기요양 =
+  건강보험료 × 13.14%(소득의 0.9448%의 절반), 고용보험 0.9%, 국민연금 하한 40만·상한 637만 원 — 2025.7~2026.6)이고 급여 설정에서 고칩니다(해마다 고시로 바뀜).
+  **소득세(간이세액표 — 부양가족 수)는 계산하지 않습니다** — 직접 넣거나 엑셀로 가져옵니다. 나이(60세 이상 국민연금)·감면·두루누리·정산 고지액은 반영하지 않습니다.
+- **엑셀** — **엑셀로 내보내기**는 "급여대장" 시트(아이디·사번·이름·부서·직책·근무일수·근로/연장/야간/휴일 시간·지급 항목(비과세는 `(비과세)`)·
+  `[계산] 항목`·`[공제] 항목`·지급 합계·공제 합계·실수령액·메모·확인 시각)와 "안내" 시트(감사 로그에 남음). **엑셀 가져오기**(작성 중인 대장 — .xlsx·CSV,
+  5MB)는 같은 모양이나 회사 급여 프로그램이 낸 표를 읽습니다 — 첫 줄에 아이디·사번·이름 중 하나의 열이 있어야 하고, 사람은 아이디 → 사번 → 이름(같은 이름이
+  없을 때)으로 찾습니다. `[공제]`·`공제:`가 붙은 열은 공제(국민연금·소득세·사우회비 같은 흔한 공제 이름은 표시 없어도 공제), 그 밖은 지급입니다. **값이 있는
+  칸만** 덧쓰고 빈 칸·파일에 없는 항목은 그대로 두며, 대장에 없던 구성원은 더합니다. 먼저 미리 보기(고칠·더할 사람, 찾지 못한 줄, 오류)를 보이고 오류가 있으면
+  바꾸지 않습니다.
+- **보내기** — 받는 사람마다 그룹웨어 푸시("2026년 10월 급여 명세서가 도착했습니다" — **알림에 금액은 넣지 않음**)가 가고 급여 탭에서 봅니다. 동시에 두 번 눌러도
+  한 번만 보냅니다. **보내기 취소**(사유 — 감사 로그)는 받는 사람 화면에서 거두고 다시 작성 중으로 만듭니다. 작성 중인 대장만 지웁니다.
+- **받는 사람** — 급여 탭 → **내 급여명세서**(해마다 지급·실수령 합계). 금액은 처음엔 가려 두고(옆 사람이 화면을 볼 수 있어서) 눈 단추로 보입니다(앱을 켜 둔 동안
+  기억). 명세서를 처음 열면 **확인 시각**이 남고(교부 확인 — 담당자 화면에 ✓), **인쇄·PDF로 저장**(A4 — 회사 이름·성명·사번·부서·직책·지급일·귀속 월, 지급·공제
+  표와 계산 방법, 합계, 근무 내역, 메모·안내, 정정 기록, "근로기준법 제48조 제2항에 따른 임금명세서")을 합니다.
+- **정정** — 보낸 뒤 고치면 **정정 사유가 꼭** 있어야 하고, 이전 내용이 정정 기록(판 번호·언제·누가·왜·정정 전 합계)에 남으며, 확인 시각을 비우고 받는 사람에게
+  "정정" 알림을 보냅니다(감사 로그 `payroll.correct`). 받는 사람은 정정 사유와 정정 전 실수령액을, 담당자는 정정 전 항목까지 봅니다.
+- **보안** — 명세서 내용(항목·금액·근무 내역·메모·정정 기록)은 DB에 **암호화해** 둡니다(`.env`의 `DB_ENCRYPTION_KEY` — AES-256-GCM, 이메일과 같은 방식). DB만
+  열어서는 급여를 볼 수 없지만 서버 PC와 `.env`를 모두 가진 사람까지 막는 것은 아닙니다. 감사 로그에는 금액을 남기지 않습니다. 모바일 화면 캡처 방지는 없습니다.
+- **사번·회사 이름** — 급여 설정의 사번(사람마다)은 새로 만드는 명세서부터, 회사 이름(비우면 팀 이름)은 명세서 머리에 들어갑니다. 부서·직책은 명세서를 만들 때의
+  조직도 값입니다.
+
+#### 법인카드·영수증 읽기
+
+서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0137`)가 돌아야 켜집니다. 서버는 `server/src/corporateCards.js`(카드·사용 건·연동 키·영수증 읽기 API)·
+`cardRules.js`(이용내역 읽기·중복·취소 짝·청구 확인 — 순수 규칙)·`sheetRows.js`(엑셀·CSV·HTML 표 읽기)·`receiptOcr.js`·`receiptOcrRules.js`, 지출 결재는
+`groupware.js`(`cardTransactionIds`). 앱은 `client/lib/screens/groupware/corporate_cards.dart`(내 법인카드·사용 건 창)·`card_admin.dart`(법인카드 관리).
+
+- **카드 등록**(결재·근태 관리자 — 지출 탭의 **법인카드 관리**) — 이름·카드사·**끝 4자리**(전체 번호·유효기간은 받지 않음)·쓰는 사람(이 범위의 정회원 이상 —
+  한 명이면 사용 건이 저절로 그 사람 것, 여럿이면 쓴 사람이 **내가 씀**으로 가져감)·월 한도(그 달 사용 막대)·메모·켜기. 범위마다 200장, 같은 카드사·끝 4자리는 하나.
+- **이용내역 가져오기** — 카드사 홈페이지에서 받은 엑셀(.xlsx)·CSV(UTF-8·EUC-KR)·"엑셀"로 이름만 바꾼 HTML 표(.xls)를 그대로 올립니다(옛 이진 .xls는 .xlsx나 CSV로
+  다시 저장하라고 알림, 10MB·3000건). 앞 20줄에서 머리 줄(이용일자·승인일시·거래일…, 가맹점명·이용가맹점…, 승인금액·이용금액…(할부의 청구금액은 맨 나중),
+  승인번호, 카드번호, 취소여부·구분, 사업자번호)을 찾고, 합계 줄은 건너뛰고, "취소"가 적힌 줄은 음수로 읽습니다. 카드는 하나를 고르거나 카드번호 열의 끝 4자리로
+  찾습니다. 먼저 미리 보기(읽은·새·이미 있는 건, 기간·합계, 못 읽은 줄). **같은 건은 한 번만**(승인번호 + 금액, 없으면 사용 시각(분) + 금액 + 가맹점 —
+  다시 올려도 된다), **승인 취소는 원래 건과 짝을 지어**(같은 승인번호, 없으면 같은 가맹점 30일 안) 둘 다 "승인 취소"로 뺍니다(청구 중인 건은 건드리지 않음).
+- **사용 건 관리** — 달마다(◀ ▶) 카드별·상태별(미정산·결재 중·정산됨·제외 — 합계와 함께) 보고, 누르면 사용자 지정(여럿이 쓰는 카드)·**제외**(사유 — 개인 사용·
+  중복·카드사 오류, 감사 로그)·제외 풀기·지우기(청구하지 않은 건). **직접 넣기**, **미정산 알림**(그 달에 청구하지 않은 사람에게 푸시 — 범위마다 한 시간에 한 번),
+  **엑셀**(한 달 — 카드·사용 일시·가맹점·사업자번호·금액·승인번호·사용자·용도·분류·상태·지출 결재·영수증 수·제외 사유).
+- **내 법인카드**(카드를 쓰는 사람 — 지출 탭 맨 위) — 청구하지 않은 내 사용 건(기간 없이). 사용 건마다 **영수증**(5장 — 내가 올린 파일)·용도·분류를 붙이고, 여러 건을
+  골라 **지출 결재로 청구**하면 지출 결재 창이 금액(합계 — 고칠 수 없음)·쓴 날(가장 늦은 사용 날)·분류(사용 건에 정한 분류)·내용("법인카드 사용 n건: …")을 채워
+  엽니다. 사용 건의 영수증은 결재에 함께 적히고(`payload.cardTransactions` — 그때의 카드·시각·가맹점·금액·승인번호·용도·영수증), 결재 상세·인쇄에 사용 건 표와
+  영수증이 보입니다. 서버는 금액 = 합계, 내 것(정해진 사람 — 정해지지 않았으면 그 카드의 사용자), 미정산, 승인 건(양수)만 받고(한 결재에 50건), **문서를 넣는
+  트랜잭션에서 사용 건 행을 잠그고 다시 확인**해 두 결재가 같은 건을 청구하지 못하게 합니다(여럿이 쓰는 카드에서 먼저 가져간 사람이 있으면 409). 상태는 그
+  결재를 따릅니다 — 결재 중이면 "결재 중", 승인되면 "정산됨", 반려·회수·취소되면 다시 미정산. **모든 사용 내역**은 달마다 내 것을 봅니다.
+- **연동 키**(공개 API) — 관리 화면의 열쇠 단추로 범위마다 하나 만듭니다(`ttc_…` — 만들 때 한 번만 보이고, 새로 만들면 예전 키는 바로 못 씀, 서버에는 해시만).
+  카드사 이용내역 연동 서비스(스크래핑·오픈뱅킹 중계 — 카드사 계정 연결은 그 서비스와 계약)·회계 프로그램·스크립트가
+  `POST /api/v1/corporate-cards/transactions`(`Authorization: Bearer ttc_…`, `{ transactions: [{ cardLast4 | cardId, usedAt, merchant, amount, approvalNo?,
+  merchantBizNo?, issuer?, canceled? }] }`)로 밀어 넣습니다. 300건·100KB까지, 키마다 1분에 30번, 같은 건은 건너뛰고, 시간대가 없는 시각은 한국 시각, 끝 4자리가 같은
+  카드가 여럿이면 `issuer`나 `cardId`. 응답은 `{ inserted, duplicates, errors: [{ index, error }] }`.
+- **영수증 읽기**(관리자가 `server/.env`에 `RECEIPT_OCR_ENGINE`을 정했을 때만 — [환경 변수 설정](#환경-변수-설정)) — 지출 결재 창에서 영수증 사진·PDF를 붙이면
+  가맹점·날짜·금액·승인번호를 읽어 **비어 있는 칸만** 채우고(금액·쓴 날·분류 짐작·제목 "가맹점 지출" — 직접 고친 칸은 덮지 않음) "영수증에서 읽음 — 확인하세요"를
+  보이며, 맞는 내 법인카드 사용 건이 있으면 그쪽으로 청구하라고 알립니다. 사용 건에 영수증을 붙이면 바로 읽어 **금액·날짜(하루 넘게)·카드가 다르면** "영수증과
+  다릅니다"를 표시하고, **영수증으로 사용 건 찾기**(승인번호 > 금액·날짜·카드·가맹점 점수 순)로 사진 한 장에서 맞는 사용 건을 찾아 붙입니다. 사진은 보내기 전에 긴
+  변 2000px JPEG로 줄이고(EXIF 방향대로), 같은 파일은 한 번만 읽어 결과를 둡니다(`receipt_scans`). 한 사람이 한 시간에 60장, HEIC 사진은 못 읽고(카메라를 JPG로),
+  PDF는 claude·clova만. 서비스: **claude**(구조화 출력 — 읽기라 effort low, 안전 거절이면 서버 쪽 대체 모델 `fallbacks: 'default'`), **openai**(OpenAI 호환 비전
+  모델 — 사내에 띄운 vLLM·Ollama의 Qwen2.5-VL 등이면 영수증이 회사 밖으로 나가지 않음), **clova**(네이버 CLOVA OCR 영수증 특화 모델 V2). 읽은 값은 틀릴 수 있어
+  늘 사람이 확인합니다.
+
 > 범위 설정을 바꾸면 이전 범위의 결재·근태·연차 조정 기록은 그 범위 키로 남아 새 범위에서는 보이지 않습니다(지우지는 않음 — 되돌리면 다시 보임).
 > 자원·예약도 범위마다 따로입니다.
 
@@ -1627,7 +1703,9 @@ DKIM 서명), `mailFormatHtml.js`(서식 있는 메일 쓰기), 앱은 `client/l
 
 ### 2순위 — 그룹웨어로서 부족한 것
 
-- **범위가 큰 것** — 급여명세서, 법인카드 연동·영수증 OCR.
+- **급여·법인카드 후속(남은 것)** — 급여명세서와 법인카드·영수증 읽기는 들어갔습니다(위 "급여명세서"·"법인카드·영수증 읽기"). 남은 것: 소득세 간이세액표 자동
+  계산(부양가족 수)·연말정산·퇴직금·4대보험 취득/상실 신고, 급여 이체 파일(은행 대량 이체), 카드사·홈택스 직접 연동(CODEF 같은 중계 서비스와 계약 — 지금은 엑셀
+  가져오기와 연동 키), 현금영수증·전자세금계산서 조회, 회계 프로그램(더존 등) 전표 내보내기, 명세서 열 때 비밀번호 다시 묻기, 영수증 사진 원본 보관 기간 관리.
 
 ### 3순위 — 메신저 편의
 
@@ -1790,6 +1868,10 @@ messenger_project/
 │  │  ├─ approvalSeal.js          결재 전자서명(문서 지문·칸 서명·검증) — 순수 규칙 / approvalSealKeys.js(서버 서명 키)
 │  │  ├─ groupware.js             그룹웨어 API(전자결재·연차·출퇴근) — approvalRules.js·annualLeave.js(법정 연차)·attendanceRules.js·
 │  │  │                           groupwareScope.js(팀마다/회사 전체)·approvalForms.js(결재 양식)가 순수 규칙(단위 테스트 대상)
+│  │  ├─ payroll.js               급여명세서 API(급여 대장·명세서 — 내용은 암호화) — payrollRules.js(항목·합계·4대보험 어림·엑셀 급여대장)가 순수 규칙
+│  │  ├─ corporateCards.js        법인카드 API(카드·사용 건·이용내역 가져오기·연동 키·영수증 읽기) — cardRules.js(이용내역 읽기·중복·취소 짝·청구 확인)가 순수 규칙
+│  │  ├─ receiptOcr.js            영수증 읽기(Claude·OpenAI 호환 비전·CLOVA OCR) — receiptOcrRules.js(응답 맞추기·분류 짐작·사용 건 맞추기)가 순수 규칙
+│  │  ├─ sheetRows.js             올린 표 파일(엑셀·CSV·HTML 표) → 줄들(급여대장·카드 이용내역 가져오기)
 │  │  ├─ backup.js                서버 전체 백업(DB를 모름 — 만들기·보관·외부 위치·첨부파일 미러·예약) — backupService.js가 DB·pg_dump와 잇고,
 │  │  │                           backupCrypto.js(백업 암호 암호화)·backupRestore.js(복원 조각)
 │  │  ├─ audit.js                 감사 로그 기록 헬퍼(실패해도 원래 동작을 막지 않음)
@@ -2042,6 +2124,7 @@ notepad .env
 | `ACME_STAGING` | 선택 | `1`이면 Let's Encrypt 시험용(staging) 인증서를 받습니다 — 브라우저가 믿지 않지만 정식 발급 한도를 쓰지 않고 포트포워딩을 확인할 수 있습니다. 확인되면 지우고(또는 `0`) 서버를 다시 시작합니다. |
 | `UPLOADS_DIR` | 선택 | 첨부파일 저장 위치. 기본은 `server/uploads/`. UNC 경로나 매핑된 네트워크 드라이브도 가능(예: `\\192.168.0.10\share\messenger_uploads`, `Z:\messenger_uploads`) — 항상 접근 가능해야 업로드/다운로드가 됩니다. |
 | `TODO_FOLDER_HOSTS` | 선택 | 할 일의 폴더 경로(파일 다운로드·업로드)에 더 허용할 사내 서버 이름, 쉼표로 구분(예: `nas.corp.local,corp.example.com`). 점이 든 이름(AD/DFS 도메인)이나 한글 이름의 사내 NAS를 쓸 때만 넣습니다 — 정식 표기의 사설 IP(`\\192.168.0.5\…`)와 점 없는 영문·숫자 컴퓨터 이름(`\\NAS\…`)은 없어도 됩니다. IP 주소는 이 목록과 상관없이 사내망 대역만 받으므로 공인 IP나 `@`가 든 이름은 넣어도 무시합니다(서버가 켜질 때 콘솔에 경고). 바꾼 뒤에는 서버를 다시 시작합니다([주요 기능](#주요-기능)의 "할 일") |
+| `RECEIPT_OCR_ENGINE`·`RECEIPT_OCR_URL`·`RECEIPT_OCR_API_KEY`·`RECEIPT_OCR_MODEL` | 선택 | 영수증 읽기([법인카드·영수증 읽기](#법인카드영수증-읽기)) — 영수증 사진을 바깥 서비스로 보내므로 `RECEIPT_OCR_ENGINE`을 정했을 때만 켜진다. `claude`(키는 `RECEIPT_OCR_API_KEY`, 없으면 `ANTHROPIC_API_KEY`, 모델 기본 `claude-opus-5-5`) · `openai`(OpenAI 호환 `/chat/completions` 비전 모델 — `RECEIPT_OCR_URL`은 `…/v1`까지, `RECEIPT_OCR_MODEL`은 꼭) · `clova`(CLOVA OCR 영수증 특화 — `RECEIPT_OCR_URL`은 영수증 호출 주소, `RECEIPT_OCR_API_KEY`는 Secret Key). |
 | `NODE_ENV` | 선택 | `production`이면 Express 기본 오류 처리기까지 간 오류의 응답에 스택 추적(서버 파일 경로) 대신 짧은 상태 문구만 보냅니다(자세한 내용은 그대로 로그에). 설치형 서버(서비스·"서버 콘솔로 실행" — 기존 설치는 새 설치 프로그램을 한 번 다시 실행한 뒤부터)와 pm2(`ecosystem.config.cjs`)는 이미 `production`으로 돌고, 개발용 `npm start`는 그대로입니다 |
 
 **여러 서버 인스턴스를 두거나 DB를 옮길 계획이 있다면** `JWT_SECRET`/`DB_ENCRYPTION_KEY`를 반드시
@@ -2808,6 +2891,26 @@ Xcode로 직접 빌드할 때는 Signing & Capabilities에서 팀을 고르면 �
 | GET | `/api/groupware/work-reports/mine` · `/api/groupware/work-reports/team` | 내 보고 `?kind&from&to`(주간에 일일 불러오기) / **팀 현황** `?kind&periodStart` → `{ canReview, submittedCount, roster: [{ userId, name, report(readByMe) }] }`(안 쓴 사람이 위) |
 | GET / DELETE | `/api/groupware/work-reports/:id` | 보고 하나(댓글·읽은 사람 — 검토자가 열면 읽음을 남김) / 지우기(쓴 사람만) |
 | POST | `/api/groupware/work-reports/:id/comments` | 업무일지 댓글 `{ text(1000자) }` — 쓴 사람·상위자에게 푸시 |
+| GET | `/api/groupware/payroll/mine` | **내 급여명세서**(보낸 대장의 내 것 — 합계만) `{ canManage, items: [{ …합계, run }] }` |
+| GET | `/api/groupware/payroll/payslips/:id` | 명세서 하나(항목·근무 내역·메모·정정 기록·`run`·`companyName`) — 받는 사람(보낸 대장)이나 급여 담당자. 받는 사람이 처음 열면 `viewedAt` |
+| GET / PUT | `/api/groupware/payroll/settings` | 급여 설정(담당자) `{ staffIds?(그룹웨어 관리자만), companyName?, template?, insurance?, employeeNos? }` |
+| GET / POST | `/api/groupware/payroll/runs` | 급여 대장 목록(명세서·확인 수) / 만들기 `{ payMonth, payDate, title?, note?, copyFromRunId?, userIds? }` |
+| GET / PATCH / DELETE | `/api/groupware/payroll/runs/:id` | 대장과 명세서들(항목까지·합계·더할 수 있는 사람) / 제목·지급일·안내 / 지우기(작성 중만) |
+| POST | `/api/groupware/payroll/runs/:id/publish` · `/unpublish` | 보내기(받는 사람마다 푸시 — 금액 없음) / 보내기 취소 `{ reason }` |
+| POST | `/api/groupware/payroll/runs/:id/payslips` | 사람 더하기 `{ userIds }`(작성 중만) |
+| POST | `/api/groupware/payroll/runs/:id/fill-attendance` · `/calc-deductions` | 근태에서 채우기 `{ updated, withAllowance }` / 4대보험 공제 어림 `{ userIds? }` → `{ updated }`(작성 중만) |
+| GET / POST | `/api/groupware/payroll/runs/:id/export` · `/import?dryRun=1` | 급여대장 엑셀 / 엑셀·CSV 가져오기(본문 그대로, 5MB) → `{ updated, added, unmatched, errors, columns, applied }` |
+| PUT / DELETE | `/api/groupware/payroll/payslips/:id` | 명세서 고치기 `{ earnings, deductions, work?, memo?, employeeNo?, reason? }`(보낸 뒤에는 `reason` 꼭 — 정정 기록·푸시) / 빼기(작성 중만) |
+| GET / POST | `/api/groupware/cards` | 카드들 `?month=`(관리자는 모두 — 그 달 사용 합계, 사용자는 내 카드) / 등록(관리자) `{ name, issuer, last4, holderIds, monthlyLimit?, memo? }` |
+| PATCH / DELETE | `/api/groupware/cards/:id` | 카드 고치기·끄기 / 지우기(사용 건도 — 올린 결재에는 그때의 사용 건이 남음) |
+| GET / POST | `/api/groupware/card-transactions` | 사용 건 `?month=YYYY-MM\|open&cardId=&mine=1` → `{ items, totals }`(사용자는 늘 내 것) / 직접 넣기(관리자) |
+| POST | `/api/groupware/card-transactions/import?cardId=&dryRun=1` | 카드사 이용내역 가져오기(엑셀·CSV·HTML 표 — 본문 그대로, 10MB) → `{ read, fresh, duplicates, errors, inserted, paired }` |
+| PATCH / DELETE | `/api/groupware/card-transactions/:id` | 용도·분류·영수증·`mine`(내가 씀)·`userId`(관리자) / 지우기(관리자 — 청구 안 한 건) |
+| POST / DELETE | `/api/groupware/card-transactions/:id/exclude` | 제외 `{ reason }` / 제외 풀기(관리자) |
+| POST / GET | `/api/groupware/card-transactions/remind` · `/export?month=` | 미정산 알림(한 시간에 한 번) / 한 달 엑셀(관리자) |
+| GET / POST / DELETE | `/api/groupware/card-feed` | 연동 키 상태 / 새로 만들기(키는 이 응답에서 한 번만) / 지우기(관리자) |
+| POST | `/api/groupware/receipts/scan` | 영수증 읽기 `{ fileUrl }`(내가 올린 파일) 또는 `{ transactionId, receiptIndex }` → `{ receipt, empty, category, matches, transaction? }`(꺼져 있으면 503, 한 시간에 60장) |
+| POST | `/api/v1/corporate-cards/transactions` | 법인카드 연동(공개 — `Authorization: Bearer ttc_…`) `{ transactions: [...] }`(300건) → `{ inserted, duplicates, errors }` |
 | GET | `/api/drive` · `/api/drive/search` | **공유 드라이브** 폴더 내용 `?teamId&folderId=` → `{ folder, path, folders, files: [{ id, name, version, size, updatedByName, url }], canWrite, isManager, usageBytes }` / 이름 찾기 `?teamId&q=` |
 | POST / PATCH / DELETE | `/api/drive/folders` · `/api/drive/folders/:id` | 폴더 만들기 `{ teamId, name, parentId? }` / 이름 바꾸기·옮기기 `{ name?, parentId? }`(자기 아래로 못 옮김, 10단계) / 휴지통으로(만든 사람·팀 관리자) |
 | POST | `/api/drive/files` | 파일 넣기 `{ teamId, folderId?, file(올린 경로), fileName, mimeType?, note? }` — 같은 이름이면 409(`existingId`) |
@@ -3004,6 +3107,13 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `resource_bookings` | 자원 예약 — `scope_key`, `resource_id`(자원을 지우면 cascade), `user_id`·`user_name`(잡은 사람), `team_id`(잡은 팀 — 캘린더 새로고침 알림), `title`, `start_at`·`end_at`(같은 자원끼리 겹치지 않음 — 자원 행을 잠그고 검사해 넣음), `event_id`(캘린더 일정에 붙은 예약이면 그 일정 — 일정 하나에 여러 줄(자원마다), 일정을 지우면 cascade), `status`(`confirmed`\|`pending` 승인 대기), `series_id`(반복 예약 묶음), `reminded_at`(시작 전 알림). 인덱스 (`resource_id`, `start_at`)·(`scope_key`, `start_at`)·`event_id`·`series_id` |
 | `surveys` / `survey_responses` | 그룹웨어 설문 — `scope_key`, `questions`(jsonb), `anonymous`, `result_visibility`, `audience`·`target_ids`, `closes_at`·`closed_at`, `reminded_at`(독촉 1시간 제한) / 응답(`survey_id`, `user_id` PK, `answers` jsonb) |
 | `work_reports` / `work_report_comments` / `work_report_reads` | 업무일지 — (`scope_key`, `user_id`, `kind`, `period_start`) 유일, `done`·`plan`·`issues` / 댓글 / 검토자가 처음 읽은 시각 |
+| `payroll_settings` | 급여 설정 — `scope_key`마다 `staff_ids`(급여 담당자)·`item_template`(새 명세서 항목 틀)·`insurance`(4대보험 요율 중 바꾼 것)·`employee_nos`(사번)·`company_name` |
+| `payroll_runs` | 급여 대장 — `scope_key`·`pay_month`(YYYY-MM)·`pay_date`·`title`·`note`, `status`(`draft`\|`published`)·`published_at`·`published_by_name` |
+| `payslips` | 급여명세서 — (`run_id`, `user_id`) 유일, 만들 때의 `user_name`·`employee_no`·`department`·`position`, `data`(**암호화한** JSON — 항목·근무 내역·메모), `revision`·`history`(암호화한 정정 기록)·`corrected_at`, `viewed_at`(받는 사람이 처음 연 시각) |
+| `corporate_cards` | 법인카드 — `scope_key`·`name`·`issuer`·`last4`(끝 4자리만)·`holder_ids`·`monthly_limit`·`enabled` |
+| `card_transactions` | 법인카드 사용 건 — (`card_id`, `dedupe_key`) 유일, `used_at`·`used_on`(한국 날짜)·`merchant`·`merchant_biz_no`·`amount`(취소는 음수)·`approval_no`·`source`(`excel`\|`api`\|`manual`), `user_id`, `memo`·`category`·`receipts`·`receipt_scan`, `expense_doc_id`(청구한 지출 결재 — 상태는 그 결재를 따름), `excluded_at`·`excluded_reason` |
+| `card_feed_keys` | 법인카드 연동 키 — `scope_key`마다 하나, `token_hash`(lookupHash)·`token_hint`·`last_used_at` |
+| `receipt_scans` | 영수증 읽기 결과 — 올린 파일 이름(`file_name`)마다 `engine`·`result`(한 번만 바깥 서비스로) |
 | `drive_folders` / `drive_files` / `drive_file_versions` | 팀 공유 드라이브 — 폴더(`parent_id`, 휴지통 `deleted_at`) / 파일(지금 판 `version`·`file_path`·`size`·`mime_type`, 휴지통 `deleted_at`) / 판 기록(`file_id`, `version` 유일, 올린 사람·메모) |
 | `wiki_pages` / `wiki_page_versions` | 팀 위키 — 페이지(`parent_id`, `title`, 마크다운 `body`, `revision` = 적용한 연산 수, `position`, 휴지통 `deleted_at`) / 판(그때의 제목·본문·`revision`, 그 사이 고친 사람 `editor_names`) |
 | `leave_promotions` | 연차 사용 촉진 통지 — `scope_key`, `user_id`, 그 연차 기간(`period_start`·`period_end`), `stage`(1 \| 2), 보낼 때 남은 연차 `remaining_half_days`, `deadline`, `message`, 2차의 `designated_dates`, 받은 사람이 낸 `plan_dates`·`planned_at`, `sent_by_id`·`sent_by_name`·`sent_at`, `read_at`. 지우지 않음 |

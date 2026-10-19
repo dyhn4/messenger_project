@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../../models/groupware.dart';
+import '../../models/groupware_finance.dart';
 import '../../services/download_storage.dart';
 import '../../services/groupware_api.dart';
 import '../../services/session.dart';
@@ -275,6 +276,32 @@ approvalContentOf(ApprovalDocument doc, GroupwareContext ctx) {
       rows.add((tr('금액'), wonText((p['amount'] as num?)?.toInt() ?? 0)));
       rows.add((tr('분류'), '${p['category'] ?? ''}'));
       rows.add((tr('쓴 날'), '${p['spentOn'] ?? ''}'));
+      // 법인카드 청구 — 그때의 사용 건(카드·사용 일시·가맹점·승인번호·금액).
+      final card = ClaimedCardTransaction.listOf(p);
+      if (card.isNotEmpty) {
+        tables.add((
+          label: tr('법인카드 사용 내역'),
+          headers: [tr('카드'), tr('사용 일시'), tr('가맹점'), tr('승인번호'), tr('금액')],
+          rows: [
+            for (final t in card)
+              [
+                '${t.cardName} ${t.last4}',
+                t.usedAt == null ? '' : formatDateTime(t.usedAt!),
+                t.memo == null ? t.merchant : '${t.merchant} (${t.memo})',
+                t.approvalNo ?? '',
+                signedWonText(t.amount),
+              ],
+          ],
+          totals: [
+            '',
+            '',
+            '',
+            tr('합계'),
+            signedWonText(card.fold<int>(0, (s, t) => s + t.amount)),
+          ],
+          numericColumns: {4},
+        ));
+      }
     case ApprovalKind.attendance:
       rows.add((tr('날짜'), '${p['workDate'] ?? ''}'));
       rows.add((tr('출근'), '${p['clockIn'] ?? ''}'));

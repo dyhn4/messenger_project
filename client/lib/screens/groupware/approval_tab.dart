@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../../models/groupware.dart';
+import '../../models/groupware_finance.dart';
 import '../../services/download_storage.dart';
 import '../../services/groupware_api.dart';
 import '../../services/session.dart';
@@ -677,6 +678,73 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
     await _load();
   }
 
+  /// 지출 결재가 청구한 법인카드 사용 건들(없으면 빈 목록).
+  List<Widget> _cardRows(
+    BuildContext context,
+    List<ClaimedCardTransaction> items,
+  ) {
+    if (items.isEmpty) return const [];
+    final hint = Theme.of(context).hintColor;
+    return [
+      const SizedBox(height: 8),
+      Text(
+        tr('법인카드 사용 {n}건', {'n': items.length}),
+        key: const ValueKey('approval-card-transactions'),
+        style: Theme.of(context).textTheme.titleSmall,
+      ),
+      for (final t in items)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      t.memo == null ? t.merchant : '${t.merchant} — ${t.memo}',
+                    ),
+                  ),
+                  Text(signedWonText(t.amount)),
+                ],
+              ),
+              Text(
+                [
+                  if (t.usedAt != null) formatDateTime(t.usedAt!),
+                  '${t.cardName} (${t.issuer} ${t.last4})',
+                  if (t.approvalNo != null) tr('승인 {no}', {'no': t.approvalNo}),
+                ].join(' · '),
+                style: TextStyle(fontSize: 12, color: hint),
+              ),
+              if (t.receipts.isNotEmpty)
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    for (final r in t.receipts)
+                      ActionChip(
+                        avatar: const Icon(Icons.receipt_long, size: 16),
+                        label: Text(r.fileName ?? tr('영수증')),
+                        onPressed: () => _openAttachment(
+                          ApprovalAttachment(
+                            fileUrl: r.fileUrl,
+                            fileName: r.fileName,
+                            mimeType: r.mimeType,
+                          ),
+                        ),
+                      ),
+                  ],
+                )
+              else
+                Text(
+                  tr('영수증 없음'),
+                  style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+                ),
+            ],
+          ),
+        ),
+    ];
+  }
+
   Future<void> _openAttachment(ApprovalAttachment a) async {
     final url = a.fileUrl;
     if (url == null) return;
@@ -889,6 +957,8 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
           row(tr('쓴 날'), '${p['spentOn'] ?? ''}'),
           if (doc.settles case final settles?)
             ..._settlesRows(context, doc, settles, row),
+          // 법인카드 청구 — 그때의 사용 건과 사용 건마다 붙인 영수증.
+          ..._cardRows(context, ClaimedCardTransaction.listOf(p)),
         ],
         if (doc.kind.isForm) FormValuesView(doc: doc),
         if (kSettleKinds.contains(doc.kind)) ?_settlementRow(context, doc),

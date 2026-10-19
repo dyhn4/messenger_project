@@ -1271,6 +1271,35 @@ class ApiClient {
       ? '/api/org-tree/export'
       : '/api/org-tree/export?teamId=${Uri.encodeQueryComponent(teamId)}';
 
+  /// 파일 바이트를 본문 그대로 보낸다(엑셀·CSV 가져오기 — 급여대장·법인카드 이용내역). [path]에는 쿼리까지 담는다. 응답 JSON을
+  /// 돌려주고, 실패(4xx·5xx)면 ApiException — 단 [resultKey]를 담은 응답(줄마다의 오류가 든 미리 보기 결과)은 실패여도 그대로 돌려준다.
+  Future<Map<String, dynamic>> postBytes(
+    String path,
+    List<int> bytes, {
+    String contentType = 'application/octet-stream',
+    String? resultKey,
+  }) async {
+    final res = await _send(
+      () => _client.post(
+        _uri(path),
+        headers: {..._authHeaders, 'Content-Type': contentType},
+        body: bytes,
+      ),
+    );
+    final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+    if (res.statusCode < 400 && decoded is Map) {
+      return decoded.cast<String, dynamic>();
+    }
+    if (resultKey != null && decoded is Map && decoded.containsKey(resultKey)) {
+      return decoded.cast<String, dynamic>();
+    }
+    throw ApiException(
+      (decoded is Map ? decoded['error'] as String? : null) ??
+          tr('요청이 실패했습니다.'),
+      statusCode: res.statusCode,
+    );
+  }
+
   /// 조직도 엑셀 가져오기 — [dryRun]이면 바꾸지 않고 미리 보기만. 오류가 있어도(400) 결과로 돌려준다(줄마다의 오류).
   Future<OrgImportResult> importOrgTree(
     List<int> bytes, {

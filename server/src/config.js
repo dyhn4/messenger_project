@@ -134,3 +134,19 @@ export const CALL_SUMMARY_URL = (process.env.CALL_SUMMARY_URL || '').replace(/\/
 export const CALL_SUMMARY_API_KEY = process.env.CALL_SUMMARY_API_KEY || null;
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
 export const CALL_SUMMARY_MODEL = process.env.CALL_SUMMARY_MODEL || null;
+
+/**
+ * 영수증 읽기(receiptOcr.js — 지출 결재·법인카드의 영수증 사진에서 가맹점·날짜·금액·승인번호를 읽는다). 영수증 사진을 바깥 서비스로 보내므로
+ * **관리자가 RECEIPT_OCR_ENGINE을 정했을 때만** 켜진다(ANTHROPIC_API_KEY가 회의록용으로 있어도 저절로 켜지지 않는다).
+ *  - 'claude': Claude(비전 + 구조화 출력). 키는 RECEIPT_OCR_API_KEY, 없으면 ANTHROPIC_API_KEY. 모델은 RECEIPT_OCR_MODEL(기본 claude-opus-5-5).
+ *  - 'openai': OpenAI 호환 `/chat/completions`의 비전 모델(사내에 띄운 vLLM·Ollama의 Qwen2.5-VL 등 — 영수증을 회사 밖으로 내보내지 않으려면).
+ *    RECEIPT_OCR_URL은 그 앞까지의 주소(예: http://10.0.0.5:8000/v1), RECEIPT_OCR_MODEL은 꼭, 키는 필요하면.
+ *  - 'clova': 네이버 클라우드 CLOVA OCR의 영수증 특화 모델. RECEIPT_OCR_URL은 도메인의 영수증 호출 주소(APIGW Invoke URL — …/document/receipt),
+ *    RECEIPT_OCR_API_KEY는 Secret Key(X-OCR-SECRET).
+ */
+export const RECEIPT_OCR_ENGINE = ['claude', 'openai', 'clova'].includes(String(process.env.RECEIPT_OCR_ENGINE ?? '').trim().toLowerCase())
+  ? String(process.env.RECEIPT_OCR_ENGINE).trim().toLowerCase()
+  : null;
+export const RECEIPT_OCR_URL = (process.env.RECEIPT_OCR_URL || '').replace(/\/+$/, '') || null;
+export const RECEIPT_OCR_API_KEY = process.env.RECEIPT_OCR_API_KEY || null;
+export const RECEIPT_OCR_MODEL = process.env.RECEIPT_OCR_MODEL || null;

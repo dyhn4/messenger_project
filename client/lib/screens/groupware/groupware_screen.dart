@@ -11,6 +11,7 @@ import 'attendance_tab.dart';
 import 'expense_tab.dart';
 import 'groupware_admin_tab.dart';
 import 'leave_tab.dart';
+import 'payroll_tab.dart';
 import 'resource_tab.dart';
 import 'survey_tab.dart';
 import 'work_report_tab.dart';
@@ -24,7 +25,7 @@ Future<void> openGroupwareScreen(BuildContext context, Session session) {
 }
 
 /// 그룹웨어 — 전자결재(휴가·지출·근태 수정), 연차, 출퇴근(server/src/groupware.js), 회의실·자원 예약(groupwareResources.js).
-/// 탭: 결재 · 휴가 · 지출 · 출퇴근 · 예약 · 관리(관리자만).
+/// 탭: 결재 · 휴가 · 지출 · 급여 · 출퇴근 · 예약 · 설문 · 업무일지 · 관리(관리자만).
 ///
 /// 범위(팀마다 / 회사 전체)는 서버 설정을 따르고(관리자 콘솔 "운영 현황"), 화면은 지금 보고 있는 팀을 함께 보낸다
 /// (session.groupwareApi). 결재가 올라오거나 진행되면 소켓(groupware:changed)으로 알아서 다시 받는다.
@@ -136,6 +137,17 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
           session: widget.session,
         ),
       ),
+      // 급여명세서(payroll_tab.dart) — 서버가 지원할 때만(마이그레이션 0137 뒤).
+      if (ctx.payrollAvailable)
+        (
+          tr('급여'),
+          PayrollTab(
+            api: _api,
+            ctx: ctx,
+            changes: _changes,
+            session: widget.session,
+          ),
+        ),
       (
         tr('출퇴근'),
         AttendanceTab(

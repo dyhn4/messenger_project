@@ -121,6 +121,105 @@ Future<http.Response> _getBytes(Uri uri, DownloadTask? task) async {
   }
 }
 
+/// 첨부를 [folder]에 받아 저장하고 그 경로를 돌려준다 — **받는 대로 디스크에 쓴다**(download_storage.dart
+/// writeDownloadStream). 예전엔 내용을 메모리에 다 모은 뒤 저장해서 수백 MB짜리 파일은 휴대폰 메모리가 모자랄 수 있었다.
+/// 진행 표시·X로 멈추기·만료된 링크 다시 받기는 [fetchAttachmentBytes]와 같다(멈추면 받던 임시 파일은 지운다).
+///
+/// 비밀 대화 첨부([attachmentKey]가 있음)는 통째로 복호화해야 해서, 웹은 폴더가 없어서 예전처럼 메모리로 받아 저장한다.
+/// [reuseIdentical]은 [writeDownloadFile]과 같다(보려고 받는 경우 — 같은 파일이 있으면 그것).
+Future<String> downloadAttachmentToFolder({
+  required Session session,
+  required String url,
+  required String folder,
+  required String fileName,
+  String? attachmentKey,
+  String? attachmentNonce,
+  bool reuseIdentical = false,
+}) async {
+  if (kIsWeb || attachmentKey != null) {
+    final bytes = await fetchAttachmentBytes(
+      session: session,
+      url: url,
+      attachmentKey: attachmentKey,
+      attachmentNonce: attachmentNonce,
+    );
+    return writeDownloadFile(
+      folder: folder,
+      fileName: fileName,
+      bytes: bytes,
+      reuseIdentical: reuseIdentical,
+    );
+  }
+  final task = DownloadTask.current;
+  task?.throwIfCancelled();
+  try {
+    return await writeDownloadStream(
+      folder: folder,
+      fileName: fileName,
+      reuseIdentical: reuseIdentical,
+      write: (sink) => _streamInto(sink, session, Uri.parse(url), task),
+    );
+  } finally {
+    task?.fileFinished();
+  }
+}
+
+/// GET 응답을 조각조각 [sink]에 쓴다 — 받은 양을 [task]에 알리고, X로 멈추면 요청을 끊는다([DownloadCancelled]). 링크가
+/// 만료됐으면(401) 새 링크로 한 번 더. 실패면(400 이상) 아무것도 쓰지 않고 던진다.
+Future<void> _streamInto(
+  Sink<List<int>> sink,
+  Session session,
+  Uri uri,
+  DownloadTask? task,
+) async {
+  final client = http.Client();
+  try {
+    Future<http.StreamedResponse> get(Uri u) => client.send(
+      http.AbortableRequest('GET', u, abortTrigger: task?.whenCancelled),
+    );
+    var streamed = await get(uri);
+    final api = session.api;
+    if (streamed.statusCode == 401 && api != null) {
+      await streamed.stream.drain<void>();
+      try {
+        final fresh = await api.resignFileUrl(uri.path);
+        streamed = await get(Uri.parse(session.resolveUrl(fresh)));
+      } on DownloadCancelled {
+        rethrow;
+      } on http.RequestAbortedException {
+        rethrow;
+      } catch (_) {
+        // 새 링크를 못 받으면 아래에서 처음 응답(401) 그대로 실패로 처리한다.
+        throw Exception(
+          tr('다운로드에 실패했습니다. (HTTP {res.statusCode})', {'res.statusCode': 401}),
+        );
+      }
+    }
+    if (streamed.statusCode >= 400) {
+      await streamed.stream.drain<void>();
+      throw Exception(
+        tr('다운로드에 실패했습니다. (HTTP {res.statusCode})', {
+          'res.statusCode': streamed.statusCode,
+        }),
+      );
+    }
+    final total = streamed.contentLength;
+    var received = 0;
+    task?.reportBytes(0, total);
+    await for (final chunk in streamed.stream) {
+      task?.throwIfCancelled();
+      sink.add(chunk);
+      received += chunk.length;
+      task?.reportBytes(received, total);
+    }
+    task?.throwIfCancelled();
+  } on http.RequestAbortedException {
+    throw const DownloadCancelled();
+  } finally {
+    client.close();
+  }
+}
+
 /// 첨부 하나를 다운로드해서 저장한다. 환경설정에서 "저장 위치 안 물어보기"가 켜져 있으면
 /// 설정된 폴더에 바로 저장하고(안드로이드는 늘 Download/TangoTalk에 바로 — 같은 이름이 있으면
 /// 덮어쓰지 않고 번호를 붙인다), 꺼져 있으면 저장 위치를 물어본다. 저장 후 "다운로드 완료 시
@@ -136,6 +235,25 @@ Future<String?> saveAttachment({
   String? attachmentNonce,
   DownloadTask? task,
 }) async {
+  final settings = session.settings;
+  // 저장 위치를 묻지 않고 폴더에 바로 저장하면(휴대폰은 늘) 받는 대로 디스크에 쓴다 — 큰 파일을 메모리에 다 올리지 않게.
+  if (!kIsWeb && settings.savesWithoutAsking && attachmentKey == null) {
+    final savedPath = await trackDownload(
+      label: fileName,
+      task: task,
+      body: () => downloadAttachmentToFolder(
+        session: session,
+        url: url,
+        folder: settings.downloadFolder,
+        fileName: fileName,
+      ),
+    );
+    if (settings.openFolderAfterDownload) {
+      await settings.openFolderOf(savedPath);
+    }
+    return savedPath;
+  }
+
   // 받는 동안 진행이 보인다(여러 개 받기 안이면 그쪽에 이어 센다). 저장 창은 다 받은 뒤에 뜬다.
   final bytes = await trackDownload(
     label: fileName,
@@ -153,7 +271,6 @@ Future<String?> saveAttachment({
     return writeDownloadFile(folder: '', fileName: fileName, bytes: bytes);
   }
 
-  final settings = session.settings;
   String? savedPath;
   if (settings.savesWithoutAsking) {
     savedPath = await writeDownloadFile(
@@ -272,16 +389,14 @@ Future<({int count, String folder})?> saveAllAttachments({
     body: () async {
       var count = 0;
       for (final item in items) {
-        final bytes = await fetchAttachmentBytes(
+        // 받는 대로 디스크에(비밀 대화·웹은 downloadAttachmentToFolder가 예전처럼 메모리로).
+        await downloadAttachmentToFolder(
           session: session,
           url: item.url,
-          attachmentKey: attachmentKey,
-          attachmentNonce: attachmentNonce,
-        );
-        await writeDownloadFile(
           folder: folder,
           fileName: item.fileName,
-          bytes: bytes,
+          attachmentKey: attachmentKey,
+          attachmentNonce: attachmentNonce,
         );
         count++;
       }
@@ -1585,15 +1700,14 @@ class _DownloadableFileState extends State<DownloadableFile> {
         items: [(url: widget.url, size: null)],
       );
       if (!ok) return;
-      final bytes = await fetchAttachmentBytes(
-        session: widget.session,
-        url: widget.url,
-        attachmentKey: widget.attachmentKey,
-        attachmentNonce: widget.attachmentNonce,
-      );
-      if (!mounted) return;
-
       if (_isInAppViewable(widget.fileName)) {
+        final bytes = await fetchAttachmentBytes(
+          session: widget.session,
+          url: widget.url,
+          attachmentKey: widget.attachmentKey,
+          attachmentNonce: widget.attachmentNonce,
+        );
+        if (!mounted) return;
         final ext = widget.fileName.split('.').last.toLowerCase();
         // 뷰어는 늘 창 전체(루트 Navigator)에 — PC 할 일 패널 안 화면(중첩 Navigator)에서 열어도 패널 폭에 갇히지 않게.
         await Navigator.of(context, rootNavigator: true).push(
@@ -1620,14 +1734,18 @@ class _DownloadableFileState extends State<DownloadableFile> {
       // writeDownloadFile). 웹은 폴더 없이 새 탭으로 연다.
       final isSecret = widget.attachmentKey != null;
       final downloadFolder = widget.session.settings.downloadFolder;
-      final path = await writeDownloadFile(
+      final path = await downloadAttachmentToFolder(
+        session: widget.session,
+        url: widget.url,
         folder: !isSecret && downloadFolder.isNotEmpty
             ? downloadFolder
             : await downloadTempFolder(),
         fileName: widget.fileName,
-        bytes: bytes,
+        attachmentKey: widget.attachmentKey,
+        attachmentNonce: widget.attachmentNonce,
         reuseIdentical: true,
       );
+      if (!mounted) return;
       // 실행될 수 있는 형식은 열지 않고 폴더에서 보여 준다 — 그 까닭을 알린다.
       final notice = await openLocalFile(path);
       if (notice != null && mounted) {

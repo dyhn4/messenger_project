@@ -17,6 +17,7 @@ import 'api_client.dart' show ApiClient, ApiException, UploadCancelToken;
 import 'chat_draft_store.dart' show ChatDraft;
 import 'file_type_utils.dart';
 import 'image_thumbnail.dart';
+import 'photo_quality.dart';
 import 'memory_file.dart';
 import 'secret_chat_crypto.dart' as secret_crypto;
 import 'secret_key_store.dart' show SecretCachedTextInfo;
@@ -1486,12 +1487,21 @@ class RoomChatController extends ChangeNotifier {
     final image = isImage ?? looksLikeImagePath(file.name);
     // 원본을 메모리로 읽는 건 썸네일을 만들거나(이미지) 암호화할 때(비밀 대화)뿐 — 큰 일반
     // 파일은 읽지 않고 그대로 스트리밍해서 올린다(uploadAttachment는 비밀 대화에서만 바이트를 쓴다).
-    final bytes = image || room.isSecret
+    var upload = file;
+    var bytes = image || room.isSecret
         ? await file.readAsBytes()
         : Uint8List(0);
+    // 휴대폰 데이터면 사진을 일반 화질로(photo_quality.dart — 게시글 편집·다른 앱에서 공유).
+    if (image) {
+      final reduced = await photoForUpload(_session.settings, file, bytes);
+      if (reduced != null) {
+        upload = reduced.file;
+        bytes = reduced.bytes;
+      }
+    }
     final thumbBytes = image ? await generateThumbnail(bytes) : null;
     return uploadAttachment(
-      file,
+      upload,
       isImage: image,
       originalBytes: bytes,
       thumbBytes: thumbBytes,

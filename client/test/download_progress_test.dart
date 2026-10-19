@@ -310,6 +310,13 @@ void main() {
       chunks.add(List.filled(1024, 1));
       await Future<void>.delayed(const Duration(milliseconds: 100));
     });
+    // 받는 대로 디스크에 쓰므로(writeDownloadStream) 멈춘 뒤 임시 파일을 닫고 지우는 데 실제 시간이 몇 번 든다.
+    for (var i = 0; i < 20 && pill.evaluate().isNotEmpty; i++) {
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+    }
     await tester.pump();
     expect(pill, findsNothing);
     expect(find.text('다운로드를 취소했습니다.'), findsOneWidget);

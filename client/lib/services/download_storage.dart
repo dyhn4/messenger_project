@@ -111,6 +111,94 @@ Future<String> writeDownloadFile({
   }
 }
 
+/// [writeDownloadFile]과 같지만 내용을 메모리에 모으지 않고 [write]가 받는 대로 디스크에 쓴다 — 수백 MB짜리 첨부를 휴대폰
+/// 메모리에 다 올리지 않으려고(attachment_widgets.dart saveAttachmentToFolder). 같은 폴더의 임시 파일
+/// (`.tangotalk-….part` — 이름이 짧아 길이 제한에 걸리지 않는다)에 받은 뒤, 다 받으면 다듬은 이름(같은 이름이 있으면 번호)으로
+/// 옮긴다. [write]가 실패하거나 멈추면(X — DownloadCancelled) 임시 파일을 지우고 그 오류를 그대로 던진다. 이름 규칙·권한·
+/// "인터넷에서 받은 파일" 표시·미디어 스캔은 [writeDownloadFile]과 같다(웹은 쓰지 않는다 — 브라우저 다운로드).
+Future<String> writeDownloadStream({
+  required String folder,
+  required String fileName,
+  required Future<void> Function(IOSink sink) write,
+  bool reuseIdentical = false,
+  bool markAsDownloaded = true,
+}) async {
+  final name = savedFileName(fileName);
+  _pathInFolder(folder, name);
+  final shared = AppPlatform.isAndroid && !_isAppPrivateFolder(folder);
+  if (shared && !await _ensureAndroidWritePermission()) {
+    throw FileSystemException(tr('저장 권한이 없어 다운로드할 수 없습니다.'));
+  }
+  await Directory(folder).create(recursive: true);
+  final temp = File(
+    _pathInFolder(
+      folder,
+      '.tangotalk-${DateTime.now().microsecondsSinceEpoch}.part',
+    ),
+  );
+  final sink = temp.openWrite();
+  try {
+    await write(sink);
+    await sink.flush();
+    await sink.close();
+  } catch (_) {
+    await sink.close().catchError((_) {});
+    await temp.delete().catchError((_) => temp);
+    rethrow;
+  }
+  try {
+    String? path;
+    try {
+      path = await _moveNumbered(temp, folder, name, reuseIdentical);
+    } on FileSystemException catch (e) {
+      // 이름이 너무 길다고 거절당하면 바이트로 줄인 이름으로 한 번 더(writeDownloadFile과 같은 까닭).
+      if (!_isNameTooLong(e)) rethrow;
+      final inBytes = _savedFileName(fileName, utf16: false);
+      if (inBytes == name) rethrow;
+      path = await _moveNumbered(temp, folder, inBytes, reuseIdentical);
+    }
+    if (markAsDownloaded) await markFromInternet(path);
+    if (shared) unawaited(_scan(path));
+    return path;
+  } catch (_) {
+    await temp.delete().catchError((_) => temp);
+    rethrow;
+  }
+}
+
+/// 다 받은 임시 파일 [temp]를 [folder]의 [name]으로 옮긴다 — 같은 이름이 있으면 번호를 붙인다([_writeNumbered]와 같은 규칙).
+/// [reuseIdentical]이면 내용까지 같은 파일이 이미 있을 때 임시 파일을 지우고 그 파일을 돌려준다.
+Future<String> _moveNumbered(
+  File temp,
+  String folder,
+  String name,
+  bool reuseIdentical,
+) async {
+  final dot = name.lastIndexOf('.');
+  final base = dot > 0 ? name.substring(0, dot) : name;
+  final ext = dot > 0 ? name.substring(dot) : '';
+  FileSystemException? lastError;
+  for (var i = 0; i < 50; i++) {
+    final path = _pathInFolder(folder, i == 0 ? name : '$base ($i)$ext');
+    final existing = File(path);
+    if (existing.existsSync()) {
+      if (reuseIdentical && _sameFiles(existing, temp)) {
+        await temp.delete().catchError((_) => temp);
+        return path;
+      }
+      continue;
+    }
+    try {
+      await temp.rename(path);
+      return path;
+    } on FileSystemException catch (e) {
+      if (_isNameTooLong(e) || !AppPlatform.isAndroid) rethrow;
+      lastError = e; // 이 앱에 안 보이는 같은 이름의 파일(안드로이드) — 다음 번호로.
+    }
+  }
+  throw lastError ?? FileSystemException(tr('저장할 이름을 찾지 못했습니다.'), folder);
+}
+
 /// Windows가 이름이 너무 길다고 거절한 오류인지 — ERROR_FILENAME_EXCED_RANGE(206)는 SMB 서버(Samba
 /// 등)가 이름이 너무 길다고 답할 때(NT_STATUS_NAME_TOO_LONG), ERROR_INVALID_NAME(123)은 파일 시스템이
 /// 그 길이의 이름 칸을 받지 못한다고 답할 때(STATUS_OBJECT_NAME_INVALID) 난다. 이름을 UTF-16 칸으로
@@ -160,6 +248,28 @@ Future<String> _writeNumbered(
     }
   }
   throw lastError ?? FileSystemException(tr('저장할 이름을 찾지 못했습니다.'), folder);
+}
+
+/// 두 파일의 내용이 같은지 — 조각씩 견준다(큰 파일을 메모리에 다 올리지 않게).
+bool _sameFiles(File a, File b) {
+  RandomAccessFile? ra;
+  RandomAccessFile? rb;
+  try {
+    if (a.lengthSync() != b.lengthSync()) return false;
+    ra = a.openSync();
+    rb = b.openSync();
+    while (true) {
+      final x = ra.readSync(64 * 1024);
+      final y = rb.readSync(64 * 1024);
+      if (x.isEmpty && y.isEmpty) return true;
+      if (!listEquals(x, y)) return false;
+    }
+  } catch (_) {
+    return false;
+  } finally {
+    ra?.closeSync();
+    rb?.closeSync();
+  }
 }
 
 bool _sameContent(File file, List<int> bytes) {

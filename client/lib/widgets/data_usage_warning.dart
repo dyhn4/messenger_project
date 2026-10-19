@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../services/app_settings.dart' show kCellularWarnMbDefault;
 import '../services/network_type.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart' show formatFileSize;
 import '../l10n/tr.dart';
 
-/// 휴대폰 데이터로 받을 때 이 크기(합계) 이상이면 데이터 사용 경고를 띄운다.
-const kCellularDownloadWarnBytes = 10 * 1024 * 1024;
+/// 데이터 사용 경고의 기본 기준(합계) — 환경설정에서 바꾼다(AppSettings.cellularDownloadWarnMb).
+const kCellularDownloadWarnBytes = kCellularWarnMbDefault * 1024 * 1024;
 
 /// 받을 첨부 하나 — [size]를 모르면(null) 받기 전에 서버에 크기만 물어본다(HEAD).
 typedef DownloadSizeItem = ({String url, int? size});
 
 /// 휴대폰 데이터(LTE·5G)로 큰 첨부를 받으려 할 때 카카오톡처럼 "데이터 사용 경고"를 띄워 확인을 받는다 —
-/// 받아도 되면 true. Wi-Fi이거나 연결 종류를 알 수 없거나(PC 등 — [isOnCellularData]) 합계가
-/// [kCellularDownloadWarnBytes]보다 작으면 묻지 않고 true.
+/// 받아도 되면 true. 환경설정에서 경고를 껐거나(AppSettings.cellularDownloadWarning), Wi-Fi이거나 연결 종류를 알 수
+/// 없거나(PC 등 — [isOnCellularData]) 합계가 환경설정의 기준(AppSettings.cellularDownloadWarnBytes — 기본 10MB)보다
+/// 작으면 묻지 않고 true.
 ///
 /// 크기는 휴대폰 데이터일 때만 알아본다 — Wi-Fi에서는 서버에 따로 묻지 않는다. 크기를 끝내 모르는 파일은
 /// 합계에서 뺀다(그런 링크는 받기도 실패한다).
@@ -23,7 +25,9 @@ Future<bool> confirmCellularDownload(
   required Session session,
   required List<DownloadSizeItem> items,
 }) async {
-  if (items.isEmpty || !await isOnCellularData()) return true;
+  final settings = session.settings;
+  if (items.isEmpty || !settings.cellularDownloadWarning) return true;
+  if (!await isOnCellularData()) return true;
   final sizes = await Future.wait([
     for (final item in items)
       item.size != null
@@ -31,7 +35,7 @@ Future<bool> confirmCellularDownload(
           : _remoteFileSize(session, item.url),
   ]);
   final total = sizes.fold<int>(0, (sum, s) => sum + (s ?? 0));
-  if (total < kCellularDownloadWarnBytes) return true;
+  if (total < settings.cellularDownloadWarnBytes) return true;
   if (!context.mounted) return false;
   final ok = await showDialog<bool>(
     context: context,

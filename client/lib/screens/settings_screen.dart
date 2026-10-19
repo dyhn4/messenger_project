@@ -65,6 +65,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late String _downloadFolder = widget.session.settings.downloadFolder;
   late bool _openFolderAfterDownload =
       widget.session.settings.openFolderAfterDownload;
+  late bool _cellularWarning = widget.session.settings.cellularDownloadWarning;
+  late int _cellularWarnMb = widget.session.settings.cellularDownloadWarnMb;
+  late bool _cellularPhotoNormal =
+      widget.session.settings.cellularPhotoNormalQuality;
   late ThemeMode _themeMode = widget.session.settings.themeMode;
   late TeamSwitchStyle _teamSwitchStyle =
       widget.session.settings.teamSwitchStyle;
@@ -163,6 +167,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await settings.setDownloadWithoutAsking(_downloadWithoutAsking);
     await settings.setDownloadFolder(_downloadFolder);
     await settings.setOpenFolderAfterDownload(_openFolderAfterDownload);
+    await settings.setCellularData(
+      warning: _cellularWarning,
+      warnMb: _cellularWarnMb,
+      photoNormalQuality: _cellularPhotoNormal,
+    );
     await settings.setThemeMode(_themeMode);
     await settings.setMessagePreviewMode(_messagePreviewMode);
     await settings.setTeamSwitchStyle(_teamSwitchStyle);
@@ -798,6 +807,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ? const _IosDownloadFolder()
               : _desktopDownload(context),
         ),
+      // 연결 종류(Wi-Fi·모바일 데이터)를 알 수 있는 곳에서만 — 안드로이드 앱과 웹(안드로이드 크롬 등 — network_type.dart).
+      if (AppPlatform.isAndroid || kIsWeb)
+        _Item(
+          key: const ValueKey('settings-cellular'),
+          label: tr('모바일 데이터'),
+          caption: tr(
+            'Wi-Fi가 아닌 모바일 데이터(LTE/5G)로 쓸 때만 적용됩니다. 동영상은 앱 안에서 저절로 재생되지 않고 누를 때만 받습니다.',
+          ),
+          child: _cellularData(context),
+        ),
       if (AppPlatform.isWindows)
         _Item(
           label: tr('자동 잠금'),
@@ -863,6 +882,65 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     ];
+  }
+
+  /// 모바일 데이터 — 큰 첨부를 받을 때 경고와 그 기준, 사진을 일반 화질로 보내기.
+  Widget _cellularData(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _CheckRow(
+          key: const ValueKey('settings-cellular-warning'),
+          value: _cellularWarning,
+          label: tr('큰 파일을 받기 전에 데이터 사용 경고 띄우기'),
+          onChanged: (v) => setState(() => _cellularWarning = v),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 44),
+          child: Row(
+            children: [
+              Text(
+                tr('경고 기준'),
+                style: TextStyle(color: _cellularWarning ? null : hint),
+              ),
+              const SizedBox(width: 12),
+              DropdownButton<int>(
+                key: const ValueKey('settings-cellular-warn-mb'),
+                value: _cellularWarnMb,
+                items: [
+                  for (final mb in kCellularWarnMbChoices)
+                    DropdownMenuItem(
+                      value: mb,
+                      child: Text(tr('{mb}MB 이상', {'mb': mb})),
+                    ),
+                ],
+                onChanged: _cellularWarning
+                    ? (v) =>
+                          setState(() => _cellularWarnMb = v ?? _cellularWarnMb)
+                    : null,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        _CheckRow(
+          key: const ValueKey('settings-cellular-photo'),
+          value: _cellularPhotoNormal,
+          label: tr('사진을 원본 대신 일반 화질로 보내기'),
+          onChanged: (v) => setState(() => _cellularPhotoNormal = v),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 44),
+          child: Text(
+            tr(
+              '긴 변 2048px로 줄여 보냅니다(위치 같은 사진 정보도 빠집니다). 사진첩·투표·할 일의 첨부는 원본 그대로 보냅니다.',
+            ),
+            style: TextStyle(fontSize: 12, color: hint),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _desktopDownload(BuildContext context) {
@@ -986,7 +1064,12 @@ class _Item extends StatelessWidget {
   final String label;
   final Widget child;
   final String? caption;
-  const _Item({required this.label, required this.child, this.caption});
+  const _Item({
+    super.key,
+    required this.label,
+    required this.child,
+    this.caption,
+  });
 
   @override
   Widget build(BuildContext context) {

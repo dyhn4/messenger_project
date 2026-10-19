@@ -35,6 +35,13 @@ const _kFontFamily = 'settings_font_family';
 const _kNotifyPopupWidth = 'settings_notify_popup_width';
 const _kNotifyPopupHeight = 'settings_notify_popup_height';
 const _kNotifyPopupMaxCards = 'settings_notify_popup_max_cards';
+const _kCellularDownloadWarning = 'settings_cellular_download_warning';
+const _kCellularDownloadWarnMb = 'settings_cellular_download_warn_mb';
+const _kCellularPhotoNormalQuality = 'settings_cellular_photo_normal_quality';
+
+/// 데이터 사용 경고 기준으로 고를 수 있는 크기(MB)와 기본값.
+const kCellularWarnMbChoices = [5, 10, 20, 50, 100, 200];
+const kCellularWarnMbDefault = 10;
 
 /// "글꼴"(화면 설정, Windows 전용) 값 — PC에 깔려 있는 시스템 글꼴 이름을 그대로 쓴다(새
 /// 글꼴 파일을 번들하지 않음, 고를 수 있는 전체 목록은 services/system_fonts.dart가 그때그때
@@ -81,6 +88,18 @@ class AppSettings extends ChangeNotifier {
   bool downloadWithoutAsking = false;
   String downloadFolder = '';
   bool openFolderAfterDownload = true;
+
+  /// 휴대폰 데이터(LTE·5G)로 큰 첨부를 받을 때 데이터 사용 경고를 띄울지(기본 켬)와 그 기준 — 받을 파일 합계가
+  /// [cellularDownloadWarnMb]MB 이상이면 묻는다(data_usage_warning.dart). 고를 수 있는 값은 [kCellularWarnMbChoices].
+  bool cellularDownloadWarning = true;
+  int cellularDownloadWarnMb = kCellularWarnMbDefault;
+
+  /// 휴대폰 데이터일 때 채팅·댓글·게시글로 보내는 사진을 원본 대신 일반 화질(긴 변 2048px, JPEG)로 줄여 보낼지(기본 켬 —
+  /// photo_quality.dart). Wi-Fi에서는 늘 원본.
+  bool cellularPhotoNormalQuality = true;
+
+  /// 데이터 사용 경고 기준(바이트).
+  int get cellularDownloadWarnBytes => cellularDownloadWarnMb * 1024 * 1024;
 
   /// 화면 테마 — 화이트(기본) 또는 다크. 예전의 "시스템 설정을 따름"은 화이트로 읽는다.
   ThemeMode themeMode = ThemeMode.light;
@@ -236,6 +255,13 @@ class AppSettings extends ChangeNotifier {
         ? await mobileDownloadFolder()
         : _prefs.getString(_kDownloadFolder) ?? _defaultDownloadFolder();
     openFolderAfterDownload = _prefs.getBool(_kOpenFolderAfterDownload) ?? true;
+    cellularDownloadWarning = _prefs.getBool(_kCellularDownloadWarning) ?? true;
+    final warnMb = _prefs.getInt(_kCellularDownloadWarnMb);
+    cellularDownloadWarnMb = kCellularWarnMbChoices.contains(warnMb)
+        ? warnMb!
+        : kCellularWarnMbDefault;
+    cellularPhotoNormalQuality =
+        _prefs.getBool(_kCellularPhotoNormalQuality) ?? true;
     themeMode = _themeModeFromName(_prefs.getString(_kThemeMode));
     messagePreviewMode = _messagePreviewModeFromName(
       _prefs.getString(_kMessagePreviewMode),
@@ -330,6 +356,24 @@ class AppSettings extends ChangeNotifier {
     if (AppPlatform.isAndroid || AppPlatform.isIOS) return;
     downloadFolder = path;
     await _prefs.setString(_kDownloadFolder, path);
+    notifyListeners();
+  }
+
+  /// 모바일 데이터 설정(data_usage_warning.dart·photo_quality.dart) — 큰 첨부를 받을 때 경고할지와 그 기준(MB), 사진을 일반
+  /// 화질로 보낼지.
+  Future<void> setCellularData({
+    required bool warning,
+    required int warnMb,
+    required bool photoNormalQuality,
+  }) async {
+    cellularDownloadWarning = warning;
+    cellularDownloadWarnMb = kCellularWarnMbChoices.contains(warnMb)
+        ? warnMb
+        : kCellularWarnMbDefault;
+    cellularPhotoNormalQuality = photoNormalQuality;
+    await _prefs.setBool(_kCellularDownloadWarning, warning);
+    await _prefs.setInt(_kCellularDownloadWarnMb, cellularDownloadWarnMb);
+    await _prefs.setBool(_kCellularPhotoNormalQuality, photoNormalQuality);
     notifyListeners();
   }
 

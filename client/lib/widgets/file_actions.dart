@@ -267,12 +267,15 @@ class FileActions {
         items: [(url: url, size: null)],
       );
       if (!ok) return;
-      final bytes = await _bytes();
       final folder = session.settings.downloadFolder;
-      final path = await writeDownloadFile(
+      // 받는 대로 디스크에(비밀 대화는 통째로 복호화 — downloadAttachmentToFolder).
+      final path = await downloadAttachmentToFolder(
+        session: session,
+        url: url,
         folder: folder.isEmpty ? await downloadTempFolder() : folder,
         fileName: fileName,
-        bytes: bytes,
+        attachmentKey: attachmentKey,
+        attachmentNonce: attachmentNonce,
         reuseIdentical: true,
       );
       final notice = await openLocalFile(path);

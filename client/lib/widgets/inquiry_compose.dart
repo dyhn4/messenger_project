@@ -11,6 +11,7 @@ import '../models/uploaded_attachment.dart';
 import '../services/api_client.dart'
     show UploadCancelToken, UploadCancelledException;
 import '../services/image_thumbnail.dart';
+import '../services/photo_quality.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import '../l10n/tr.dart';
@@ -130,11 +131,25 @@ class _InquiryComposeDialogState extends State<InquiryComposeDialog> {
   }
 
   Future<void> _stageAndUpload(
-    XFile file,
+    XFile picked,
     bool isImage,
     String displayName,
   ) async {
-    final bytes = await file.readAsBytes();
+    var file = picked;
+    var bytes = await picked.readAsBytes();
+    // 휴대폰 데이터면 사진을 일반 화질로 줄여 보낸다(photo_quality.dart — 환경설정에서 끌 수 있음).
+    if (isImage) {
+      final reduced = await photoForUpload(
+        widget.session.settings,
+        picked,
+        bytes,
+        name: displayName,
+      );
+      if (reduced != null) {
+        file = reduced.file;
+        bytes = reduced.bytes;
+      }
+    }
     final thumbBytes = isImage ? await generateThumbnail(bytes) : null;
     if (!mounted) return;
 

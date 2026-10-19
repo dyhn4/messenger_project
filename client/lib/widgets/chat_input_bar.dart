@@ -16,6 +16,7 @@ import '../services/app_platform.dart';
 import '../services/clipboard_paste.dart';
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
+import '../services/photo_quality.dart';
 import '../services/memory_file.dart';
 import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart';
@@ -608,11 +609,25 @@ class ChatInputBarState extends State<ChatInputBar> {
   /// 업로드를 시작한다 — "보내기"를 누르기 전부터 진행률이 보이고, 실제로 보내기를 누르는
   /// 시점엔 이미 업로드가 끝나 있어 지연 없이 바로 전송된다.
   Future<void> _stageAndUpload(
-    XFile file,
+    XFile picked,
     bool isImage,
     String displayName,
   ) async {
-    final bytes = await file.readAsBytes();
+    var file = picked;
+    var bytes = await picked.readAsBytes();
+    // 휴대폰 데이터면 사진을 일반 화질로 줄여 보낸다(photo_quality.dart — 환경설정에서 끌 수 있음).
+    if (isImage) {
+      final reduced = await photoForUpload(
+        widget.session.settings,
+        picked,
+        bytes,
+        name: displayName,
+      );
+      if (reduced != null) {
+        file = reduced.file;
+        bytes = reduced.bytes;
+      }
+    }
     final thumbBytes = isImage ? await generateThumbnail(bytes) : null;
     if (!mounted) return;
 

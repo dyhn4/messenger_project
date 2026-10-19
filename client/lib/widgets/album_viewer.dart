@@ -6,7 +6,7 @@ import '../services/album_download.dart' show albumItemFileName;
 import '../services/download_storage.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
-import 'attachment_widgets.dart' show fetchAttachmentBytes;
+import 'attachment_widgets.dart' show downloadAttachmentToFolder;
 import 'data_usage_warning.dart';
 import '../l10n/tr.dart';
 
@@ -58,15 +58,13 @@ Future<void> openAlbumVideo(
   if (!ok) return;
   showAppToastOnOverlay(overlay, tr('영상을 여는 중입니다…'));
   try {
-    final bytes = await fetchAttachmentBytes(
+    // 영상은 크다 — 받는 대로 디스크에(메모리에 다 올리지 않게).
+    final folder = session.settings.downloadFolder;
+    final path = await downloadAttachmentToFolder(
       session: session,
       url: session.resolveUrl(item.fileUrl),
-    );
-    final folder = session.settings.downloadFolder;
-    final path = await writeDownloadFile(
       folder: folder.isEmpty ? await downloadTempFolder() : folder,
       fileName: albumItemFileName(item, 0),
-      bytes: bytes,
       reuseIdentical: true,
     );
     final notice = await openLocalFile(path);

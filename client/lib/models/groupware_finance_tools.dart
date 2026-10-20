@@ -77,7 +77,14 @@ class YearEndEstimate {
   /// 공제 자료의 세액공제 합계(산출세액 안에서 쓴 것).
   final int claimCredit;
 
-  /// 공제 자료가 있을 때 공제마다의 금액 — 소득공제(extraPersonal·card·subscription·other·rentLoan·mortgage)와 세액공제
+  /// 소득공제 종합한도(2,500만 원)를 넘어 빼낸 소득공제.
+  final int limitExcess;
+
+  /// 계산에 쓴 세법의 귀속 연도 — [lawAssumed]면 그해 법이 서버에 아직 없어 가까운 해의 값을 빌렸다.
+  final int? lawYear;
+  final bool lawAssumed;
+
+  /// 공제 자료가 있을 때 공제마다의 금액 — 소득공제(extraPersonal·card·subscription·other·otherExempt·rentLoan·mortgage — 종합한도 빼기 전)와 세액공제
   /// (pensionAccount·political·hometown·marriage·births·other·insurance·medical·education·donation·monthlyRent). 고른 쪽에서 쓰지 못한 것은 0.
   final Map<String, int> claimDeductions;
   final Map<String, int> claimCredits;
@@ -96,6 +103,9 @@ class YearEndEstimate {
     this.childCredit = 0,
     this.standardCredit = 0,
     this.claimCredit = 0,
+    this.limitExcess = 0,
+    this.lawYear,
+    this.lawAssumed = false,
     this.claimDeductions = const {},
     this.claimCredits = const {},
     this.useStandard = false,
@@ -115,6 +125,9 @@ class YearEndEstimate {
     childCredit: _int(j['childCredit']),
     standardCredit: _int(j['standardCredit']),
     claimCredit: _int(j['claimCredit']),
+    limitExcess: _int(j['limitExcess']),
+    lawYear: _intOrNull(_map(j['law'])['year']),
+    lawAssumed: _map(j['law'])['assumed'] == true,
     claimDeductions: _intMap(_map(j['claim'])['deductions']),
     claimCredits: _intMap(_map(j['claim'])['credits']),
     useStandard: j['useStandard'] == true,
@@ -778,6 +791,11 @@ class YearEndClaim {
     'disabled',
   ];
   static const mortgageLimits = [6000000, 8000000, 18000000, 20000000];
+
+  /// 귀속 연도마다 넣는 칸이 다른 것(server yearEndClaimRules.js TAX_LAW와 맞춘다) — 신용카드 등 기본한도의 자녀등 수는 2026년 귀속부터,
+  /// 소비 증가분(지난해 사용액 합계)은 2024년 귀속만.
+  static bool cardChildrenApplies(int year) => year >= 2026;
+  static bool spendingGrowthApplies(int year) => year == 2024;
 
   int value(String group, String field) => _int(_map(json[group])[field]);
   int top(String key) => _int(json[key]);

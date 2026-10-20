@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { yearEndEstimate } from '../src/incomeTaxRules.js';
+import { childTaxCredit, yearEndEstimate } from '../src/incomeTaxRules.js';
 import {
   birthCredit,
   cardDeduction,
@@ -13,6 +13,7 @@ import {
   monthlyRentCredit,
   parseYearEndClaim,
   pensionAccountCredit,
+  taxLaw,
 } from '../src/yearEndClaimRules.js';
 
 test('공제 자료 읽기 — 빈 칸은 0, 모두 비면 null, 잘못된 값은 거절', () => {
@@ -135,4 +136,84 @@ test('연말정산 어림 — 공제 자료가 없으면 예전 계산 그대로
   // 세액공제는 산출세액을 넘지 못한다.
   const big = parseYearEndClaim({ otherCredit: 100_000_000 }).claim;
   assert.equal(yearEndEstimate(year, null, { claim: big }).decidedTax, 0);
+});
+
+test('귀속 연도마다의 법 — 줄이 없는 해는 가까운 해를 빌리고 assumed로 알린다', () => {
+  assert.deepEqual([taxLaw(2025).year, taxLaw(2025).assumed], [2025, false]);
+  assert.deepEqual([taxLaw(2027).year, taxLaw(2027).assumed], [2026, true]);
+  assert.deepEqual([taxLaw(2023).year, taxLaw(2023).assumed], [2024, true]);
+  assert.equal(taxLaw(null).year, 2025);
+  // 자녀세액공제 — 2024년 귀속 15만·35만·30만, 2025년부터 25만·55만·40만.
+  assert.equal(childTaxCredit(1, 2024), 150_000);
+  assert.equal(childTaxCredit(3, 2024), 650_000);
+  assert.equal(childTaxCredit(2, 2025), 550_000);
+  assert.equal(childTaxCredit(3, 2026), 950_000);
+});
+
+test('공제 자료 읽기 — 카드 한도 자녀등 수·지난해 사용액·종합한도 밖 소득공제', () => {
+  const ok = parseYearEndClaim({ cardChildren: 2, cardPrevious: '15,000,000', otherDeductionExempt: 1_000 }).claim;
+  assert.equal(ok.cardChildren, 2);
+  assert.equal(ok.cardPrevious, 15_000_000);
+  assert.equal(ok.otherDeductionExempt, 1_000);
+  // 이 칸들만 있어도 자료로 남는다.
+  assert.notEqual(parseYearEndClaim({ cardChildren: 1 }).claim, null);
+  assert.match(parseYearEndClaim({ cardChildren: 21 }).error, /사람 수/);
+  assert.match(parseYearEndClaim({ cardPrevious: -1 }).error, /금액/);
+});
+
+test('신용카드 등 — 2026년 귀속부터 자녀등 수로 기본한도가 늘어난다(2명까지)', () => {
+  const card = { credit: 20_000_000, debitCash: 15_000_000 }; // 공제 전 금액 562.5만
+  assert.equal(cardDeduction(50_000_000, card, { year: 2025, children: 2 }).deduction, 3_000_000);
+  assert.equal(cardDeduction(50_000_000, card, { year: 2026, children: 1 }).deduction, 3_500_000);
+  assert.equal(cardDeduction(50_000_000, card, { year: 2026, children: 2 }).deduction, 4_000_000);
+  assert.equal(cardDeduction(50_000_000, card, { year: 2026, children: 3 }).basicLimit, 4_000_000);
+  // 총급여 7,000만 원 넘으면 1명마다 25만 원.
+  const high = { credit: 40_000_000, debitCash: 20_000_000 };
+  assert.equal(cardDeduction(80_000_000, high, { year: 2026, children: 1 }).deduction, 2_750_000);
+  assert.equal(cardDeduction(80_000_000, high, { year: 2026, children: 2 }).deduction, 3_000_000);
+});
+
+test('신용카드 등 — 2024년 귀속 소비 증가분(지난해 × 105% 넘는 금액의 10%, 추가한도 100만)', () => {
+  const card = { credit: 20_000_000, debitCash: 5_000_000, market: 1_000_000 }; // 합계 2,600만, 공제 전 302.5만(전통시장 40만)
+  const a = cardDeduction(50_000_000, card, { year: 2024, previous: 5_000_000 });
+  assert.equal(a.growth, 2_075_000); // (2,600만 − 525만) × 10%
+  // 기본 300만 + min(넘는 210만, 전통시장 40만 + 증가분 100만(한도)) = 440만.
+  assert.equal(a.deduction, 4_400_000);
+  assert.equal(cardDeduction(50_000_000, card, { year: 2024, previous: 15_000_000 }).deduction, 4_050_000);
+  // 2025년 귀속에는 없고, 지난해를 안 넣었거나 최저사용금액을 못 넘으면 셈하지 않는다.
+  assert.equal(cardDeduction(50_000_000, card, { year: 2025, previous: 5_000_000 }).deduction, 3_025_000);
+  assert.equal(cardDeduction(50_000_000, card, { year: 2024 }).deduction, 3_025_000);
+  assert.equal(cardDeduction(50_000_000, { credit: 10_000_000 }, { year: 2024, previous: 1_000_000 }).deduction, 0);
+  // 공제 자료로도 같은 값.
+  const claim = parseYearEndClaim({ card, cardPrevious: 5_000_000 }).claim;
+  assert.equal(claimAllowances(50_000_000, 37_750_000, claim, 2024).deductions.card, 4_400_000);
+});
+
+test('고향사랑기부금 — 2026년 귀속부터 10만 원 넘고 20만 원까지 40%', () => {
+  assert.equal(donationCredit(100_000_000, { hometown: 300_000 }, 2025).hometown, 90_909 + 30_000);
+  assert.equal(donationCredit(100_000_000, { hometown: 300_000 }, 2026).hometown, 90_909 + 40_000 + 15_000);
+  assert.equal(donationCredit(100_000_000, { hometown: 150_000 }, 2026).hometown, 90_909 + 20_000);
+});
+
+test('소득공제 종합한도 2,500만 원 — 주택자금·청약·카드·그 밖의 소득공제(한도 안)', () => {
+  // 총급여 1억: 카드 250만(한도), 저당 이자 2,000만, 그 밖(한도 안) 500만 → 2,750만 중 250만을 뺀다. 한도 밖 100만은 그대로.
+  const claim = parseYearEndClaim({
+    card: { credit: 60_000_000 },
+    housing: { mortgage: 20_000_000, mortgageLimit: 20_000_000 },
+    otherDeduction: 5_000_000,
+    otherDeductionExempt: 1_000_000,
+  }).claim;
+  const year = { taxable: 100_000_000, pension: 0, insurance: 0, withheldIncomeTax: 0 };
+  const est = yearEndEstimate(year, null, { claim, taxYear: 2025 });
+  assert.equal(est.useStandard, false);
+  assert.equal(est.limitExcess, 2_500_000);
+  assert.equal(est.claim.deductions.otherExempt, 1_000_000);
+  // 근로소득금액 8,525만 − (기본 150만 + 카드 250만 + 그 밖 500만 + 한도 밖 100만 + 저당 2,000만 − 넘는 250만).
+  assert.equal(est.taxBase, 85_250_000 - 27_500_000);
+  assert.deepEqual(est.law, { year: 2025, assumed: false });
+  // 한도 안이면 빼지 않는다.
+  const small = parseYearEndClaim({ card: { credit: 60_000_000 }, otherDeduction: 5_000_000 }).claim;
+  assert.equal(yearEndEstimate(year, null, { claim: small, taxYear: 2025 }).limitExcess, 0);
+  // 공제 자료가 없어도 법의 해는 알린다.
+  assert.deepEqual(yearEndEstimate(year, null, { taxYear: 2028 }).law, { year: 2026, assumed: true });
 });

@@ -6,102 +6,153 @@ const Map<String, String> serverEn = {
   '\n담당:': '\nAssignee:',
   ' (비과세)': ' (tax-free)',
   ' 통신사가 80 포트를 막는 회선도 있습니다.': ' Some ISPs block port 80 on their lines.',
-  '"등록 도메인당 7일에 새 인증서 50장" 한도를 모든 iptime DDNS 사용자가 함께 씁니다 — 다른 사용자들이 이번 주 몫을 다 쓰면 ': 'The "50 new certificates per registered domain per 7 days" limit is shared by all iptime DDNS users — if other users use up this week\'s quota, ',
-  '"연결 시험"을 먼저 해 보세요. 통과하면 켤 수 있습니다.': 'Run "Test connection" first. You can turn it on once it passes.',
-  '# TangoTalk 서버가 .env의 EXTERNAL_ADDRESS에 맞춰 관리함(server/src/livekitNat.js)': '# Managed by the TangoTalk server to match EXTERNAL_ADDRESS in .env (server/src/livekitNat.js)',
+  '"등록 도메인당 7일에 새 인증서 50장" 한도를 모든 iptime DDNS 사용자가 함께 씁니다 — 다른 사용자들이 이번 주 몫을 다 쓰면 ':
+      'The "50 new certificates per registered domain per 7 days" limit is shared by all iptime DDNS users — if other users use up this week\'s quota, ',
+  '"연결 시험"을 먼저 해 보세요. 통과하면 켤 수 있습니다.':
+      'Run "Test connection" first. You can turn it on once it passes.',
+  '# TangoTalk 서버가 .env의 EXTERNAL_ADDRESS에 맞춰 관리함(server/src/livekitNat.js)':
+      '# Managed by the TangoTalk server to match EXTERNAL_ADDRESS in .env (server/src/livekitNat.js)',
   '## 결정 사항 (글머리표)': '## Decisions (bullets)',
   '## 논의한 내용 (주제별 글머리표)': '## Discussion (bullets by topic)',
   '## 요약 (3~5문장)': '## Summary (3–5 sentences)',
-  '## 할 일 (글머리표 — "담당자: 할 일 (기한)" 꼴, 담당자·기한을 모르면 빼고)': '## Action items (bullets — "Owner: task (due)", omit owner/due if unknown)',
-  '\'[공제] 이름\' 열은 공제 항목, \'(비과세)\'가 붙은 열은 비과세 지급 항목, \'[계산] 이름\' 열은 그 항목의 계산 방법입니다.': 'Columns named \'[공제] name\' are deductions, columns ending in \'(비과세)\' are tax-free earnings, and \'[계산] name\' columns hold that item\'s calculation.',
-  '\'지정\' 토픽 생성 권한은 팀을 만든 뒤 팀 설정에서 정할 수 있습니다.': 'You can set who may create topics (\'Selected\') in team settings after creating the team.',
+  '## 할 일 (글머리표 — "담당자: 할 일 (기한)" 꼴, 담당자·기한을 모르면 빼고)':
+      '## Action items (bullets — "Owner: task (due)", omit owner/due if unknown)',
+  '\'[공제] 이름\' 열은 공제 항목, \'(비과세)\'가 붙은 열은 비과세 지급 항목, \'[계산] 이름\' 열은 그 항목의 계산 방법입니다.':
+      'Columns named \'[공제] name\' are deductions, columns ending in \'(비과세)\' are tax-free earnings, and \'[계산] name\' columns hold that item\'s calculation.',
+  '\'지정\' 토픽 생성 권한은 팀을 만든 뒤 팀 설정에서 정할 수 있습니다.':
+      'You can set who may create topics (\'Selected\') in team settings after creating the team.',
   '(UNC가 아닌 형식)': '(non-UNC format)',
   '(가맹점 없음)': '(no merchant)',
-  '(받아쓴 말이 없습니다 — 녹음에 말소리가 없었을 수 있습니다.)': '(Nothing was transcribed — the recording may have had no speech.)',
+  '(받아쓴 말이 없습니다 — 녹음에 말소리가 없었을 수 있습니다.)':
+      '(Nothing was transcribed — the recording may have had no speech.)',
   '(삭제된 메시지)': '(Deleted message)',
-  '(예: \\\\192.168.0.5\\공유)로 지정하거나, 회사 서버라면 서버 관리자에게 허용을 요청하세요.': '(e.g. \\\\192.168.0.5\\share), or if it\'s a company server, ask the server admin to allow access.',
+  '(예: \\\\192.168.0.5\\공유)로 지정하거나, 회사 서버라면 서버 관리자에게 허용을 요청하세요.':
+      '(e.g. \\\\192.168.0.5\\share), or if it\'s a company server, ask the server admin to allow access.',
   '(이 서버의 바깥 주소)': '(this server\'s public address)',
   ', 시험용(staging)': ', staging',
   '- approvalNo: 카드 승인번호.': '- approvalNo: card approval number.',
-  '- bizNo: 가맹점 사업자등록번호(숫자 10자리, 하이픈 포함 가능).': '- bizNo: merchant business registration number (10 digits, hyphens allowed).',
-  '- cardLast4: 결제한 카드 번호의 끝 4자리(가려진 자리는 무시).': '- cardLast4: last 4 digits of the card used (ignore masked digits).',
-  '- date: 거래(승인) 날짜 YYYY-MM-DD. 연도가 두 자리면 20xx.': '- date: transaction (approval) date YYYY-MM-DD. A two-digit year means 20xx.',
-  '- items: 품목들 [{ name, qty, amount }] (amount는 그 줄의 금액, 원).': '- items: line items [{ name, qty, amount }] (amount is the line total in KRW).',
-  '- merchant: 가맹점(상호) 이름. 지점명이 있으면 함께.': '- merchant: merchant (store) name, with the branch if shown.',
+  '- bizNo: 가맹점 사업자등록번호(숫자 10자리, 하이픈 포함 가능).':
+      '- bizNo: merchant business registration number (10 digits, hyphens allowed).',
+  '- cardLast4: 결제한 카드 번호의 끝 4자리(가려진 자리는 무시).':
+      '- cardLast4: last 4 digits of the card used (ignore masked digits).',
+  '- date: 거래(승인) 날짜 YYYY-MM-DD. 연도가 두 자리면 20xx.':
+      '- date: transaction (approval) date YYYY-MM-DD. A two-digit year means 20xx.',
+  '- items: 품목들 [{ name, qty, amount }] (amount는 그 줄의 금액, 원).':
+      '- items: line items [{ name, qty, amount }] (amount is the line total in KRW).',
+  '- merchant: 가맹점(상호) 이름. 지점명이 있으면 함께.':
+      '- merchant: merchant (store) name, with the branch if shown.',
   '- time: 거래 시각 HH:MM(24시간).': '- time: transaction time HH:MM (24-hour).',
-  '- total: 실제 결제한 합계 금액(원, 숫자만). 할인·포인트를 뺀 최종 금액. 취소 전표면 음수.': '- total: total actually paid (KRW, digits only), after discounts and points. Negative for a cancellation slip.',
+  '- total: 실제 결제한 합계 금액(원, 숫자만). 할인·포인트를 뺀 최종 금액. 취소 전표면 음수.':
+      '- total: total actually paid (KRW, digits only), after discounts and points. Negative for a cancellation slip.',
   '- vat: 부가세(원, 숫자만).': '- vat: VAT (KRW, digits only).',
   '11번가': '11st',
   '15·30·60분 중에서 고르세요.': 'Choose 15, 30, or 60 minutes.',
   '1:1 대화는 토픽으로 전환할 수 없습니다.': 'Direct messages can\'t be converted to topics.',
-  '1:1 대화방에서만 문의할 수 있습니다.': 'You can only send inquiries from a direct message.',
-  '1차 촉진 통지에만 쓸 날을 냅니다.': 'Calculates dates for the first leave usage reminder notice only.',
+  '1:1 대화방에서만 문의할 수 있습니다.':
+      'You can only send inquiries from a direct message.',
+  '1차 촉진 통지에만 쓸 날을 냅니다.':
+      'Calculates dates for the first leave usage reminder notice only.',
   '1차 촉진을 먼저 보내세요.': 'Send the first leave usage reminder first.',
   '2단계 인증 정책 값이 올바르지 않습니다.': 'Invalid two-factor authentication policy value.',
-  '2단계 인증을 쓰는 계정입니다. 앱을 최신 버전으로 업데이트한 뒤 다시 로그인하세요.': 'This account uses two-factor authentication. Update the app to the latest version and sign in again.',
+  '2단계 인증을 쓰는 계정입니다. 앱을 최신 버전으로 업데이트한 뒤 다시 로그인하세요.':
+      'This account uses two-factor authentication. Update the app to the latest version and sign in again.',
   '2단계 인증이 꺼져 있습니다.': 'Two-factor authentication is off.',
   '2단계 인증이 이미 켜져 있습니다.': 'Two-factor authentication is already on.',
   '4대보험 요율': 'Social insurance rates',
-  '4대사회보험 정보연계센터(www.4insure.or.kr)·각 공단 EDI의 취득·상실 신고서에 옮겨 적을 자료입니다.': 'Data to copy into the acquisition/loss forms of the 4 Social Insurances Information Center (www.4insure.or.kr) or each agency\'s EDI.',
-  '5명 미만 사업장인지를 참/거짓으로 보내세요.': 'Send whether the business has fewer than 5 employees as true or false.',
-  '80·443 포트의 주소만 구독할 수 있습니다.': 'You can only subscribe to addresses on port 80 or 443.',
+  '4대사회보험 정보연계센터(www.4insure.or.kr)·각 공단 EDI의 취득·상실 신고서에 옮겨 적을 자료입니다.':
+      'Data to copy into the acquisition/loss forms of the 4 Social Insurances Information Center (www.4insure.or.kr) or each agency\'s EDI.',
+  '5명 미만 사업장인지를 참/거짓으로 보내세요.':
+      'Send whether the business has fewer than 5 employees as true or false.',
+  '80·443 포트의 주소만 구독할 수 있습니다.':
+      'You can only subscribe to addresses on port 80 or 443.',
   '8~20세 자녀': 'Children aged 8–20',
-  '8~20세 자녀 수는 공제대상가족 수보다 적어야 합니다(본인 포함이므로).': 'Children aged 8–20 must be fewer than dependents (which include the employee).',
-  'CNAME으로 연결해 WEB_DOMAIN으로 쓰세요.': 'Point it with a CNAME and use it as WEB_DOMAIN.',
+  '8~20세 자녀 수는 공제대상가족 수보다 적어야 합니다(본인 포함이므로).':
+      'Children aged 8–20 must be fewer than dependents (which include the employee).',
+  'CNAME으로 연결해 WEB_DOMAIN으로 쓰세요.':
+      'Point it with a CNAME and use it as WEB_DOMAIN.',
   'CODEF 인증 응답을 읽지 못했습니다.': 'Couldn\'t read the CODEF authentication response.',
-  'CODEF 인증에 실패했습니다. server/.env의 CODEF_CLIENT_ID·CODEF_CLIENT_SECRET을 확인하세요.': 'CODEF authentication failed. Check CODEF_CLIENT_ID and CODEF_CLIENT_SECRET in server/.env.',
+  'CODEF 인증에 실패했습니다. server/.env의 CODEF_CLIENT_ID·CODEF_CLIENT_SECRET을 확인하세요.':
+      'CODEF authentication failed. Check CODEF_CLIENT_ID and CODEF_CLIENT_SECRET in server/.env.',
   'CODEF가 connectedId를 돌려주지 않았습니다.': 'CODEF didn\'t return a connectedId.',
-  'CODEF에서 만든 홈택스 connectedId를 넣으세요.': 'Enter the Hometax connectedId created in CODEF.',
+  'CODEF에서 만든 홈택스 connectedId를 넣으세요.':
+      'Enter the Hometax connectedId created in CODEF.',
   'DATABASE_URL이 없습니다.': 'DATABASE_URL is missing.',
   'DB 백업 중': 'Backing up database',
-  'DKIM 선택자는 영문 소문자·숫자·하이픈으로 넣으세요(예: tangotalk).': 'Use lowercase letters, digits and hyphens for the DKIM selector (e.g. tangotalk).',
+  'DKIM 선택자는 영문 소문자·숫자·하이픈으로 넣으세요(예: tangotalk).':
+      'Use lowercase letters, digits and hyphens for the DKIM selector (e.g. tangotalk).',
   'DM에는 멤버를 초대할 수 없습니다.': 'You can\'t invite members to a DM.',
-  'DuckDNS 토큰 모양이 아닙니다 — DuckDNS 첫 화면의 token 값을 그대로 붙여 넣으세요.': 'This doesn\'t look like a DuckDNS token — paste the token value from the DuckDNS home page as is.',
-  'DuckDNS가 갱신을 거절했습니다 — 도메인 이름이 이 토큰의 계정 것인지, 토큰이 맞는지 확인하세요.': 'DuckDNS rejected the update — check that the domain name belongs to this token\'s account and that the token is correct.',
-  'EDI 일괄 신고 파일로 바로 올리려면 내보내기 양식을 정보연계센터에서 받은 양식의 열 순서대로 만들어 그 양식으로 내려받으세요.': 'To upload directly as an EDI bulk-filing file, build an export layout in the column order of the template from the Information Center and download with that layout.',
+  'DuckDNS 토큰 모양이 아닙니다 — DuckDNS 첫 화면의 token 값을 그대로 붙여 넣으세요.':
+      'This doesn\'t look like a DuckDNS token — paste the token value from the DuckDNS home page as is.',
+  'DuckDNS가 갱신을 거절했습니다 — 도메인 이름이 이 토큰의 계정 것인지, 토큰이 맞는지 확인하세요.':
+      'DuckDNS rejected the update — check that the domain name belongs to this token\'s account and that the token is correct.',
+  'EDI 일괄 신고 파일로 바로 올리려면 내보내기 양식을 정보연계센터에서 받은 양식의 열 순서대로 만들어 그 양식으로 내려받으세요.':
+      'To upload directly as an EDI bulk-filing file, build an export layout in the column order of the template from the Information Center and download with that layout.',
   'FCM 설정 변경': 'FCM settings changed',
-  'Firebase 서비스 계정 키 JSON이 아닌 것 같습니다.': 'This doesn\'t appear to be a Firebase service account key JSON.',
+  'Firebase 서비스 계정 키 JSON이 아닌 것 같습니다.':
+      'This doesn\'t appear to be a Firebase service account key JSON.',
   'GS칼텍스': 'GS Caltex',
-  'Google 계정 → 보안 → 2단계 인증을 켠 뒤 "앱 비밀번호"를 만들어 넣으세요(계정 비밀번호로는 로그인되지 않습니다).': 'Go to Google Account → Security → turn on 2-Step Verification, then create an "App password" and enter it (your account password won\'t work).',
-  'Google 로그인으로 메일 연결이 꺼져 있습니다.': 'Connecting mail with Google sign-in is turned off.',
+  'Google 계정 → 보안 → 2단계 인증을 켠 뒤 "앱 비밀번호"를 만들어 넣으세요(계정 비밀번호로는 로그인되지 않습니다).':
+      'Go to Google Account → Security → turn on 2-Step Verification, then create an "App password" and enter it (your account password won\'t work).',
+  'Google 로그인으로 메일 연결이 꺼져 있습니다.':
+      'Connecting mail with Google sign-in is turned off.',
   'Google 클라이언트 값이 올바르지 않습니다.': 'Invalid Google client value.',
   'G마켓': 'Gmarket',
-  'HEIC 사진은 읽지 못합니다. 휴대폰 카메라 설정을 "호환성 우선"(JPG)으로 바꾸거나 캡처해서 올리세요.': 'HEIC photos cannot be read. Set the phone camera to "Most Compatible" (JPG) or upload a screenshot.',
+  'HEIC 사진은 읽지 못합니다. 휴대폰 카메라 설정을 "호환성 우선"(JPG)으로 바꾸거나 캡처해서 올리세요.':
+      'HEIC photos cannot be read. Set the phone camera to "Most Compatible" (JPG) or upload a screenshot.',
   'IBK기업': 'IBK',
   'IBK기업은행': 'IBK Industrial Bank',
-  'ICS 캘린더가 아닙니다. 캘린더의 "비공개 주소(iCal 형식)"를 넣으세요.': 'This isn\'t an ICS calendar. Enter the calendar\'s "Secret address in iCal format".',
+  'ICS 캘린더가 아닙니다. 캘린더의 "비공개 주소(iCal 형식)"를 넣으세요.':
+      'This isn\'t an ICS calendar. Enter the calendar\'s "Secret address in iCal format".',
   'ICS 형식': 'ICS format',
   'ICS 형식이 아닙니다.': 'Not in ICS format.',
-  'IdP 로그아웃 주소는 https://로 시작해야 합니다.': 'The IdP logout URL must start with https://.',
-  'IdP 로그인 주소(SSO URL — https://…)를 넣으세요.': 'Enter the IdP sign-in URL (SSO URL — https://…).',
-  'IdP 메타데이터(EntityDescriptor XML)가 아닙니다.': 'This is not IdP metadata (EntityDescriptor XML).',
-  'IdP 서명 인증서(X.509 — PEM)를 넣으세요.': 'Enter the IdP signing certificate (X.509 — PEM).',
+  'IdP 로그아웃 주소는 https://로 시작해야 합니다.':
+      'The IdP logout URL must start with https://.',
+  'IdP 로그인 주소(SSO URL — https://…)를 넣으세요.':
+      'Enter the IdP sign-in URL (SSO URL — https://…).',
+  'IdP 메타데이터(EntityDescriptor XML)가 아닙니다.':
+      'This is not IdP metadata (EntityDescriptor XML).',
+  'IdP 서명 인증서(X.509 — PEM)를 넣으세요.':
+      'Enter the IdP signing certificate (X.509 — PEM).',
   'IdP 인증서 값이 올바르지 않습니다.': 'The IdP certificate value is invalid.',
-  'IdP 인증서는 PEM(-----BEGIN CERTIFICATE-----…) 모양으로 넣으세요.': 'Enter the IdP certificate in PEM form (-----BEGIN CERTIFICATE-----…).',
+  'IdP 인증서는 PEM(-----BEGIN CERTIFICATE-----…) 모양으로 넣으세요.':
+      'Enter the IdP certificate in PEM form (-----BEGIN CERTIFICATE-----…).',
   'IdP 주소는 https://로 시작해야 합니다.': 'IdP URLs must start with https://.',
-  'IdP가 일회용(transient) NameID를 보냈습니다. IdP에서 NameID를 persistent나 이메일 형식으로 정해 달라고 관리자에게 알리세요.': 'The IdP sent a transient NameID. Ask your administrator to configure the IdP to send a persistent or email-format NameID.',
+  'IdP가 일회용(transient) NameID를 보냈습니다. IdP에서 NameID를 persistent나 이메일 형식으로 정해 달라고 관리자에게 알리세요.':
+      'The IdP sent a transient NameID. Ask your administrator to configure the IdP to send a persistent or email-format NameID.',
   'JSON 객체나 글을 보내세요.': 'Send a JSON object or text.',
   'KB국민': 'KB Kookmin',
   'KB국민은행': 'KB Kookmin Bank',
   'KDB산업은행': 'KDB Korea Development Bank',
   'KEB하나': 'KEB Hana',
   'K뱅크': 'K Bank',
-  'LDAP 서버 주소(ldap://… 또는 ldaps://…)를 넣으세요.': 'Enter the LDAP server address (ldap://… or ldaps://…).',
-  'LDAP 서버 주소는 ldap://호스트 또는 ldaps://호스트 모양이어야 합니다.': 'The LDAP server address must look like ldap://host or ldaps://host.',
+  'LDAP 서버 주소(ldap://… 또는 ldaps://…)를 넣으세요.':
+      'Enter the LDAP server address (ldap://… or ldaps://…).',
+  'LDAP 서버 주소는 ldap://호스트 또는 ldaps://호스트 모양이어야 합니다.':
+      'The LDAP server address must look like ldap://host or ldaps://host.',
   'LDAP 연결 값이 올바르지 않습니다.': 'Invalid LDAP connection value.',
   'LG유플러스': 'LG U+',
-  'Let\'s Encrypt 발급 한도에 걸렸습니다(rateLimited — 같은 도메인 인증서는 7일에 5장). certs/web.crt가 지워지거나 서버를 다시 ': 'Hit the Let\'s Encrypt issuance limit (rateLimited — 5 certificates per 7 days for the same domain). If certs/web.crt is deleted or the server is ',
-  'Let\'s Encrypt 발급 한도에 걸렸습니다(rateLimited). iptime.org는 공용 접미사 목록(PSL)에 없어서 Let\'s Encrypt의 ': 'Hit the Let\'s Encrypt issuance limit (rateLimited). iptime.org isn\'t on the Public Suffix List (PSL), so Let\'s Encrypt\'s ',
-  'Let\'s Encrypt 서버가 잠시 요청을 처리하지 못했습니다 — 나중에 자동으로 다시 시도합니다.': 'The Let\'s Encrypt server couldn\'t process the request for now — it will retry automatically later.',
-  'Let\'s Encrypt 확인 실패가 너무 잦아 잠시 막혔습니다(rateLimited — 도메인당 1시간에 5번). 공유기 포트포워딩·방화벽을 고쳐 두면 ': 'Temporarily blocked by Let\'s Encrypt due to too many failed validations (rateLimited — 5 per hour per domain). Once you fix the router\'s port forwarding/firewall, ',
-  'Let\'s Encrypt가 보낸 확인 요청의 형식이 예상과 다릅니다.': 'The validation request from Let\'s Encrypt has an unexpected format.',
-  'Let\'s Encrypt가 이 서버의 이 도메인 발급을 일시 중지했습니다(rateLimited — 확인 실패가 오래 계속됨). 포트포워딩을 고친 뒤 서버 ': 'Let\'s Encrypt has paused issuance for this domain on this server (rateLimited — validation kept failing for a long time). After fixing port forwarding, the server ',
+  'Let\'s Encrypt 발급 한도에 걸렸습니다(rateLimited — 같은 도메인 인증서는 7일에 5장). certs/web.crt가 지워지거나 서버를 다시 ':
+      'Hit the Let\'s Encrypt issuance limit (rateLimited — 5 certificates per 7 days for the same domain). If certs/web.crt is deleted or the server is ',
+  'Let\'s Encrypt 발급 한도에 걸렸습니다(rateLimited). iptime.org는 공용 접미사 목록(PSL)에 없어서 Let\'s Encrypt의 ':
+      'Hit the Let\'s Encrypt issuance limit (rateLimited). iptime.org isn\'t on the Public Suffix List (PSL), so Let\'s Encrypt\'s ',
+  'Let\'s Encrypt 서버가 잠시 요청을 처리하지 못했습니다 — 나중에 자동으로 다시 시도합니다.':
+      'The Let\'s Encrypt server couldn\'t process the request for now — it will retry automatically later.',
+  'Let\'s Encrypt 확인 실패가 너무 잦아 잠시 막혔습니다(rateLimited — 도메인당 1시간에 5번). 공유기 포트포워딩·방화벽을 고쳐 두면 ':
+      'Temporarily blocked by Let\'s Encrypt due to too many failed validations (rateLimited — 5 per hour per domain). Once you fix the router\'s port forwarding/firewall, ',
+  'Let\'s Encrypt가 보낸 확인 요청의 형식이 예상과 다릅니다.':
+      'The validation request from Let\'s Encrypt has an unexpected format.',
+  'Let\'s Encrypt가 이 서버의 이 도메인 발급을 일시 중지했습니다(rateLimited — 확인 실패가 오래 계속됨). 포트포워딩을 고친 뒤 서버 ':
+      'Let\'s Encrypt has paused issuance for this domain on this server (rateLimited — validation kept failing for a long time). After fixing port forwarding, the server ',
   'LiveKit 주소를 알 수 없습니다.': 'Unknown LiveKit address.',
-  'Microsoft 365는 관리자가 IMAP·SMTP 인증(기본 인증)을 허용해야 연결됩니다. 막혀 있으면 회사 IT 담당에게 문의하세요.': 'Microsoft 365 connects only if the admin allows IMAP/SMTP authentication (basic auth). If it\'s blocked, contact your company IT staff.',
-  'Microsoft 로그인으로 메일 연결이 꺼져 있습니다.': 'Connecting mail with Microsoft sign-in is turned off.',
+  'Microsoft 365는 관리자가 IMAP·SMTP 인증(기본 인증)을 허용해야 연결됩니다. 막혀 있으면 회사 IT 담당에게 문의하세요.':
+      'Microsoft 365 connects only if the admin allows IMAP/SMTP authentication (basic auth). If it\'s blocked, contact your company IT staff.',
+  'Microsoft 로그인으로 메일 연결이 꺼져 있습니다.':
+      'Connecting mail with Microsoft sign-in is turned off.',
   'Microsoft 클라이언트 값이 올바르지 않습니다.': 'Invalid Microsoft client value.',
-  'NAS 같은 공유 폴더(\\\\…) 경로는 보안상 서버 PC에서 연 관리자 콘솔에서만 정할 수 있습니다. 외장 드라이브(E:\\…)는 어디서든 정할 수 있습니다.': 'For security, shared folder paths (\\\\…) such as a NAS can only be set from the admin console opened on the server PC. External drives (E:\\…) can be set from anywhere.',
-  'NAS 공유 폴더라면 서버 PC(컴퓨터 계정)에 쓰기 권한이 있어야 합니다 — 안 되면 외장 드라이브를 쓰거나 도움말의 "외부 백업 위치"를 참고하세요.': 'For a NAS shared folder, the server PC (computer account) needs write permission — if that doesn\'t work, use an external drive or see "External backup location" in Help.',
+  'NAS 같은 공유 폴더(\\\\…) 경로는 보안상 서버 PC에서 연 관리자 콘솔에서만 정할 수 있습니다. 외장 드라이브(E:\\…)는 어디서든 정할 수 있습니다.':
+      'For security, shared folder paths (\\\\…) such as a NAS can only be set from the admin console opened on the server PC. External drives (E:\\…) can be set from anywhere.',
+  'NAS 공유 폴더라면 서버 PC(컴퓨터 계정)에 쓰기 권한이 있어야 합니다 — 안 되면 외장 드라이브를 쓰거나 도움말의 "외부 백업 위치"를 참고하세요.':
+      'For a NAS shared folder, the server PC (computer account) needs write permission — if that doesn\'t work, use an external drive or see "External backup location" in Help.',
   'NH농협': 'NH Nonghyup',
   'NH농협은행': 'NH NongHyup Bank',
   'OAuth 켜기 값을 확인하세요.': 'Check the OAuth on/off values.',
@@ -112,17 +163,26 @@ const Map<String, String> serverEn = {
   'SK네트웍스': 'SK Networks',
   'SK텔레콤': 'SK Telecom',
   'TangoTalk 백업 파일이 아닙니다.': 'This isn\'t a TangoTalk backup file.',
-  'TangoTalk 앱으로 돌아가 이메일 확인을 마치세요. 이 창은 닫아도 됩니다.': 'Go back to the TangoTalk app to finish verifying your email. You can close this window.',
-  'TangoTalk 앱으로 돌아가세요. 이 창은 닫아도 됩니다.': 'Go back to the TangoTalk app. You can close this window.',
-  'TangoTalk과 회사 계정에서 로그아웃했습니다. 이 창은 닫아도 됩니다.': 'Signed out of TangoTalk and your company account. You can close this window.',
-  'TangoTalk에 등록한 보안 키·패스키로 로그인합니다.': 'Sign in with a security key/passkey registered in TangoTalk.',
+  'TangoTalk 앱으로 돌아가 이메일 확인을 마치세요. 이 창은 닫아도 됩니다.':
+      'Go back to the TangoTalk app to finish verifying your email. You can close this window.',
+  'TangoTalk 앱으로 돌아가세요. 이 창은 닫아도 됩니다.':
+      'Go back to the TangoTalk app. You can close this window.',
+  'TangoTalk과 회사 계정에서 로그아웃했습니다. 이 창은 닫아도 됩니다.':
+      'Signed out of TangoTalk and your company account. You can close this window.',
+  'TangoTalk에 등록한 보안 키·패스키로 로그인합니다.':
+      'Sign in with a security key/passkey registered in TangoTalk.',
   'WEB_DOMAIN이 없어 SAML을 쓸 수 없습니다.': 'SAML can\'t be used without WEB_DOMAIN.',
-  '[backup] 설정을 읽지 못해 예약하지 않았습니다:': '[backup] Not scheduled because settings couldn\'t be read:',
-  '[backup] 첨부파일 미러 키가 바뀌어 첨부파일 백업을 새로 만듭니다.': '[backup] The attachment mirror key changed, so a new attachment backup will be created.',
+  '[backup] 설정을 읽지 못해 예약하지 않았습니다:':
+      '[backup] Not scheduled because settings couldn\'t be read:',
+  '[backup] 첨부파일 미러 키가 바뀌어 첨부파일 백업을 새로 만듭니다.':
+      '[backup] The attachment mirror key changed, so a new attachment backup will be created.',
   '[ddns] 설정을 읽지 못했습니다:': '[ddns] Couldn\'t read settings:',
-  '[projects] 공개 프로젝트 생성 알림 실패:': '[projects] Failed to send public project creation notification:',
-  '[projects] 미뤄 둔 공개 프로젝트 생성 알림이 너무 많아 이번 알림은 보내지 않습니다.': '[projects] Too many deferred public project creation notifications; this one won\'t be sent.',
-  '[web-tls]   WEB_DOMAIN을 설정했으므로 Let\'s Encrypt 가입자 약관(https://letsencrypt.org/repository/)에 동의한 것으로 계정을 만듭니다.': '[web-tls]   Since WEB_DOMAIN is set, the account is created on the basis that you agree to the Let\'s Encrypt Subscriber Agreement (https://letsencrypt.org/repository/).',
+  '[projects] 공개 프로젝트 생성 알림 실패:':
+      '[projects] Failed to send public project creation notification:',
+  '[projects] 미뤄 둔 공개 프로젝트 생성 알림이 너무 많아 이번 알림은 보내지 않습니다.':
+      '[projects] Too many deferred public project creation notifications; this one won\'t be sent.',
+  '[web-tls]   WEB_DOMAIN을 설정했으므로 Let\'s Encrypt 가입자 약관(https://letsencrypt.org/repository/)에 동의한 것으로 계정을 만듭니다.':
+      '[web-tls]   Since WEB_DOMAIN is set, the account is created on the basis that you agree to the Let\'s Encrypt Subscriber Agreement (https://letsencrypt.org/repository/).',
   '[계산] ': '[Calc] ',
   '[공제] ': '[Deduction] ',
   '[이모티콘]': '[Sticker]',
@@ -132,12 +192,15 @@ const Map<String, String> serverEn = {
   'assigneeId가 올바르지 않습니다.': 'Invalid assigneeId.',
   'before가 올바르지 않습니다.': 'Invalid before.',
   'before는 밀리초 시각이어야 합니다.': 'before must be a time in milliseconds.',
-  'cardLast4(카드 끝 4자리) 또는 cardId가 있어야 합니다.': 'cardLast4 (last 4 card digits) or cardId is required.',
-  'code_challenge는 S256(43자)만 됩니다.': 'code_challenge must be S256 (43 characters).',
+  'cardLast4(카드 끝 4자리) 또는 cardId가 있어야 합니다.':
+      'cardLast4 (last 4 card digits) or cardId is required.',
+  'code_challenge는 S256(43자)만 됩니다.':
+      'code_challenge must be S256 (43 characters).',
   'code_verifier가 맞지 않습니다.': 'code_verifier does not match.',
   'connectedId 모양이 아닙니다.': 'Not a connectedId.',
   'creatorId가 올바르지 않습니다.': 'Invalid creatorId.',
-  'deviceId, identityPublicKey, signingPublicKey가 필요합니다.': 'deviceId, identityPublicKey, and signingPublicKey are required.',
+  'deviceId, identityPublicKey, signingPublicKey가 필요합니다.':
+      'deviceId, identityPublicKey, and signingPublicKey are required.',
   'deviceId가 올바르지 않습니다.': 'Invalid deviceId.',
   'deviceId가 필요합니다.': 'deviceId is required.',
   'digestEnabled는 참/거짓이어야 합니다.': 'digestEnabled must be true/false.',
@@ -152,15 +215,21 @@ const Map<String, String> serverEn = {
   'from, to(ms)를 보내세요.': 'Send from and to (ms).',
   'from, to(ms)를 올바르게 보내세요.': 'Send valid from and to (ms) values.',
   'from과 to는 함께 보내야 합니다.': 'from and to must be sent together.',
-  'gmail.com은 회사 도메인이 아닙니다 — Google Workspace의 회사 도메인을 넣으세요.': 'gmail.com isn\'t a company domain — enter your company\'s Google Workspace domain.',
-  'grant_type은 authorization_code·refresh_token만 됩니다.': 'grant_type must be authorization_code or refresh_token.',
-  'groupwareScope는 \'org\', \'team\', \'server\' 중 하나여야 합니다.': 'groupwareScope must be one of \'org\', \'team\', or \'server\'.',
+  'gmail.com은 회사 도메인이 아닙니다 — Google Workspace의 회사 도메인을 넣으세요.':
+      'gmail.com isn\'t a company domain — enter your company\'s Google Workspace domain.',
+  'grant_type은 authorization_code·refresh_token만 됩니다.':
+      'grant_type must be authorization_code or refresh_token.',
+  'groupwareScope는 \'org\', \'team\', \'server\' 중 하나여야 합니다.':
+      'groupwareScope must be one of \'org\', \'team\', or \'server\'.',
   'hidden 값이 필요합니다.': 'hidden is required.',
   'hidden을 올바르게 보내세요.': 'Send a valid hidden value.',
-  'http 주소는 이 PC 안(127.0.0.1·localhost)만 됩니다. 그 밖에는 https를 쓰세요.': 'http addresses are only allowed on this PC (127.0.0.1 / localhost). Use https otherwise.',
+  'http 주소는 이 PC 안(127.0.0.1·localhost)만 됩니다. 그 밖에는 https를 쓰세요.':
+      'http addresses are only allowed on this PC (127.0.0.1 / localhost). Use https otherwise.',
   'http(s) 주소만 됩니다.': 'Only http(s) addresses are allowed.',
-  'http:// 또는 https://로 시작하는 올바른 주소를 입력하세요.': 'Enter a valid address starting with http:// or https://.',
-  'https:// 또는 webcal://로 시작하는 ICS 주소를 넣으세요.': 'Enter an ICS address starting with https:// or webcal://.',
+  'http:// 또는 https://로 시작하는 올바른 주소를 입력하세요.':
+      'Enter a valid address starting with http:// or https://.',
+  'https:// 또는 webcal://로 시작하는 ICS 주소를 넣으세요.':
+      'Enter an ICS address starting with https:// or webcal://.',
   'iM뱅크(대구)': 'iM Bank (Daegu)',
   'iconType이 올바르지 않습니다.': 'Invalid iconType.',
   'ids, kind, messageId 중 하나를 보내세요.': 'Send one of ids, kind, or messageId.',
@@ -169,20 +238,23 @@ const Map<String, String> serverEn = {
   'ldapManagerSync는 참/거짓이어야 합니다.': 'ldapManagerSync must be true or false.',
   'limit은 1 이상의 숫자여야 합니다.': 'limit must be a number of 1 or more.',
   'mentionAll은 true/false여야 합니다.': 'mentionAll must be true/false.',
-  'messageEditDeleteEnabled는 true/false여야 합니다.': 'messageEditDeleteEnabled must be true/false.',
+  'messageEditDeleteEnabled는 true/false여야 합니다.':
+      'messageEditDeleteEnabled must be true/false.',
   'messageId가 올바르지 않습니다.': 'Invalid messageId.',
   'mustRead는 true/false여야 합니다.': 'mustRead must be true/false.',
   'occurrenceStart가 올바르지 않습니다.': 'Invalid occurrenceStart.',
   'offset은 0 이상의 숫자여야 합니다.': 'offset must be a number of 0 or more.',
   'optionIds는 보기 id 배열이어야 합니다.': 'optionIds must be an array of option IDs.',
   'order는 asc|desc 중 하나여야 합니다.': 'order must be asc or desc.',
-  'orgScope는 \'team\' 또는 \'account\'여야 합니다.': 'orgScope must be \'team\' or \'account\'.',
+  'orgScope는 \'team\' 또는 \'account\'여야 합니다.':
+      'orgScope must be \'team\' or \'account\'.',
   'payload가 올바른 JSON이 아닙니다.': 'payload isn\'t valid JSON.',
   'pinned는 true/false여야 합니다.': 'pinned must be true/false.',
   'projectId 또는 teamId가 필요합니다.': 'projectId or teamId is required.',
   'pushWhileOnline은 true/false여야 합니다.': 'pushWhileOnline must be true/false.',
   'q가 올바르지 않습니다.': 'Invalid q.',
-  'redirect_uri가 승인 때와 다릅니다.': 'redirect_uri differs from the one used at approval.',
+  'redirect_uri가 승인 때와 다릅니다.':
+      'redirect_uri differs from the one used at approval.',
   'refreshToken이 없습니다.': 'refreshToken is missing.',
   'response_type=code만 됩니다.': 'Only response_type=code is supported.',
   'roomId가 올바르지 않습니다.': 'Invalid roomId.',
@@ -190,12 +262,15 @@ const Map<String, String> serverEn = {
   'scope가 올바르지 않습니다.': 'Invalid scope.',
   'scope는 read·write 중에서 고르세요.': 'scope must be read and/or write.',
   'scope는 team|all 중 하나여야 합니다.': 'scope must be team or all.',
-  'server/.env에 CODEF_PUBLIC_KEY가 없어 계정을 연결할 수 없습니다.': 'No CODEF_PUBLIC_KEY in server/.env, so accounts can\'t be linked.',
+  'server/.env에 CODEF_PUBLIC_KEY가 없어 계정을 연결할 수 없습니다.':
+      'No CODEF_PUBLIC_KEY in server/.env, so accounts can\'t be linked.',
   'since는 밀리초 시각이어야 합니다.': 'since must be a time in milliseconds.',
-  'subscription은 endpoint와 keys(p256dh, auth)가 있는 객체 또는 null이어야 합니다.': 'subscription must be an object with endpoint and keys (p256dh, auth), or null.',
+  'subscription은 endpoint와 keys(p256dh, auth)가 있는 객체 또는 null이어야 합니다.':
+      'subscription must be an object with endpoint and keys (p256dh, auth), or null.',
   'targetUserId가 필요합니다.': 'targetUserId is required.',
   'teamId가 필요합니다.': 'teamId is required.',
-  'teamId에 내가 속한 팀의 id를 넣으세요(GET /api/v1/teams).': 'Set teamId to the ID of a team you belong to (GET /api/v1/teams).',
+  'teamId에 내가 속한 팀의 id를 넣으세요(GET /api/v1/teams).':
+      'Set teamId to the ID of a team you belong to (GET /api/v1/teams).',
   'teamId에 내가 속한 팀의 id를 넣으세요.': 'Set teamId to the id of a team you belong to.',
   'text나 blocks를 넣으세요.': 'Provide text or blocks.',
   'text나 blocks에 보낼 내용을 넣으세요.': 'Put the content to send in text or blocks.',
@@ -203,10 +278,13 @@ const Map<String, String> serverEn = {
   'token은 문자열 또는 null이어야 합니다.': 'token must be a string or null.',
   'token이 올바르지 않습니다.': 'Invalid token.',
   'transactions(사용 건 목록)를 보내세요.': 'Send transactions (a list of transactions).',
-  'type은 \'topic\' 또는 \'group\'이어야 합니다 (DM은 /rooms/dm 사용).': 'type must be \'topic\' or \'group\' (use /rooms/dm for DMs).',
+  'type은 \'topic\' 또는 \'group\'이어야 합니다 (DM은 /rooms/dm 사용).':
+      'type must be \'topic\' or \'group\' (use /rooms/dm for DMs).',
   'until은 밀리초 시각이어야 합니다.': 'until must be a time in milliseconds.',
-  'usedAt(사용 시각 — ISO 8601, 예: 2026-10-18T12:30:00+09:00)을 확인하세요.': 'Check usedAt (time of use — ISO 8601, e.g. 2026-10-18T12:30:00+09:00).',
-  'which는 \'bot\'·\'client\'·\'signing\' 중 하나여야 합니다.': 'which must be \'bot\', \'client\' or \'signing\'.',
+  'usedAt(사용 시각 — ISO 8601, 예: 2026-10-18T12:30:00+09:00)을 확인하세요.':
+      'Check usedAt (time of use — ISO 8601, e.g. 2026-10-18T12:30:00+09:00).',
+  'which는 \'bot\'·\'client\'·\'signing\' 중 하나여야 합니다.':
+      'which must be \'bot\', \'client\' or \'signing\'.',
   '⏰ 리마인더': '⏰ Reminder',
   '가맹점명': 'Merchant name',
   '가맹점사업자등록번호': 'Merchant business registration number',
@@ -222,27 +300,37 @@ const Map<String, String> serverEn = {
   '감지할 필드를 하나 이상 고르세요.': 'Select at least one field to watch.',
   '같은 결재자를 두 번 넣었습니다.': 'You added the same approver twice.',
   '같은 날을 두 번 골랐습니다.': 'You selected the same day twice.',
-  '같은 모양으로 고쳐서 "엑셀 가져오기"로 다시 올릴 수 있습니다(작성 중인 대장만).': 'Edit it in the same layout and upload it again with "Import Excel" (draft payrolls only).',
+  '같은 모양으로 고쳐서 "엑셀 가져오기"로 다시 올릴 수 있습니다(작성 중인 대장만).':
+      'Edit it in the same layout and upload it again with "Import Excel" (draft payrolls only).',
   '같은 보기가 여러 번 있습니다.': 'The same option appears more than once.',
-  '같은 사람을 결재자와 참조자로 함께 넣을 수 없습니다.': 'The same person can\'t be both an approver and a CC.',
-  '같은 사람을 기본 결재자와 기본 참조자로 함께 넣을 수 없습니다.': 'The same person can\'t be both a default approver and a default CC.',
+  '같은 사람을 결재자와 참조자로 함께 넣을 수 없습니다.':
+      'The same person can\'t be both an approver and a CC.',
+  '같은 사람을 기본 결재자와 기본 참조자로 함께 넣을 수 없습니다.':
+      'The same person can\'t be both a default approver and a default CC.',
   '같은 사용 건이 이미 있습니다.': 'This transaction already exists.',
-  '같은 아이디의 계정이 이미 있는데 회사 계정과 이메일이 달라 연결하지 않았습니다. 이 앱의 비밀번호로 로그인하거나 관리자에게 문의하세요.': 'An account with the same ID already exists but its email differs from the company account, so they weren\'t linked. Sign in with this app\'s password or contact an admin.',
-  '같은 위치에 같은 이름의 부서가 있습니다.': 'A department with the same name already exists in this location.',
+  '같은 아이디의 계정이 이미 있는데 회사 계정과 이메일이 달라 연결하지 않았습니다. 이 앱의 비밀번호로 로그인하거나 관리자에게 문의하세요.':
+      'An account with the same ID already exists but its email differs from the company account, so they weren\'t linked. Sign in with this app\'s password or contact an admin.',
+  '같은 위치에 같은 이름의 부서가 있습니다.':
+      'A department with the same name already exists in this location.',
   '같은 이름의 양식이 있습니다.': 'A form with the same name already exists.',
   '같은 이름의 자원이 있습니다.': 'A resource with the same name already exists.',
   '같은 이름의 폴더가 이미 있습니다.': 'A folder with that name already exists.',
   '같은 종류가 두 번 있습니다.': 'The same type appears twice.',
   '같은 참조자를 두 번 넣었습니다.': 'You added the same CC twice.',
   '같은 카드 사용 건이 두 번 있습니다.': 'The same card transaction appears twice.',
-  '같은 카드를 쓰는 다른 사람이 먼저 가져간 사용 건입니다.': 'Another user of this card already took this transaction.',
-  '같은 팀 멤버만 프로젝트에 추가할 수 있습니다.': 'Only members of the same team can be added to the project.',
-  '같은 팀에 있는 사람과만 비밀 대화를 할 수 있습니다.': 'You can only start a secret chat with people on the same team.',
+  '같은 카드를 쓰는 다른 사람이 먼저 가져간 사용 건입니다.':
+      'Another user of this card already took this transaction.',
+  '같은 팀 멤버만 프로젝트에 추가할 수 있습니다.':
+      'Only members of the same team can be added to the project.',
+  '같은 팀에 있는 사람과만 비밀 대화를 할 수 있습니다.':
+      'You can only start a secret chat with people on the same team.',
   '같은 팀의 대화방에만 공유할 수 있습니다.': 'You can only share to chats in the same team.',
   '같은 팀의 폴더에만 넣을 수 있습니다.': 'You can only add it to folders in the same team.',
-  '같은 팀의 프로젝트만 템플릿으로 저장할 수 있습니다.': 'Only projects in the same team can be saved as a template.',
+  '같은 팀의 프로젝트만 템플릿으로 저장할 수 있습니다.':
+      'Only projects in the same team can be saved as a template.',
   '같은 폴더입니다.': 'It\'s the same folder.',
-  '같은 프로젝트의 업무만 선행 업무로 둘 수 있습니다.': 'Only tasks in the same project can be predecessors.',
+  '같은 프로젝트의 업무만 선행 업무로 둘 수 있습니다.':
+      'Only tasks in the same project can be predecessors.',
   '개인 사정으로 인한 자진 퇴사': 'Voluntary resignation for personal reasons',
   '개천절': 'National Foundation Day',
   '거래구분': 'Transaction type',
@@ -255,8 +343,10 @@ const Map<String, String> serverEn = {
   '거래처명': 'Client name',
   '거래처코드': 'Client code',
   '걸린 시간(시간)': 'Time taken (hours)',
-  '검색 위치(Base DN — 예: DC=company,DC=local)를 넣으세요.': 'Enter the search base (Base DN — e.g. DC=company,DC=local).',
-  '게시글은 보드 뷰 토픽에서만 올릴 수 있습니다.': 'Posts can only be created in board view topics.',
+  '검색 위치(Base DN — 예: DC=company,DC=local)를 넣으세요.':
+      'Enter the search base (Base DN — e.g. DC=company,DC=local).',
+  '게시글은 보드 뷰 토픽에서만 올릴 수 있습니다.':
+      'Posts can only be created in board view topics.',
   '결근': 'Absence',
   '결재 문서를 찾을 수 없습니다.': 'Approval document not found.',
   '결재 문서를 확인하세요.': 'Check the approval document.',
@@ -264,21 +354,26 @@ const Map<String, String> serverEn = {
   '결재 요청': 'Approval request',
   '결재 종류를 고르세요.': 'Select an approval type.',
   '결재·근태 관리자만 할 수 있습니다.': 'Only approval/attendance admins can do this.',
-  '결재선 규칙은 그룹웨어 관리자만 정할 수 있습니다.': 'Only groupware admins can set approval line rules.',
-  '결재선 역할은 결재·합의·전결 중에서 고르세요.': 'Choose an approval line role: approval, concurrence, or final approval.',
-  '결재선에 고를 수 없는 사람이 있습니다(정회원 이상, 같은 범위의 사람만).': 'The approval line includes someone who can\'t be selected (members or above in the same scope only).',
+  '결재선 규칙은 그룹웨어 관리자만 정할 수 있습니다.':
+      'Only groupware admins can set approval line rules.',
+  '결재선 역할은 결재·합의·전결 중에서 고르세요.':
+      'Choose an approval line role: approval, concurrence, or final approval.',
+  '결재선에 고를 수 없는 사람이 있습니다(정회원 이상, 같은 범위의 사람만).':
+      'The approval line includes someone who can\'t be selected (members or above in the same scope only).',
   '결재선을 찾을 수 없습니다.': 'Approval line not found.',
   '결재자가 아닌 사람입니다.': 'This person isn\'t an approver.',
   '결재자를 참조자로 또 넣을 수는 없습니다.': 'An approver can\'t also be added as a CC.',
   '결재자별': 'By approver',
   '결정세액(어림)': 'Determined tax (estimate)',
-  '결정세액·차감세액은 근로소득공제·기본공제(가족 수)·국민연금·보험료(또는 표준세액공제)·근로소득세액공제·자녀세액공제와 연말정산 공제 자료로 계산한 어림입니다.': 'The determined and difference amounts are estimates using the earned income deduction, basic deduction (dependents), National Pension, insurance premiums (or the standard tax credit), earned income tax credit, child tax credit and year-end deduction data.',
+  '결정세액·차감세액은 근로소득공제·기본공제(가족 수)·국민연금·보험료(또는 표준세액공제)·근로소득세액공제·자녀세액공제와 연말정산 공제 자료로 계산한 어림입니다.':
+      'The determined and difference amounts are estimates using the earned income deduction, basic deduction (dependents), National Pension, insurance premiums (or the standard tax credit), earned income tax credit, child tax credit and year-end deduction data.',
   '결제금액': 'Payment amount',
   '겸직 부서': 'Concurrent departments',
   '겸직을 찾을 수 없습니다.': 'Concurrent post not found.',
   '경남': 'Gyeongnam',
   '경남은행': 'Kyongnam Bank',
-  '경영상 필요·회사 불황으로 인원 감축 등(해고·권고사직·계약 파기)': 'Workforce reduction for business needs or downturn (dismissal, recommended resignation, contract cancellation)',
+  '경영상 필요·회사 불황으로 인원 감축 등(해고·권고사직·계약 파기)':
+      'Workforce reduction for business needs or downturn (dismissal, recommended resignation, contract cancellation)',
   '경조사': 'Family event leave',
   '계약 기간 만료·공사 종료': 'End of contract term or project',
   '계정 ID': 'Account ID',
@@ -288,16 +383,22 @@ const Map<String, String> serverEn = {
   '계정 코드는 숫자·영문 10자까지입니다.': 'Account codes are up to 10 digits or letters.',
   '계정(아이디)이 올바르지 않습니다.': 'Invalid account (ID).',
   '계정과목 이름을 30자까지 쓰세요.': 'Enter an account name of up to 30 characters.',
-  '계정은 그룹웨어 → 지출 → 법인카드 관리 → 지출 관리 설정에서 바꿉니다. 부가세 매입세액(부가세대급금)은 나누지 않았습니다.': 'Accounts are changed under Groupware → Expenses → Corporate card management → expense settings. Input VAT isn\'t split out.',
-  '계정을 만드는 사이 같은 아이디가 생겼습니다. 다시 로그인하세요.': 'The same ID was created while your account was being set up. Sign in again.',
+  '계정은 그룹웨어 → 지출 → 법인카드 관리 → 지출 관리 설정에서 바꿉니다. 부가세 매입세액(부가세대급금)은 나누지 않았습니다.':
+      'Accounts are changed under Groupware → Expenses → Corporate card management → expense settings. Input VAT isn\'t split out.',
+  '계정을 만드는 사이 같은 아이디가 생겼습니다. 다시 로그인하세요.':
+      'The same ID was created while your account was being set up. Sign in again.',
   '계정을 찾을 수 없습니다.': 'Account not found.',
-  '계정을 확인할 수 없습니다. 다시 로그인해 주세요.': 'Couldn\'t verify your account. Please sign in again.',
-  '계정의 이메일을 이 주소로 바꾸려고 보낸 메일입니다. 아래 코드를 앱에 넣으세요.': 'This email was sent to change your account email to this address. Enter the code below in the app.',
+  '계정을 확인할 수 없습니다. 다시 로그인해 주세요.':
+      'Couldn\'t verify your account. Please sign in again.',
+  '계정의 이메일을 이 주소로 바꾸려고 보낸 메일입니다. 아래 코드를 앱에 넣으세요.':
+      'This email was sent to change your account email to this address. Enter the code below in the app.',
   '계정코드': 'Account code',
   '계좌번호는 숫자 8~16자리입니다(- 없이).': 'Account numbers are 8–16 digits (no hyphens).',
   '고기': 'BBQ',
-  '고른 기간에 근무일이 없습니다(주말·공휴일만 있음).': 'There are no workdays in the selected period (only weekends/holidays).',
-  '고를 수 없는 공감입니다. 앱을 최신 버전으로 업데이트해 주세요.': 'This reaction isn\'t available. Please update the app to the latest version.',
+  '고른 기간에 근무일이 없습니다(주말·공휴일만 있음).':
+      'There are no workdays in the selected period (only weekends/holidays).',
+  '고를 수 없는 공감입니다. 앱을 최신 버전으로 업데이트해 주세요.':
+      'This reaction isn\'t available. Please update the app to the latest version.',
   '고속버스': 'Express bus',
   '고용보험 비적용': 'Not covered by employment insurance',
   '고정 값은 60자까지입니다.': 'Fixed values can be up to 60 characters.',
@@ -308,9 +409,11 @@ const Map<String, String> serverEn = {
   '공개 범위가 올바르지 않습니다.': 'Invalid visibility.',
   '공개 설정 값이 올바르지 않습니다.': 'Invalid visibility setting value.',
   '공개 여부가 올바르지 않습니다.': 'Invalid public/private value.',
-  '공개 프로젝트는 정회원 이상 팀원 모두가 참여합니다. 비공개로 바꾼 뒤 멤버를 관리하세요.': 'All team members (member or above) join public projects. Make it private first to manage members.',
+  '공개 프로젝트는 정회원 이상 팀원 모두가 참여합니다. 비공개로 바꾼 뒤 멤버를 관리하세요.':
+      'All team members (member or above) join public projects. Make it private first to manage members.',
   '공개되지 않은 캘린더입니다.': 'This calendar isn\'t public.',
-  '공개키(identityPublicKey, signingPublicKey)가 올바르지 않습니다.': 'Invalid public keys (identityPublicKey, signingPublicKey).',
+  '공개키(identityPublicKey, signingPublicKey)가 올바르지 않습니다.':
+      'Invalid public keys (identityPublicKey, signingPublicKey).',
   '공급받는 자': 'Recipient',
   '공급받는 자 사업자번호': 'Recipient business number',
   '공급받는자등록번호': 'Recipient registration number',
@@ -325,7 +428,8 @@ const Map<String, String> serverEn = {
   '공유할 메시지를 찾을 수 없습니다.': 'Message to share not found.',
   '공유할 방을 찾을 수 없습니다.': 'Room to share not found.',
   '공제 자료 세액공제': 'Deduction data tax credits',
-  '공제 자료(신용카드·의료비·교육비·기부금·주택자금·연금계좌·월세 등)는 근로자나 담당자가 홈택스 간소화 자료의 합계를 넣은 값입니다. 실제 정산은 세무 프로그램·홈택스로 하세요.': 'Deduction data (credit cards, medical, education, donations, housing funds, pension accounts, rent, etc.) is the totals of Hometax simplified data entered by the employee or staff. Do the actual settlement with tax software or Hometax.',
+  '공제 자료(신용카드·의료비·교육비·기부금·주택자금·연금계좌·월세 등)는 근로자나 담당자가 홈택스 간소화 자료의 합계를 넣은 값입니다. 실제 정산은 세무 프로그램·홈택스로 하세요.':
+      'Deduction data (credit cards, medical, education, donations, housing funds, pension accounts, rent, etc.) is the totals of Hometax simplified data entered by the employee or staff. Do the actual settlement with tax software or Hometax.',
   '공제 자료를 확인하세요.': 'Check the deduction data.',
   '공제 합계': 'Total deductions',
   '공지는 2000자 이내로 작성하세요.': 'Announcements must be 2000 characters or fewer.',
@@ -333,8 +437,10 @@ const Map<String, String> serverEn = {
   '공지를 작성할 권한이 없습니다.': 'You don\'t have permission to write announcements.',
   '공지를 찾을 수 없습니다.': 'Announcement not found.',
   '과세': 'Taxable',
-  '관리자가 2단계 인증을 꼭 쓰게 정해서 끌 수 없습니다.': 'The admin requires two-factor authentication, so you can\'t turn it off.',
-  '관리자가 2단계 인증을 꼭 쓰게 정해서 마지막 보안 키는 지울 수 없습니다. 인증 앱을 먼저 켜세요.': 'Your administrator requires 2-step verification, so the last security key can\'t be deleted. Set up the authenticator app first.',
+  '관리자가 2단계 인증을 꼭 쓰게 정해서 끌 수 없습니다.':
+      'The admin requires two-factor authentication, so you can\'t turn it off.',
+  '관리자가 2단계 인증을 꼭 쓰게 정해서 마지막 보안 키는 지울 수 없습니다. 인증 앱을 먼저 켜세요.':
+      'Your administrator requires 2-step verification, so the last security key can\'t be deleted. Set up the authenticator app first.',
   '관리자는 그 팀의 소유자만 뺄 수 있습니다.': 'Admins can only remove that team\'s owner.',
   '관리자만 남의 근태를 볼 수 있습니다.': 'Only admins can view other people\'s attendance.',
   '관리자만 남의 대결을 정할 수 있습니다.': 'Only admins can set proxy approval for others.',
@@ -353,17 +459,20 @@ const Map<String, String> serverEn = {
   '교통': 'Transport',
   '교통비': 'Transportation expenses',
   '교통편': 'Transportation',
-  '구독 중이거나 멤버인 캘린더가 아닙니다.': 'This isn\'t a calendar you subscribe to or are a member of.',
+  '구독 중이거나 멤버인 캘린더가 아닙니다.':
+      'This isn\'t a calendar you subscribe to or are a member of.',
   '구독 키(p256dh, auth)가 올바르지 않습니다.': 'Invalid subscription keys (p256dh, auth).',
   '구매 사유': 'Purchase reason',
   '구매 요청': 'Purchase request',
-  '구매 요청·출장 신청 결재만 정산할 수 있습니다.': 'Only purchase requests and business trip requests can be settled.',
+  '구매 요청·출장 신청 결재만 정산할 수 있습니다.':
+      'Only purchase requests and business trip requests can be settled.',
   '구매 품목': 'Items to purchase',
   '구매처': 'Vendor',
   '구분': 'Type',
   '구성원을 찾을 수 없습니다.': 'Member not found.',
   '국민': 'Kookmin',
-  '국민연금 기준소득월액 상·하한을 원 단위로 넣으세요.': 'Enter the national pension income floor and cap in won.',
+  '국민연금 기준소득월액 상·하한을 원 단위로 넣으세요.':
+      'Enter the national pension income floor and cap in won.',
   '국민연금 하한이 상한보다 큽니다.': 'The national pension floor is above the cap.',
   '국밥': 'Gukbap',
   '국세청승인번호': 'NTS approval number',
@@ -376,21 +485,30 @@ const Map<String, String> serverEn = {
   '규칙 흐름 형식이 올바르지 않습니다.': 'Invalid rule flow format.',
   '규칙은 20개까지 만들 수 있습니다.': 'You can create up to 20 rules.',
   '규칙을 저장한 사람을 알 수 없습니다.': 'Unknown who saved the rule.',
-  '규칙을 저장한 사람이 더 이상 이 프로젝트를 관리할 수 없습니다.': 'The person who saved the rule can no longer manage this project.',
-  '규칙을 저장한 사람이 더 이상 이 프로젝트의 구성원이 아닙니다.': 'The person who saved the rule is no longer a member of this project.',
-  '규칙을 저장한 사람이 더 이상 채팅방 멤버가 아닙니다.': 'The person who saved the rule is no longer a member of the chat.',
-  '규칙을 저장한 사람이 탈퇴·정지됐거나 준회원이 되었습니다.': 'The person who saved the rule has left, been suspended, or become a guest.',
+  '규칙을 저장한 사람이 더 이상 이 프로젝트를 관리할 수 없습니다.':
+      'The person who saved the rule can no longer manage this project.',
+  '규칙을 저장한 사람이 더 이상 이 프로젝트의 구성원이 아닙니다.':
+      'The person who saved the rule is no longer a member of this project.',
+  '규칙을 저장한 사람이 더 이상 채팅방 멤버가 아닙니다.':
+      'The person who saved the rule is no longer a member of the chat.',
+  '규칙을 저장한 사람이 탈퇴·정지됐거나 준회원이 되었습니다.':
+      'The person who saved the rule has left, been suspended, or become a guest.',
   '규칙을 찾을 수 없습니다.': 'Rule not found.',
   '규칙을 확인하세요.': 'Check the rule.',
-  '그 기간에 이미 맡겨 둔 대결이 있습니다.': 'There\'s already a proxy approval delegation for that period.',
+  '그 기간에 이미 맡겨 둔 대결이 있습니다.':
+      'There\'s already a proxy approval delegation for that period.',
   '그 밖의 공제': 'Other deductions',
-  '그 아이디로 찾은 사람이 여럿입니다 — 검색 조건을 더 좁히세요.': 'Multiple people found with that ID — narrow your search filter.',
+  '그 아이디로 찾은 사람이 여럿입니다 — 검색 조건을 더 좁히세요.':
+      'Multiple people found with that ID — narrow your search filter.',
   '그 카드의 사용자만 고를 수 있습니다.': 'Only that card\'s users can be chosen.',
-  '그 캘린더에 일정을 만들 권한이 없습니다.': 'You don\'t have permission to create events in that calendar.',
+  '그 캘린더에 일정을 만들 권한이 없습니다.':
+      'You don\'t have permission to create events in that calendar.',
   '그 판을 찾을 수 없습니다.': 'That version wasn\'t found.',
   '그룹 규칙 지움': 'Group rule deleted',
-  '그룹 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.': 'Invalid group icon photo. Please upload it again.',
-  '그룹 이름(또는 DN·개체 ID)을 500자 안으로 넣으세요.': 'Enter a group name (or DN/object ID) of up to 500 characters.',
+  '그룹 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.':
+      'Invalid group icon photo. Please upload it again.',
+  '그룹 이름(또는 DN·개체 ID)을 500자 안으로 넣으세요.':
+      'Enter a group name (or DN/object ID) of up to 500 characters.',
   '그룹 채팅 이름이 올바르지 않습니다.': 'Invalid group chat name.',
   '그룹에는 나 이외의 멤버가 최소 1명 필요합니다.': 'A group needs at least 1 member besides you.',
   '그룹채팅만 토픽으로 전환할 수 있습니다.': 'Only group chats can be converted to topics.',
@@ -402,12 +520,15 @@ const Map<String, String> serverEn = {
   '그림 한 장은 5MB 이하여야 합니다.': 'Each image must be 5 MB or smaller.',
   '그림이 아닙니다.': 'Not an image.',
   '근로시간': 'Working hours',
-  '근로시간 기간 종류를 확인하세요(탄력 2주·탄력 3개월·선택근무 정산).': 'Check the working hours period type (flexible 2 weeks, flexible 3 months, selective hours settlement).',
-  '근로자의 귀책 사유에 의한 징계 해고·권고사직': 'Disciplinary dismissal or recommended resignation for the employee\'s fault',
+  '근로시간 기간 종류를 확인하세요(탄력 2주·탄력 3개월·선택근무 정산).':
+      'Check the working hours period type (flexible 2 weeks, flexible 3 months, selective hours settlement).',
+  '근로자의 귀책 사유에 의한 징계 해고·권고사직':
+      'Disciplinary dismissal or recommended resignation for the employee\'s fault',
   '근무 시간': 'Working hours',
   '근무 시작이 끝보다 앞이어야 합니다(HH:MM).': 'Work start must be before work end (HH:MM).',
   '근무 형태 되돌림(범위의 근무 시간)': 'Work schedule reverted (working hours of the scope)',
-  '근무 형태를 고르세요(시차출퇴근·선택근무·자율 출퇴근).': 'Choose a work schedule (staggered hours, flexible hours, or self-scheduled).',
+  '근무 형태를 고르세요(시차출퇴근·선택근무·자율 출퇴근).':
+      'Choose a work schedule (staggered hours, flexible hours, or self-scheduled).',
   '근무일': 'Workdays',
   '근무일수': 'Days worked',
   '근태': 'Attendance',
@@ -420,7 +541,8 @@ const Map<String, String> serverEn = {
   '급여 계좌 없음': 'No salary account',
   '급여 계좌를 확인하세요.': 'Check the salary account.',
   '급여 달을 고르세요(YYYY-MM).': 'Choose the pay month (YYYY-MM).',
-  '급여 담당자는 이 범위의 정회원 이상만 정할 수 있습니다.': 'Payroll staff must be full members or above in this scope.',
+  '급여 담당자는 이 범위의 정회원 이상만 정할 수 있습니다.':
+      'Payroll staff must be full members or above in this scope.',
   '급여 담당자를 확인하세요.': 'Check the payroll staff.',
   '급여 담당자만 할 수 있습니다.': 'Only payroll staff can do this.',
   '급여 대장을 찾을 수 없습니다.': 'Payroll not found.',
@@ -432,24 +554,33 @@ const Map<String, String> serverEn = {
   '기간은 93일까지입니다.': 'The period can be up to 93 days.',
   '기간은 YYYY-MM-DD 형식입니다.': 'The period must be in YYYY-MM-DD format.',
   '기간을 확인하세요.': 'Check the period.',
-  '기간의 시작일은 종료일보다 늦을 수 없습니다.': 'The start date can\'t be later than the end date.',
+  '기간의 시작일은 종료일보다 늦을 수 없습니다.':
+      'The start date can\'t be later than the end date.',
   '기간이 올바르지 않습니다. (YYYY-MM-DD)': 'Invalid period. (YYYY-MM-DD)',
-  '기관 코드가 있는 켜진 카드가 없습니다. 기관 코드를 넣으세요.': 'No enabled card has an organization code. Enter an organization code.',
+  '기관 코드가 있는 켜진 카드가 없습니다. 기관 코드를 넣으세요.':
+      'No enabled card has an organization code. Enter an organization code.',
   '기기를 찾을 수 없습니다.': 'Device not found.',
   '기다리는 TLS-ALPN-01 확인이 없습니다.': 'No pending TLS-ALPN-01 validation.',
   '기다리는 중': 'Waiting',
-  '기본 결재선에 같은 사람이 두 번 있습니다.': 'The default approval line has the same person twice.',
-  '기본 결재선에 결재자로 고를 수 없는 사람이 있습니다.': 'The default approval line has someone who can\'t be an approver.',
+  '기본 결재선에 같은 사람이 두 번 있습니다.':
+      'The default approval line has the same person twice.',
+  '기본 결재선에 결재자로 고를 수 없는 사람이 있습니다.':
+      'The default approval line has someone who can\'t be an approver.',
   '기본 결재선이 올바르지 않습니다.': 'The default approval line is invalid.',
-  '기본 양식은 지울 수 없습니다(끌 수는 있습니다).': 'Default forms can\'t be deleted (they can be turned off).',
+  '기본 양식은 지울 수 없습니다(끌 수는 있습니다).':
+      'Default forms can\'t be deleted (they can be turned off).',
   '기본 양식은 켜고 끄기만 할 수 있습니다.': 'Default forms can only be turned on or off.',
-  '기본 양식은 켜고 끄기와 기본 결재선만 바꿀 수 있습니다.': 'Built-in forms can only be turned on/off and given a default approval line.',
+  '기본 양식은 켜고 끄기와 기본 결재선만 바꿀 수 있습니다.':
+      'Built-in forms can only be turned on/off and given a default approval line.',
   '기본 참조자가 올바르지 않습니다.': 'The default CC list is invalid.',
-  '기본 참조자에 고를 수 없는 사람이 있습니다.': 'The default CC list has someone who can\'t be chosen.',
+  '기본 참조자에 고를 수 없는 사람이 있습니다.':
+      'The default CC list has someone who can\'t be chosen.',
   '기본 캘린더는 삭제할 수 없습니다.': 'The default calendar can\'t be deleted.',
-  '기본 캘린더와 팀 캘린더는 삭제할 수 없습니다.': 'The default calendar and team calendars can\'t be deleted.',
+  '기본 캘린더와 팀 캘린더는 삭제할 수 없습니다.':
+      'The default calendar and team calendars can\'t be deleted.',
   '기본 캘린더의 이름은 바꿀 수 없습니다.': 'The default calendar can\'t be renamed.',
-  '기본 폴더는 이름을 바꾸거나 지울 수 없습니다.': 'Built-in folders can\'t be renamed or deleted.',
+  '기본 폴더는 이름을 바꾸거나 지울 수 없습니다.':
+      'Built-in folders can\'t be renamed or deleted.',
   '기본급': 'Base pay',
   '기안 내용': 'Request details',
   '기업': 'IBK',
@@ -458,7 +589,8 @@ const Map<String, String> serverEn = {
   '김밥': 'Gimbap',
   '끊을 수 없는 연결입니다.': 'This connection can\'t be disconnected.',
   '끔': 'Off',
-  '끝 4자리가 같은 카드가 여럿입니다 — issuer나 cardId를 보내세요.': 'Several cards share these last 4 digits — send issuer or cardId.',
+  '끝 4자리가 같은 카드가 여럿입니다 — issuer나 cardId를 보내세요.':
+      'Several cards share these last 4 digits — send issuer or cardId.',
   '끝 날짜가 시작보다 빠릅니다.': 'The end date is earlier than the start.',
   '끝난 시각': 'Finished at',
   '나 자신은 즐겨찾기할 수 없습니다.': 'You can\'t favorite yourself.',
@@ -472,8 +604,10 @@ const Map<String, String> serverEn = {
   '납품 희망일': 'Desired delivery date',
   '내 사용 건이 아닙니다.': 'This is not your transaction.',
   '내가 남긴 기록만 지울 수 있습니다.': 'You can only delete records you created.',
-  '내가 속한 팀에만 초대 링크를 만들 수 있습니다.': 'You can only create invite links for teams you belong to.',
-  '내가 속한 팀에서만 비밀 대화를 시작할 수 있습니다.': 'You can only start a secret chat in a team you belong to.',
+  '내가 속한 팀에만 초대 링크를 만들 수 있습니다.':
+      'You can only create invite links for teams you belong to.',
+  '내가 속한 팀에서만 비밀 대화를 시작할 수 있습니다.':
+      'You can only start a secret chat in a team you belong to.',
   '내가 쓰는 카드가 아닙니다.': 'You are not a user of this card.',
   '내가 쓴 댓글만 수정할 수 있습니다.': 'You can only edit your own comments.',
   '내가 쓴 업무일지만 지울 수 있습니다.': 'You can only delete your own work reports.',
@@ -482,43 +616,57 @@ const Map<String, String> serverEn = {
   '내보내기 양식을 찾을 수 없습니다.': 'Export layout not found.',
   '내보낼 멤버를 선택하세요.': 'Select a member to remove.',
   '내용 형식이 올바르지 않습니다.': 'Invalid content format.',
-  '내용에 쓸 수 없는 문자가 있습니다.': 'The content contains characters that aren\'t allowed.',
+  '내용에 쓸 수 없는 문자가 있습니다.':
+      'The content contains characters that aren\'t allowed.',
   '내용은 2000자 이내로 작성하세요.': 'Content must be 2000 characters or fewer.',
-  '내용이 없는 메시지는 공지로 등록할 수 없습니다.': 'A message with no content can\'t be made an announcement.',
+  '내용이 없는 메시지는 공지로 등록할 수 없습니다.':
+      'A message with no content can\'t be made an announcement.',
   '냄': 'submitted',
-  '너무 흔하거나 단순한 비밀번호입니다. 다른 비밀번호를 쓰세요.': 'This password is too common or simple. Use a different password.',
+  '너무 흔하거나 단순한 비밀번호입니다. 다른 비밀번호를 쓰세요.':
+      'This password is too common or simple. Use a different password.',
   '넘겨받을 사람을 선택하세요.': 'Select the person to hand over to.',
   '넣을 팀이나 정할 등급 중 하나는 고르세요.': 'Choose a team to add to or a role to set.',
   '네이버 메일': 'Naver Mail',
-  '네이버 메일 → 환경설정 → POP3/IMAP 설정에서 "IMAP/SMTP 사용"을 켜세요. 2단계 인증을 쓰면 네이버 ID → 보안설정의 "애플리케이션 비밀번호"를 넣으세요.': 'In Naver Mail → Settings → POP3/IMAP settings, turn on "Use IMAP/SMTP". If you use two-factor authentication, enter the "Application password" from Naver ID → Security settings.',
+  '네이버 메일 → 환경설정 → POP3/IMAP 설정에서 "IMAP/SMTP 사용"을 켜세요. 2단계 인증을 쓰면 네이버 ID → 보안설정의 "애플리케이션 비밀번호"를 넣으세요.':
+      'In Naver Mail → Settings → POP3/IMAP settings, turn on "Use IMAP/SMTP". If you use two-factor authentication, enter the "Application password" from Naver ID → Security settings.',
   '네이버웍스': 'Naver Works',
-  '네이버웍스 메일 → 환경설정 → IMAP/SMTP에서 사용을 켜고, 관리자가 외부 앱 접속을 막았으면 허용을 받으세요(앱 비밀번호가 필요할 수 있습니다).': 'In Naver Works Mail → Settings → IMAP/SMTP, turn it on. If your admin blocks external app access, ask for permission (an app password may be required).',
+  '네이버웍스 메일 → 환경설정 → IMAP/SMTP에서 사용을 켜고, 관리자가 외부 앱 접속을 막았으면 허용을 받으세요(앱 비밀번호가 필요할 수 있습니다).':
+      'In Naver Works Mail → Settings → IMAP/SMTP, turn it on. If your admin blocks external app access, ask for permission (an app password may be required).',
   '네이버페이': 'Naver Pay',
   '노드 id가 겹칩니다.': 'Duplicate node ID.',
   '노드 id가 올바르지 않습니다.': 'Invalid node ID.',
   '노드 종류가 올바르지 않습니다.': 'Invalid node type.',
   '노드를 자기 자신에 연결할 수 없습니다.': 'A node can\'t connect to itself.',
   '노트 권한 값이 올바르지 않습니다.': 'Invalid note permission value.',
-  '노트 작성자와 관리자만 삭제할 수 있습니다.': 'Only the note\'s author and admins can delete it.',
+  '노트 작성자와 관리자만 삭제할 수 있습니다.':
+      'Only the note\'s author and admins can delete it.',
   '노트 작성자와 관리자만 수정할 수 있습니다.': 'Only the note\'s author and admins can edit it.',
   '노트를 찾을 수 없습니다.': 'Note not found.',
-  '녹화 서버(Egress)가 녹화를 시작하지 못했습니다.': 'The recording server (Egress) couldn\'t start the recording.',
-  '녹화 서버(Egress)가 파일을 마무리했다는 답을 주지 않았습니다.': 'The recording server (Egress) never reported that the file was finished.',
-  '녹화 파일을 찾지 못했습니다. 녹화 폴더 설정(CALL_RECORDING_DIR)을 확인해 주세요.': 'The recording file wasn\'t found. Check the recording folder setting (CALL_RECORDING_DIR).',
+  '녹화 서버(Egress)가 녹화를 시작하지 못했습니다.':
+      'The recording server (Egress) couldn\'t start the recording.',
+  '녹화 서버(Egress)가 파일을 마무리했다는 답을 주지 않았습니다.':
+      'The recording server (Egress) never reported that the file was finished.',
+  '녹화 파일을 찾지 못했습니다. 녹화 폴더 설정(CALL_RECORDING_DIR)을 확인해 주세요.':
+      'The recording file wasn\'t found. Check the recording folder setting (CALL_RECORDING_DIR).',
   '녹화가 시작되지 않았습니다.': 'The recording never started.',
   '녹화가 중단되었습니다.': 'The recording was aborted.',
-  '녹화를 시작하지 못했습니다. 녹화 서버(Egress)가 켜져 있는지 관리자에게 확인해 주세요.': 'Couldn\'t start recording. Ask your administrator to check that the recording server (Egress) is running.',
-  '녹화를 시작한 사람의 계정이 없어 대화방에 올리지 못했습니다.': 'The account that started the recording no longer exists, so it couldn\'t be posted to the chat.',
-  '녹화를 시작한 사람이나 진행자만 녹화를 멈출 수 있습니다.': 'Only the person who started the recording or the host can stop it.',
+  '녹화를 시작하지 못했습니다. 녹화 서버(Egress)가 켜져 있는지 관리자에게 확인해 주세요.':
+      'Couldn\'t start recording. Ask your administrator to check that the recording server (Egress) is running.',
+  '녹화를 시작한 사람의 계정이 없어 대화방에 올리지 못했습니다.':
+      'The account that started the recording no longer exists, so it couldn\'t be posted to the chat.',
+  '녹화를 시작한 사람이나 진행자만 녹화를 멈출 수 있습니다.':
+      'Only the person who started the recording or the host can stop it.',
   '녹화를 찾을 수 없습니다.': 'Recording not found.',
   '녹화에 실패했습니다.': 'Recording failed.',
   '녹화하고 있지 않습니다.': 'Not recording.',
   '농협': 'NongHyup',
   '누군가': 'Someone',
-  '늘 붙일 결재자에 결재자로 고를 수 없는 사람이 있습니다.': 'Some fixed approvers can\'t be chosen as approvers.',
+  '늘 붙일 결재자에 결재자로 고를 수 없는 사람이 있습니다.':
+      'Some fixed approvers can\'t be chosen as approvers.',
   '다른 계정이 쓰고 있는 기기입니다.': 'This device is used by another account.',
   '다른 사람의 사용 건입니다.': 'This is someone else\'s transaction.',
-  '다른 사람이 먼저 이 노트를 수정했습니다. 다시 불러온 뒤 고쳐주세요.': 'Someone else edited this note first. Reload it, then make your changes.',
+  '다른 사람이 먼저 이 노트를 수정했습니다. 다시 불러온 뒤 고쳐주세요.':
+      'Someone else edited this note first. Reload it, then make your changes.',
   '다른 앱의 로그인 결과입니다.': 'This sign-in result belongs to another app.',
   '다시 로그인할 계정을 찾을 수 없습니다.': 'Couldn\'t find the account to sign in again.',
   '다시 로그인해야 합니다.': 'You need to sign in again.',
@@ -526,15 +674,21 @@ const Map<String, String> serverEn = {
   '다시 받기 토큰이 없거나 만료됐습니다.': 'The refresh token is invalid or expired.',
   '다운로드 링크가 만료되었거나 유효하지 않습니다.': 'The download link has expired or is invalid.',
   '다음 메일': 'Daum Mail',
-  '다음 메일 → 환경설정 → IMAP/SMTP에서 사용을 켜세요. 2단계 인증이면 앱 비밀번호를 넣으세요.': 'In Daum Mail → Settings → IMAP/SMTP, turn it on. If you use two-factor authentication, enter an app password.',
-  '다음 예약과 겹칩니다. 더 짧게 고르세요.': 'That overlaps the next booking. Choose a shorter time.',
-  '다음 제목을 이 순서로 쓰고, 해당 내용이 없으면 "없음"이라고 적습니다:': 'Use these headings in this order, and write "None" when a section has nothing:',
+  '다음 메일 → 환경설정 → IMAP/SMTP에서 사용을 켜세요. 2단계 인증이면 앱 비밀번호를 넣으세요.':
+      'In Daum Mail → Settings → IMAP/SMTP, turn it on. If you use two-factor authentication, enter an app password.',
+  '다음 예약과 겹칩니다. 더 짧게 고르세요.':
+      'That overlaps the next booking. Choose a shorter time.',
+  '다음 제목을 이 순서로 쓰고, 해당 내용이 없으면 "없음"이라고 적습니다:':
+      'Use these headings in this order, and write "None" when a section has nothing:',
   '다이소': 'Daiso',
   '단계(낮음/보통/높음)를 고르세요.': 'Choose a level (low/medium/high).',
-  '단계(낮음/보통/높음)마다 우선순위가 하나는 있어야 합니다.': 'Each level (low/medium/high) needs at least one priority.',
+  '단계(낮음/보통/높음)마다 우선순위가 하나는 있어야 합니다.':
+      'Each level (low/medium/high) needs at least one priority.',
   '단위농협': 'Local NongHyup',
-  '단추를 처리하는 서버에 연결하지 못했습니다.': 'Couldn\'t connect to the server that handles the button.',
-  '단추를 처리하는 서버의 답이 올바른 JSON이 아닙니다.': 'The response from the server that handles the button is not valid JSON.',
+  '단추를 처리하는 서버에 연결하지 못했습니다.':
+      'Couldn\'t connect to the server that handles the button.',
+  '단추를 처리하는 서버의 답이 올바른 JSON이 아닙니다.':
+      'The response from the server that handles the button is not valid JSON.',
   '달별': 'By month',
   '달을 확인하세요(YYYY-MM).': 'Check the month (YYYY-MM).',
   '담당자 목록이 올바르지 않습니다.': 'Invalid assignee list.',
@@ -542,15 +696,18 @@ const Map<String, String> serverEn = {
   '담당자가 넣음': 'entered by staff',
   '담당자가 프로젝트 구성원이 아닙니다.': 'The assignee isn\'t a project member.',
   '담당자가 한 명은 있어야 합니다.': 'There must be at least one assignee.',
-  '담당자가 확인한 자료라 고칠 수 없습니다. 급여 담당자에게 확인을 풀어 달라고 하세요.': 'This data was confirmed by staff and can\'t be edited. Ask the payroll staff to remove the confirmation.',
+  '담당자가 확인한 자료라 고칠 수 없습니다. 급여 담당자에게 확인을 풀어 달라고 하세요.':
+      'This data was confirmed by staff and can\'t be edited. Ask the payroll staff to remove the confirmation.',
   '담당자는 담당자 목록을 바꿀 수 없습니다.': 'Assignees can\'t change the assignee list.',
   '담당자는 파일 경로를 바꿀 수 없습니다.': 'Assignees can\'t change the file path.',
-  '담당자는 프로젝트 구성원 중에서 고를 수 있습니다.': 'Assignees can be chosen from project members.',
+  '담당자는 프로젝트 구성원 중에서 고를 수 있습니다.':
+      'Assignees can be chosen from project members.',
   '담당자를 해제했습니다.': 'Assignee removed.',
   '담당자만 진척률을 바꿀 수 있습니다.': 'Only assignees can change progress.',
   '답글에는 다시 답글을 달 수 없습니다.': 'You can\'t reply to a reply.',
   '답글을 달 댓글을 찾을 수 없습니다.': 'The comment to reply to wasn\'t found.',
-  '당신은 회사 화상회의의 회의록을 쓰는 비서입니다. 받아쓰기(음성 인식 결과)를 읽고 한국어 회의록을 마크다운으로 씁니다.': 'You are an assistant who writes minutes for company video meetings. Read the transcript (speech recognition output) and write Korean meeting minutes in Markdown.',
+  '당신은 회사 화상회의의 회의록을 쓰는 비서입니다. 받아쓰기(음성 인식 결과)를 읽고 한국어 회의록을 마크다운으로 씁니다.':
+      'You are an assistant who writes minutes for company video meetings. Read the transcript (speech recognition output) and write Korean meeting minutes in Markdown.',
   '대결 설정을 찾을 수 없습니다.': 'Proxy approval setting not found.',
   '대결로 처리': 'Handled by proxy',
   '대구': 'Daegu',
@@ -559,24 +716,29 @@ const Map<String, String> serverEn = {
   '대상': 'Target',
   '대상 사용자가 올바르지 않습니다.': 'Invalid target user.',
   '대상 사용자를 찾을 수 없습니다.': 'Target user not found.',
-  '대신 결재할 수 없는 사람입니다(정회원 이상, 같은 범위의 사람만).': 'This person can\'t approve on your behalf (members or above in the same scope only).',
+  '대신 결재할 수 없는 사람입니다(정회원 이상, 같은 범위의 사람만).':
+      'This person can\'t approve on your behalf (members or above in the same scope only).',
   '대체공휴일(개천절)': 'Substitute holiday (National Foundation Day)',
   '대체공휴일(광복절)': 'Substitute holiday (Liberation Day)',
   '대체공휴일(부처님오신날)': 'Substitute holiday (Buddha\'s Birthday)',
   '대체공휴일(삼일절)': 'Substitute holiday (Independence Movement Day)',
   '대체공휴일(설날)': 'Substitute holiday (Seollal)',
   '대체공휴일(성탄절)': 'Substitute holiday (Christmas)',
-  '대체공휴일(어린이날·부처님오신날)': 'Substitute holiday (Children\'s Day / Buddha\'s Birthday)',
+  '대체공휴일(어린이날·부처님오신날)':
+      'Substitute holiday (Children\'s Day / Buddha\'s Birthday)',
   '대체공휴일(추석)': 'Substitute holiday (Chuseok)',
   '대체공휴일(한글날)': 'Substitute holiday (Hangul Day)',
-  '대표 이미지는 사진이나 썸네일이 있는 영상만 정할 수 있습니다.': 'Only photos or videos with a thumbnail can be set as the cover image.',
+  '대표 이미지는 사진이나 썸네일이 있는 영상만 정할 수 있습니다.':
+      'Only photos or videos with a thumbnail can be set as the cover image.',
   '대표품목': 'Main item',
   '대한항공': 'Korean Air',
   '대화 내역': 'Chat history',
   '대화내역.xlsx': 'Chat history.xlsx',
-  '대화방의 멤버가 아니어서 보내지 못했습니다.': 'Couldn\'t send because you\'re not a member of the chat.',
+  '대화방의 멤버가 아니어서 보내지 못했습니다.':
+      'Couldn\'t send because you\'re not a member of the chat.',
   '대화방이 삭제되어 보내지 못했습니다.': 'Couldn\'t send because the chat was deleted.',
-  '대화방이 없어 녹화 파일을 올리지 못했습니다.': 'The chat no longer exists, so the recording couldn\'t be posted.',
+  '대화방이 없어 녹화 파일을 올리지 못했습니다.':
+      'The chat no longer exists, so the recording couldn\'t be posted.',
   '댓글 달기': 'Comment',
   '댓글은': 'Comments',
   '댓글은 1000자 이내로 작성하세요.': 'Comments must be 1000 characters or fewer.',
@@ -586,10 +748,12 @@ const Map<String, String> serverEn = {
   '댓글을 지울 권한이 없습니다.': 'You don\'t have permission to delete this comment.',
   '댓글을 찾을 수 없습니다.': 'Comment not found.',
   '더 이상 쓸 수 없습니다': 'No longer available',
-  '더존 모양은 일반전표 엑셀 올리기에 흔한 열 순서입니다 — 프로그램 판마다 다를 수 있으니 올리기 전에 회계 프로그램의 양식과 맞춰 보세요.': 'The Douzone layout follows a common column order for general journal Excel upload — it can differ by program version, so match it to your accounting program\'s template before uploading.',
+  '더존 모양은 일반전표 엑셀 올리기에 흔한 열 순서입니다 — 프로그램 판마다 다를 수 있으니 올리기 전에 회계 프로그램의 양식과 맞춰 보세요.':
+      'The Douzone layout follows a common column order for general journal Excel upload — it can differ by program version, so match it to your accounting program\'s template before uploading.',
   '더할 사람을 고르세요.': 'Choose people to add.',
   '도로공사': 'Korea Expressway',
-  '도메인 이름만 적으세요(예: xxx.iptime.org — https://·포트·경로 없이)': 'Enter the domain name only (e.g. xxx.iptime.org — no https://, port, or path)',
+  '도메인 이름만 적으세요(예: xxx.iptime.org — https://·포트·경로 없이)':
+      'Enter the domain name only (e.g. xxx.iptime.org — no https://, port, or path)',
   '도메인은 글자로 넣어야 합니다.': 'The domain must be text.',
   '도메인이 없습니다.': 'No domain.',
   '도서': 'Books',
@@ -603,37 +767,50 @@ const Map<String, String> serverEn = {
   '동작을 하나 이상 추가하세요.': 'Add at least one action.',
   '동행자': 'Companions',
   '되돌릴 이력을 찾을 수 없습니다.': 'History entry to revert not found.',
-  '등급은 서버 운영자만 관리자 콘솔에서 바꿀 수 있습니다.': 'Only server operators can change account levels, in the admin console.',
-  '등급은 준회원/정회원/관리자 중에서 고를 수 있습니다.': 'Account level can be guest, member, or admin.',
+  '등급은 서버 운영자만 관리자 콘솔에서 바꿀 수 있습니다.':
+      'Only server operators can change account levels, in the admin console.',
+  '등급은 준회원/정회원/관리자 중에서 고를 수 있습니다.':
+      'Account level can be guest, member, or admin.',
   '등급은 준회원·정회원·관리자 중 하나여야 합니다.': 'Role must be associate, member or admin.',
   '등록되지 않았거나 꺼진 앱입니다(client_id).': 'Unknown or disabled app (client_id).',
   '등록되지 않았거나 꺼진 앱입니다.': 'Unknown or disabled app.',
   '등록되지 않았거나 폐기된 기기입니다.': 'This device isn\'t registered or has been revoked.',
-  '등록되지 않은 보안 키·패스키입니다. 아이디로 로그인한 뒤 내 프로필에서 등록하세요.': 'This security key/passkey isn\'t registered. Sign in with your username and register it in My profile.',
+  '등록되지 않은 보안 키·패스키입니다. 아이디로 로그인한 뒤 내 프로필에서 등록하세요.':
+      'This security key/passkey isn\'t registered. Sign in with your username and register it in My profile.',
   '등록된 이메일이 없습니다.': 'No email registered.',
-  '등록된 이메일이 없습니다. 먼저 이메일을 등록하세요.': 'No email registered. Register an email first.',
+  '등록된 이메일이 없습니다. 먼저 이메일을 등록하세요.':
+      'No email registered. Register an email first.',
   '등록된(켜진) 카드가 아닙니다.': 'Not a registered (enabled) card.',
-  '등록한 보안 키가 없습니다. 인증 앱의 코드를 넣으세요.': 'No security key is registered. Enter the code from your authenticator app.',
+  '등록한 보안 키가 없습니다. 인증 앱의 코드를 넣으세요.':
+      'No security key is registered. Enter the code from your authenticator app.',
   '디렉터리(테넌트) ID(GUID)를 넣으세요.': 'Enter the Directory (tenant) ID (GUID).',
-  '디렉터리(테넌트) ID는 GUID(예: 1234abcd-…)여야 합니다 — Entra 관리 센터의 "개요"에 있습니다.': 'The Directory (tenant) ID must be a GUID (e.g. 1234abcd-…) — you can find it under "Overview" in the Entra admin center.',
-  '디렉터리에서 그 아이디를 찾지 못했습니다(검색 위치·검색 조건을 확인하세요).': 'That ID wasn\'t found in the directory (check the search base and search filter).',
+  '디렉터리(테넌트) ID는 GUID(예: 1234abcd-…)여야 합니다 — Entra 관리 센터의 "개요"에 있습니다.':
+      'The Directory (tenant) ID must be a GUID (e.g. 1234abcd-…) — you can find it under "Overview" in the Entra admin center.',
+  '디렉터리에서 그 아이디를 찾지 못했습니다(검색 위치·검색 조건을 확인하세요).':
+      'That ID wasn\'t found in the directory (check the search base and search filter).',
   '디렉터리에서 사용 안 함으로 된 계정입니다.': 'This account is disabled in the directory.',
-  '따로 고치거나 지운 회차가 너무 많은 반복 일정입니다. "이 일정 및 이후 일정"으로 나눠서 바꾸세요.': 'This recurring event has too many individually edited or deleted occurrences. Split it using "This and following events" to make changes.',
+  '따로 고치거나 지운 회차가 너무 많은 반복 일정입니다. "이 일정 및 이후 일정"으로 나눠서 바꾸세요.':
+      'This recurring event has too many individually edited or deleted occurrences. Split it using "This and following events" to make changes.',
   '뚜레쥬르': 'Tous les Jours',
   '렌터카': 'Rental car',
   '로그아웃하지 못했습니다': 'Couldn\'t sign out',
   '로그아웃했습니다': 'Signed out',
   '로그인 결과가 만료되었습니다. 다시 하세요.': 'The sign-in result expired. Please try again.',
   '로그인 결과를 읽지 못했습니다.': 'Couldn\'t read the sign-in result.',
-  '로그인 보안 탭에 Google 클라이언트 ID·보안 비밀을 먼저 넣으세요.': 'First enter the Google client ID and secret in the Login security tab.',
-  '로그인 보안 탭에 Microsoft 테넌트 ID·클라이언트 ID·클라이언트 암호를 먼저 넣으세요.': 'First enter the Microsoft tenant ID, client ID and client secret in the Login security tab.',
-  '로그인 확인 값이 맞지 않습니다. 다시 하세요.': 'The sign-in check value doesn\'t match. Please try again.',
+  '로그인 보안 탭에 Google 클라이언트 ID·보안 비밀을 먼저 넣으세요.':
+      'First enter the Google client ID and secret in the Login security tab.',
+  '로그인 보안 탭에 Microsoft 테넌트 ID·클라이언트 ID·클라이언트 암호를 먼저 넣으세요.':
+      'First enter the Microsoft tenant ID, client ID and client secret in the Login security tab.',
+  '로그인 확인 값이 맞지 않습니다. 다시 하세요.':
+      'The sign-in check value doesn\'t match. Please try again.',
   '로그인을 이어 갈 수 없습니다': 'Can\'t continue signing in',
-  '로그인을 취소했거나 메일 권한을 허용하지 않았습니다.': 'Sign-in was canceled or mail access wasn\'t allowed.',
+  '로그인을 취소했거나 메일 권한을 허용하지 않았습니다.':
+      'Sign-in was canceled or mail access wasn\'t allowed.',
   '로그인하지 못했습니다': 'Couldn\'t sign in',
   '로그인하지 못했습니다.': 'Couldn\'t sign in.',
   '로그인하지 않았습니다': 'Not signed in',
-  '로그인한 계정의 메일 주소를 알 수 없습니다.': 'Couldn\'t determine the signed-in account\'s email address.',
+  '로그인한 계정의 메일 주소를 알 수 없습니다.':
+      'Couldn\'t determine the signed-in account\'s email address.',
   '로그인한 곳이 이 회사가 아닙니다.': 'You signed in somewhere other than this company.',
   '로그인한 곳이 코드를 보내지 않았습니다.': 'The sign-in provider didn\'t send a code.',
   '롯데': 'Lotte',
@@ -652,21 +829,30 @@ const Map<String, String> serverEn = {
   '마우스': 'Mouse',
   '마지막 근무일을 확인하세요.': 'Check the last working day.',
   '마지막 근무일이 입사일보다 앞입니다.': 'The last working day is before the hire date.',
-  '마지막 서버 운영자는 정지할 수 없습니다. 다른 회원을 서버 운영자로 먼저 지정하세요.': 'The last server operator can\'t be suspended. Make another member a server operator first.',
-  '마지막 서버 운영자는 탈퇴할 수 없습니다. 관리자 콘솔에서 다른 회원을 서버 운영자로 지정한 뒤 탈퇴하세요.': 'The last server operator can\'t leave. Make another member a server operator in the admin console, then leave.',
-  '마지막 서버 운영자는 해제할 수 없습니다. 다른 회원을 서버 운영자로 먼저 지정하세요.': 'The last server operator can\'t be removed. Make another member a server operator first.',
-  '마지막으로 성공한 백업이 사흘 넘게 지났습니다.': 'More than three days have passed since the last successful backup.',
+  '마지막 서버 운영자는 정지할 수 없습니다. 다른 회원을 서버 운영자로 먼저 지정하세요.':
+      'The last server operator can\'t be suspended. Make another member a server operator first.',
+  '마지막 서버 운영자는 탈퇴할 수 없습니다. 관리자 콘솔에서 다른 회원을 서버 운영자로 지정한 뒤 탈퇴하세요.':
+      'The last server operator can\'t leave. Make another member a server operator in the admin console, then leave.',
+  '마지막 서버 운영자는 해제할 수 없습니다. 다른 회원을 서버 운영자로 먼저 지정하세요.':
+      'The last server operator can\'t be removed. Make another member a server operator first.',
+  '마지막으로 성공한 백업이 사흘 넘게 지났습니다.':
+      'More than three days have passed since the last successful backup.',
   '만든 사람만 독촉할 수 있습니다.': 'Only the creator can send nudges.',
   '만든 사람만 마감할 수 있습니다.': 'Only the creator can close it.',
   '만든 사람만 지울 수 있습니다.': 'Only the creator can delete it.',
-  '만든 사람이나 팀 관리자만 되살릴 수 있습니다.': 'Only the creator or a team admin can restore it.',
-  '만든 사람이나 팀 관리자만 영구 삭제할 수 있습니다.': 'Only the creator or a team admin can delete it permanently.',
-  '만든 사람이나 팀 관리자만 지울 수 있습니다.': 'Only the creator or a team admin can delete it.',
+  '만든 사람이나 팀 관리자만 되살릴 수 있습니다.':
+      'Only the creator or a team admin can restore it.',
+  '만든 사람이나 팀 관리자만 영구 삭제할 수 있습니다.':
+      'Only the creator or a team admin can delete it permanently.',
+  '만든 사람이나 팀 관리자만 지울 수 있습니다.':
+      'Only the creator or a team admin can delete it.',
   '만료되었습니다': 'Expired',
   '말머리 목록을 확인하세요.': 'Check the category list.',
   '말머리 이름을 넣으세요.': 'Enter a category name.',
-  '말머리는 보드 뷰 토픽에만 둘 수 있습니다.': 'Categories are only available in board view topics.',
-  '말머리를 확인하세요. 관리자가 지웠을 수 있습니다.': 'Check the category. An admin may have deleted it.',
+  '말머리는 보드 뷰 토픽에만 둘 수 있습니다.':
+      'Categories are only available in board view topics.',
+  '말머리를 확인하세요. 관리자가 지웠을 수 있습니다.':
+      'Check the category. An admin may have deleted it.',
   '맡긴 사람이나 관리자만 거둘 수 있습니다.': 'Only the delegator or an admin can revoke it.',
   '매입': 'Purchase',
   '매입/매출': 'Purchase/Sale',
@@ -682,13 +868,15 @@ const Map<String, String> serverEn = {
   '메모는 300자까지입니다.': 'Memos are up to 300 characters.',
   '메모는 500자까지입니다.': 'Memo can be up to 500 characters.',
   '메시지 고침': 'message edit',
-  '메시지 공유는 앱을 최신 버전으로 업데이트한 뒤 다시 해 주세요.': 'To share messages, update the app to the latest version and try again.',
+  '메시지 공유는 앱을 최신 버전으로 업데이트한 뒤 다시 해 주세요.':
+      'To share messages, update the app to the latest version and try again.',
   '메시지 내용을 입력하세요.': 'Enter a message.',
   '메시지 지움': 'message deletion',
   '메시지는': 'Messages',
   '메시지를 보내지 못했습니다.': 'Couldn\'t send the message.',
   '메시지를 보내지 못했습니다. 다시 시도하세요.': 'Couldn\'t send the message. Try again.',
-  '메시지를 보내지 못했습니다. 잠시 후 다시 시도하세요.': 'Couldn\'t send the message. Try again in a moment.',
+  '메시지를 보내지 못했습니다. 잠시 후 다시 시도하세요.':
+      'Couldn\'t send the message. Try again in a moment.',
   '메시지를 찾을 수 없습니다.': 'Message not found.',
   '메일 계정 연결을 이어 갈 수 없습니다': 'Can\'t continue connecting the mail account',
   '메일 계정을 연결하지 못했습니다': 'Couldn\'t connect the mail account',
@@ -699,68 +887,95 @@ const Map<String, String> serverEn = {
   '메일 보내기': 'Send mail',
   '메일 보내기 시도': 'Mail send attempt',
   '메일 서비스를 확인하세요.': 'Check the mail service.',
-  '메일 설정이 잘 되었습니다. 관리자 콘솔의 메일 탭에서 "메일 기능 사용"을 켜면 이메일 확인·메일로 아이디/비밀번호 찾기·초대 메일·멘션 요약 메일이 동작합니다.': 'Mail is set up correctly. Turn on "Use mail" in the Mail tab of the admin console to enable email verification, ID/password recovery by email, invite emails, and mention digest emails.',
+  '메일 설정이 잘 되었습니다. 관리자 콘솔의 메일 탭에서 "메일 기능 사용"을 켜면 이메일 확인·메일로 아이디/비밀번호 찾기·초대 메일·멘션 요약 메일이 동작합니다.':
+      'Mail is set up correctly. Turn on "Use mail" in the Mail tab of the admin console to enable email verification, ID/password recovery by email, invite emails, and mention digest emails.',
   '메일을 보내지 못했습니다.': 'Couldn\'t send the email.',
-  '메일을 보내지 못했습니다. 잠시 뒤 다시 시도하고, 계속 안 되면 서버 운영자에게 알려 주세요.': 'Couldn\'t send the email. Try again shortly, and if it keeps failing, let the server operator know.',
+  '메일을 보내지 못했습니다. 잠시 뒤 다시 시도하고, 계속 안 되면 서버 운영자에게 알려 주세요.':
+      'Couldn\'t send the email. Try again shortly, and if it keeps failing, let the server operator know.',
   '메일을 찾을 수 없습니다.': 'Couldn\'t find the message.',
-  '메일을 찾을 수 없습니다. 다른 곳에서 옮기거나 지웠을 수 있습니다.': 'Mail not found. It may have been moved or deleted elsewhere.',
+  '메일을 찾을 수 없습니다. 다른 곳에서 옮기거나 지웠을 수 있습니다.':
+      'Mail not found. It may have been moved or deleted elsewhere.',
   '메일을 확인하세요.': 'Check the mail.',
-  '메일이 너무 커서 여기서 열 수 없습니다(30MB 넘음). 원래 메일 프로그램에서 보세요.': 'This email is too large to open here (over 30 MB). View it in your original mail program.',
-  '메일이 들어 있는 폴더는 지울 수 없습니다. 메일을 먼저 옮기거나 지우세요.': 'A folder with messages in it can\'t be deleted. Move or delete the messages first.',
+  '메일이 너무 커서 여기서 열 수 없습니다(30MB 넘음). 원래 메일 프로그램에서 보세요.':
+      'This email is too large to open here (over 30 MB). View it in your original mail program.',
+  '메일이 들어 있는 폴더는 지울 수 없습니다. 메일을 먼저 옮기거나 지우세요.':
+      'A folder with messages in it can\'t be deleted. Move or delete the messages first.',
   '메일함에 넣지 못했습니다.': 'Couldn\'t store it in the mailbox.',
   '메일함이 가득 찼습니다. 오래된 메일을 지우세요.': 'The mailbox is full. Delete old messages.',
   '메타데이터가 너무 큽니다.': 'The metadata is too large.',
-  '메타데이터에 HTTP-Redirect 로그인 주소(SingleSignOnService)가 없습니다.': 'The metadata has no HTTP-Redirect sign-in URL (SingleSignOnService).',
-  '메타데이터에 IdP 정보(IDPSSODescriptor)가 없습니다.': 'The metadata has no IdP information (IDPSSODescriptor).',
+  '메타데이터에 HTTP-Redirect 로그인 주소(SingleSignOnService)가 없습니다.':
+      'The metadata has no HTTP-Redirect sign-in URL (SingleSignOnService).',
+  '메타데이터에 IdP 정보(IDPSSODescriptor)가 없습니다.':
+      'The metadata has no IdP information (IDPSSODescriptor).',
   '메타데이터에 서명 인증서가 없습니다.': 'The metadata has no signing certificate.',
-  '멤버는 새로 만든 공유 캘린더에서만 관리할 수 있습니다.': 'Members can only be managed in newly created shared calendars.',
+  '멤버는 새로 만든 공유 캘린더에서만 관리할 수 있습니다.':
+      'Members can only be managed in newly created shared calendars.',
   '멤버를 뺄 권한이 없습니다.': 'You don\'t have permission to remove members.',
   '멤버를 선택하세요.': 'Select members.',
   '멤버를 찾을 수 없습니다.': 'Member not found.',
   '멤버를 초대할 권한이 없습니다.': 'You don\'t have permission to invite members.',
   '멤버를 추가할 권한이 없습니다.': 'You don\'t have permission to add members.',
-  '명령을 처리하는 서버의 답이 올바른 JSON이 아닙니다.': 'The response from the command server isn\'t valid JSON.',
+  '명령을 처리하는 서버의 답이 올바른 JSON이 아닙니다.':
+      'The response from the command server isn\'t valid JSON.',
   '명세서 비밀번호 확인': 'Payslip password check',
   '명세서가 없습니다. 사람을 먼저 더하세요.': 'No payslips. Add people first.',
   '명세서를 보려면 비밀번호를 다시 확인하세요.': 'Verify your password again to view the payslip.',
   '모니터': 'Monitor',
   '모든 기기에서 강제 로그아웃': 'Force sign-out from all devices',
   '모텔': 'Motel',
-  '목록의 머리 줄(작성일자·거래일시, 공급가액·합계금액 같은 열 이름)을 찾지 못했습니다. 홈택스에서 내려받은 엑셀을 그대로 올리세요.': 'Couldn\'t find the list\'s header row (columns like issue date/transaction time, supply amount/total). Upload the Excel file downloaded from Hometax as is.',
+  '목록의 머리 줄(작성일자·거래일시, 공급가액·합계금액 같은 열 이름)을 찾지 못했습니다. 홈택스에서 내려받은 엑셀을 그대로 올리세요.':
+      'Couldn\'t find the list\'s header row (columns like issue date/transaction time, supply amount/total). Upload the Excel file downloaded from Hometax as is.',
   '문구': 'Stationery',
   '문서 번호': 'Document number',
   '문의를 찾을 수 없습니다.': 'Inquiry not found.',
   '문항을 하나 이상 넣으세요.': 'Add at least one question.',
-  '물품·서비스 구매. 품목마다 수량·단가를 넣으면 합계를 계산합니다.': 'Purchase of goods and services. Enter the quantity and unit price for each item to calculate the total.',
+  '물품·서비스 구매. 품목마다 수량·단가를 넣으면 합계를 계산합니다.':
+      'Purchase of goods and services. Enter the quantity and unit price for each item to calculate the total.',
   '미지급금': 'Accounts payable',
   '바(bar)': 'Bar',
-  '바깥 주소로 보내려면 관리자 콘솔 → 메일(SMTP)을 먼저 켜야 합니다.': 'To send to outside addresses, first turn on Admin console → Mail (SMTP).',
-  '바깥 주소로 보내려면 관리자가 관리자 콘솔 → 메일(SMTP)을 켜야 합니다. 회사 도메인 주소로는 보낼 수 있습니다.': 'To send to outside addresses, an admin must turn on Admin console → Mail (SMTP). You can still send to company-domain addresses.',
+  '바깥 주소로 보내려면 관리자 콘솔 → 메일(SMTP)을 먼저 켜야 합니다.':
+      'To send to outside addresses, first turn on Admin console → Mail (SMTP).',
+  '바깥 주소로 보내려면 관리자가 관리자 콘솔 → 메일(SMTP)을 켜야 합니다. 회사 도메인 주소로는 보낼 수 있습니다.':
+      'To send to outside addresses, an admin must turn on Admin console → Mail (SMTP). You can still send to company-domain addresses.',
   '바꿀 내용이 없습니다.': 'Nothing to change.',
-  '바뀐 값으로 "연결 시험"을 먼저 해 보세요. 통과하면 켤 수 있습니다.': 'Run "Test connection" with the new values first. You can turn it on once it passes.',
-  '바뀐 값으로 시험 메일을 먼저 보내 보세요. 성공하면 켤 수 있습니다.': 'Send a test email with the new values first. You can turn it on once it succeeds.',
-  '밖에서 열 때는 공용 와이파이(카페·공항·호텔 등) 말고 LTE/5G나 집 와이파이에서 여세요.': 'When opening it outside, use LTE/5G or home Wi-Fi rather than public Wi-Fi (cafés, airports, hotels, etc.).',
-  '반대 의견은 합의 칸에서만 남길 수 있습니다.': 'Disagreement can only be recorded on an agree step.',
+  '바뀐 값으로 "연결 시험"을 먼저 해 보세요. 통과하면 켤 수 있습니다.':
+      'Run "Test connection" with the new values first. You can turn it on once it passes.',
+  '바뀐 값으로 시험 메일을 먼저 보내 보세요. 성공하면 켤 수 있습니다.':
+      'Send a test email with the new values first. You can turn it on once it succeeds.',
+  '밖에서 열 때는 공용 와이파이(카페·공항·호텔 등) 말고 LTE/5G나 집 와이파이에서 여세요.':
+      'When opening it outside, use LTE/5G or home Wi-Fi rather than public Wi-Fi (cafés, airports, hotels, etc.).',
+  '반대 의견은 합의 칸에서만 남길 수 있습니다.':
+      'Disagreement can only be recorded on an agree step.',
   '반대 의견을 쓰세요.': 'Write your disagreement.',
   '반려 사유를 쓰세요.': 'Enter a reason for rejection.',
   '반반차': 'Quarter day',
-  '반복 간격은 매주 또는 2주마다입니다.': 'The repeat interval is every week or every 2 weeks.',
+  '반복 간격은 매주 또는 2주마다입니다.':
+      'The repeat interval is every week or every 2 weeks.',
   '반복 규칙이 올바르지 않습니다.': 'Invalid recurrence rule.',
   '반복 단위가 올바르지 않습니다.': 'Invalid recurrence unit.',
   '반복 설정이 올바르지 않습니다.': 'Invalid recurrence setting.',
-  '반복 예약은 한 회차가 반복 간격보다 짧아야 합니다.': 'Each occurrence of a recurring booking must be shorter than the repeat interval.',
-  '반복 예약의 마지막 회차가 180일 앞을 넘습니다. 회차를 줄이세요.': 'The last occurrence is more than 180 days ahead. Use fewer occurrences.',
-  '반복 요일은 매주 반복에서만 지정할 수 있습니다.': 'Repeat days can only be set for weekly recurrence.',
+  '반복 예약은 한 회차가 반복 간격보다 짧아야 합니다.':
+      'Each occurrence of a recurring booking must be shorter than the repeat interval.',
+  '반복 예약의 마지막 회차가 180일 앞을 넘습니다. 회차를 줄이세요.':
+      'The last occurrence is more than 180 days ahead. Use fewer occurrences.',
+  '반복 요일은 매주 반복에서만 지정할 수 있습니다.':
+      'Repeat days can only be set for weekly recurrence.',
   '반복 요일이 올바르지 않습니다.': 'Invalid repeat days.',
-  '반복 일정에는 회의실·자원을 잡을 수 없습니다. 회차마다 따로 잡으세요.': 'Rooms & resources can\'t be booked for recurring events. Book them for each occurrence separately.',
+  '반복 일정에는 회의실·자원을 잡을 수 없습니다. 회차마다 따로 잡으세요.':
+      'Rooms & resources can\'t be booked for recurring events. Book them for each occurrence separately.',
   '반복 일정은 occurrenceStart가 필요합니다.': 'Recurring events require occurrenceStart.',
-  '반복 일정은 전체 수정일 때만 캘린더를 옮길 수 있습니다.': 'A recurring event can only be moved to another calendar when editing all occurrences.',
+  '반복 일정은 전체 수정일 때만 캘린더를 옮길 수 있습니다.':
+      'A recurring event can only be moved to another calendar when editing all occurrences.',
   '반복 종료일 형식이 올바르지 않습니다.': 'Invalid recurrence end date format.',
-  '반복 종료일과 반복 횟수는 함께 쓸 수 없습니다.': 'The recurrence end date and occurrence count can\'t be used together.',
-  '반복 종료일은 YYYY-MM-DD 형식입니다.': 'The recurrence end date must be in YYYY-MM-DD format.',
-  '반복 종료일은 시작일보다 빠를 수 없습니다.': 'The recurrence end date can\'t be earlier than the start date.',
+  '반복 종료일과 반복 횟수는 함께 쓸 수 없습니다.':
+      'The recurrence end date and occurrence count can\'t be used together.',
+  '반복 종료일은 YYYY-MM-DD 형식입니다.':
+      'The recurrence end date must be in YYYY-MM-DD format.',
+  '반복 종료일은 시작일보다 빠를 수 없습니다.':
+      'The recurrence end date can\'t be earlier than the start date.',
   '반복 종료일이 지나 반복을 마쳤습니다.': 'Recurrence ended because the end date has passed.',
-  '반복 주기는 매일·매주·매월·매년 중 하나입니다.': 'Recurrence must be daily, weekly, monthly, or yearly.',
+  '반복 주기는 매일·매주·매월·매년 중 하나입니다.':
+      'Recurrence must be daily, weekly, monthly, or yearly.',
   '반복을 해제했습니다.': 'Recurrence removed.',
   '반점': 'Chinese restaurant',
   '반차는 근무일에만 쓸 수 있습니다.': 'Half-day leave can only be used on workdays.',
@@ -768,10 +983,12 @@ const Map<String, String> serverEn = {
   '받는 사람 이메일이 올바르지 않습니다.': 'Invalid recipient email.',
   '받는 사람을 찾을 수 없습니다.': 'Recipient not found.',
   '받는 포트는 1~65535 사이로 넣으세요.': 'Enter a receiving port between 1 and 65535.',
-  '받아들일 회사 도메인(Google Workspace)을 넣으세요 — 없으면 아무 Gmail 계정으로나 들어올 수 있습니다.': 'Enter the company domain to accept (Google Workspace) — without it, any Gmail account can sign in.',
+  '받아들일 회사 도메인(Google Workspace)을 넣으세요 — 없으면 아무 Gmail 계정으로나 들어올 수 있습니다.':
+      'Enter the company domain to accept (Google Workspace) — without it, any Gmail account can sign in.',
   '받아쓰기': 'Transcript',
   '받아쓰기:': 'Transcript:',
-  '받아쓰기에는 인식 오류가 있을 수 있으니 문맥으로 바로잡되, 없는 내용을 지어내지 마세요. 누가 말했는지는 받아쓰기에 없으므로 확실할 때만 적습니다.': 'The transcript may contain recognition errors; fix them from context, but don\'t invent content. Speakers aren\'t labeled, so name them only when certain.',
+  '받아쓰기에는 인식 오류가 있을 수 있으니 문맥으로 바로잡되, 없는 내용을 지어내지 마세요. 누가 말했는지는 받아쓰기에 없으므로 확실할 때만 적습니다.':
+      'The transcript may contain recognition errors; fix them from context, but don\'t invent content. Speakers aren\'t labeled, so name them only when certain.',
   '받아쓸 녹음 파일을 찾지 못했습니다.': 'The audio file to transcribe wasn\'t found.',
   '받은편지함과 같은 이름은 쓸 수 없습니다.': 'You can\'t use the same name as the Inbox.',
   '받을 이메일 주소를 넣으세요.': 'Enter the email address to receive at.',
@@ -783,23 +1000,31 @@ const Map<String, String> serverEn = {
   '발행일자': 'Issue date',
   '발행자명': 'Issuer name',
   '방해 금지 시간이 올바르지 않습니다.': 'Invalid Do Not Disturb time.',
-  '방해 금지 시작과 끝 시간이 같습니다.': 'The Do Not Disturb start and end times are the same.',
+  '방해 금지 시작과 끝 시간이 같습니다.':
+      'The Do Not Disturb start and end times are the same.',
   '방해 금지 요일을 하나 이상 고르세요.': 'Select at least one day for Do Not Disturb.',
   '방해 금지 일정 형식이 올바르지 않습니다.': 'Invalid Do Not Disturb schedule format.',
-  '방해 금지 일정의 켜짐 여부가 올바르지 않습니다.': 'Invalid Do Not Disturb schedule on/off value.',
+  '방해 금지 일정의 켜짐 여부가 올바르지 않습니다.':
+      'Invalid Do Not Disturb schedule on/off value.',
   '방해 금지를 끝낼': 'Do Not Disturb end',
   '배달의민족': 'Baemin',
   '백업 시각은 0~23시 중에서 고르세요.': 'Choose a backup hour from 0 to 23.',
   '백업 암호 변경': 'Backup password changed',
   '백업 암호 설정': 'Backup password set',
-  '백업 암호가 틀렸거나 파일이 손상되었습니다.': 'The backup password is wrong or the file is corrupted.',
+  '백업 암호가 틀렸거나 파일이 손상되었습니다.':
+      'The backup password is wrong or the file is corrupted.',
   '백업 암호가 틀렸습니다.': 'The backup password is wrong.',
-  '백업 암호를 먼저 정하세요 — 관리자 콘솔 "백업" 탭.': 'Set a backup password first — "Backup" tab in the admin console.',
+  '백업 암호를 먼저 정하세요 — 관리자 콘솔 "백업" 탭.':
+      'Set a backup password first — "Backup" tab in the admin console.',
   '백업 암호를 먼저 정하세요.': 'Set a backup password first.',
-  '백업 암호를 정하지 않아 백업하지 않고 있습니다.': 'Backups aren\'t running because no backup password is set.',
-  '백업 잠금을 잡지 못했습니다. 잠시 뒤 다시 시도하세요.': 'Couldn\'t acquire the backup lock. Try again shortly.',
-  '백업 정보(manifest.json)가 손상되었습니다.': 'The backup info (manifest.json) is corrupted.',
-  '백업 파일 끝에 알 수 없는 내용이 붙어 있습니다.': 'Unknown data is appended to the end of the backup file.',
+  '백업 암호를 정하지 않아 백업하지 않고 있습니다.':
+      'Backups aren\'t running because no backup password is set.',
+  '백업 잠금을 잡지 못했습니다. 잠시 뒤 다시 시도하세요.':
+      'Couldn\'t acquire the backup lock. Try again shortly.',
+  '백업 정보(manifest.json)가 손상되었습니다.':
+      'The backup info (manifest.json) is corrupted.',
+  '백업 파일 끝에 알 수 없는 내용이 붙어 있습니다.':
+      'Unknown data is appended to the end of the backup file.',
   '백업 파일이 손상되었습니다.': 'The backup file is corrupted.',
   '백업 파일이 중간에 잘렸습니다.': 'The backup file is truncated.',
   '버거': 'Burger',
@@ -810,70 +1035,95 @@ const Map<String, String> serverEn = {
   '법인카드 연동 키 지움': 'Deleted the corporate card feed key',
   '법인카드 정산': 'Corporate card claims',
   '베이커리': 'Bakery',
-  '변경할 상태를 이 프로젝트의 상태 중에서 고르세요.': 'Choose the new status from this project\'s statuses.',
-  '변경할 우선순위를 이 프로젝트의 우선순위 중에서 고르세요.': 'Choose the new priority from this project\'s priorities.',
+  '변경할 상태를 이 프로젝트의 상태 중에서 고르세요.':
+      'Choose the new status from this project\'s statuses.',
+  '변경할 우선순위를 이 프로젝트의 우선순위 중에서 고르세요.':
+      'Choose the new priority from this project\'s priorities.',
   '변경할 필드를 고르세요.': 'Select a field to change.',
   '보고 날짜는 YYYY-MM-DD 형식입니다.': 'The report date must be in YYYY-MM-DD format.',
   '보고 종류는 일일·주간 중 하나입니다.': 'The report type must be daily or weekly.',
-  '보관 기간은 5·7·10년이나 기한 없음 중에서 고르세요.': 'Choose a retention period of 5, 7 or 10 years, or no limit.',
+  '보관 기간은 5·7·10년이나 기한 없음 중에서 고르세요.':
+      'Choose a retention period of 5, 7 or 10 years, or no limit.',
   '보관 기간을 "기한 없음"으로 두었습니다.': 'The retention period is set to "no limit".',
-  '보관된 업무입니다. 보관을 해제한 뒤 수정할 수 있습니다.': 'This task is archived. Unarchive it to edit.',
+  '보관된 업무입니다. 보관을 해제한 뒤 수정할 수 있습니다.':
+      'This task is archived. Unarchive it to edit.',
   '보관된 토픽에는 올릴 수 없습니다.': 'You can\'t post to an archived topic.',
-  '보관된 토픽에서는 토픽 관리자만 글을 쓸 수 있습니다.': 'In archived topics, only topic admins can post.',
-  '보관된 토픽에서는 토픽 관리자만 앨범을 쓸 수 있습니다.': 'In archived topics, only topic admins can use albums.',
-  '보관된 토픽에서는 토픽 관리자만 화상회의를 시작할 수 있습니다.': 'In archived topics, only topic admins can start video meetings.',
+  '보관된 토픽에서는 토픽 관리자만 글을 쓸 수 있습니다.':
+      'In archived topics, only topic admins can post.',
+  '보관된 토픽에서는 토픽 관리자만 앨범을 쓸 수 있습니다.':
+      'In archived topics, only topic admins can use albums.',
+  '보관된 토픽에서는 토픽 관리자만 화상회의를 시작할 수 있습니다.':
+      'In archived topics, only topic admins can start video meetings.',
   '보관함': 'Archive',
   '보기 방식은 바꿀 수 없습니다.': 'The view type can\'t be changed.',
   '보기 방식이 올바르지 않습니다.': 'Invalid view type.',
-  '보내기가 계속 실패해서 연동을 껐습니다.': 'The integration was turned off because deliveries kept failing.',
+  '보내기가 계속 실패해서 연동을 껐습니다.':
+      'The integration was turned off because deliveries kept failing.',
   '보내기를 취소하는 사유를 쓰세요.': 'Enter a reason for unsending.',
   '보내는 이름은 50자 이내로 넣으세요.': 'The sender name must be 50 characters or fewer.',
   '보내는 이름은 글자로 넣어야 합니다.': 'The sender name must be text.',
   '보내는 주소가 이메일 형식이 아닙니다.': 'The sender address isn\'t a valid email.',
   '보내는 주소는 글자로 넣어야 합니다.': 'The sender address must be text.',
-  '보내는 중 오류가 발생했습니다. 다시 예약하세요.': 'An error occurred while sending. Schedule it again.',
+  '보내는 중 오류가 발생했습니다. 다시 예약하세요.':
+      'An error occurred while sending. Schedule it again.',
   '보내지 않은 대장입니다.': 'This payroll has not been sent.',
-  '보낸 내용이 너무 큽니다. 내용을 줄이거나 나눠서 다시 보내 주세요.': 'What you sent is too large. Shorten it or split it up and send again.',
-  '보낸 대장의 명세서는 뺄 수 없습니다. 먼저 보내기를 취소하세요.': 'Payslips cannot be removed from a sent payroll. Unsend it first.',
+  '보낸 내용이 너무 큽니다. 내용을 줄이거나 나눠서 다시 보내 주세요.':
+      'What you sent is too large. Shorten it or split it up and send again.',
+  '보낸 대장의 명세서는 뺄 수 없습니다. 먼저 보내기를 취소하세요.':
+      'Payslips cannot be removed from a sent payroll. Unsend it first.',
   '보낸 사람 주소를 확인하세요.': 'Check the sender address.',
-  '보낸 사람을 확인하지 못했습니다(SPF·DKIM 확인 안 됨).': 'The sender couldn\'t be verified (SPF and DKIM didn\'t verify).',
-  '보낸 서버가 그 도메인의 메일 서버가 아닙니다(SPF 실패).': 'The sending server isn\'t one of that domain\'s mail servers (SPF failed).',
+  '보낸 사람을 확인하지 못했습니다(SPF·DKIM 확인 안 됨).':
+      'The sender couldn\'t be verified (SPF and DKIM didn\'t verify).',
+  '보낸 서버가 그 도메인의 메일 서버가 아닙니다(SPF 실패).':
+      'The sending server isn\'t one of that domain\'s mail servers (SPF failed).',
   '보낸사람': 'From',
   '보낸편지함': 'Sent',
   '보낼 글이 없습니다(text 칸을 넣으세요).': 'Nothing to send (fill in the text field).',
   '보낼 글이 없습니다.': 'Nothing to send.',
   '보낼 사람을 고르세요.': 'Choose recipients.',
-  '보낼 주소가 있는 나가는 웹훅·앱만 시험할 수 있습니다.': 'Only outgoing webhooks and apps with a target URL can be tested.',
-  '보드 뷰 토픽에는 게시글만 올릴 수 있습니다.': 'Only posts can be created in board view topics.',
+  '보낼 주소가 있는 나가는 웹훅·앱만 시험할 수 있습니다.':
+      'Only outgoing webhooks and apps with a target URL can be tested.',
+  '보드 뷰 토픽에는 게시글만 올릴 수 있습니다.':
+      'Only posts can be created in board view topics.',
   '보드 뷰 토픽에는 앨범을 공유할 수 없습니다.': 'Albums can\'t be shared to board view topics.',
-  '보드 뷰 토픽에는 채팅방 알림을 보낼 수 없습니다.': 'Chat notifications can\'t be sent to board view topics.',
-  '보드 뷰 토픽에서는 할 일을 만들 수 없습니다.': 'To-dos can\'t be created in board view topics.',
+  '보드 뷰 토픽에는 채팅방 알림을 보낼 수 없습니다.':
+      'Chat notifications can\'t be sent to board view topics.',
+  '보드 뷰 토픽에서는 할 일을 만들 수 없습니다.':
+      'To-dos can\'t be created in board view topics.',
   '보드 뷰 토픽의 게시글만 고정할 수 있습니다.': 'Only posts in board view topics can be pinned.',
   '보드를 찾을 수 없습니다.': 'Board not found.',
-  '보안 질문 답변은 2자 이상 입력하세요.': 'The security answer must be at least 2 characters.',
+  '보안 질문 답변은 2자 이상 입력하세요.':
+      'The security answer must be at least 2 characters.',
   '보안 질문 답변이 일치하지 않습니다.': 'The security answer doesn\'t match.',
-  '보안 질문이 등록되지 않은 계정은 사내 와이파이에서만 비밀번호를 재설정할 수 있습니다. 서버 운영자에게 문의하세요.': 'Accounts without a security question can only reset their password on the company Wi-Fi. Contact the server operator.',
+  '보안 질문이 등록되지 않은 계정은 사내 와이파이에서만 비밀번호를 재설정할 수 있습니다. 서버 운영자에게 문의하세요.':
+      'Accounts without a security question can only reset their password on the company Wi-Fi. Contact the server operator.',
   '보안 키': 'Security key',
   '보안 키 로그인 시도': 'security key sign-in attempts',
   '보안 키 응답이 없습니다.': 'No response from the security key.',
   '보안 키 확인': 'Security key verification',
-  '보안 키 확인 시간이 지났습니다. 처음부터 다시 하세요.': 'Security key verification timed out. Start again.',
+  '보안 키 확인 시간이 지났습니다. 처음부터 다시 하세요.':
+      'Security key verification timed out. Start again.',
   '보안 키로 로그인 확인': 'Confirm sign-in with security key',
-  '보안 키를 등록했습니다. TangoTalk 앱으로 돌아가세요. 이 창은 닫아도 됩니다.': 'Security key registered. Go back to the TangoTalk app. You can close this window.',
+  '보안 키를 등록했습니다. TangoTalk 앱으로 돌아가세요. 이 창은 닫아도 됩니다.':
+      'Security key registered. Go back to the TangoTalk app. You can close this window.',
   '보안 키를 찾을 수 없습니다.': 'Security key not found.',
-  '보안 키를 확인하지 못했습니다. 처음부터 다시 하세요.': 'Couldn\'t verify the security key. Start again.',
+  '보안 키를 확인하지 못했습니다. 처음부터 다시 하세요.':
+      'Couldn\'t verify the security key. Start again.',
   '보통예금': 'Ordinary deposits',
-  '복구 코드가 맞지 않거나 이미 쓴 코드입니다.': 'The recovery code is incorrect or has already been used.',
+  '복구 코드가 맞지 않거나 이미 쓴 코드입니다.':
+      'The recovery code is incorrect or has already been used.',
   '복리후생비': 'Employee benefits',
   '본문을 입력하세요.': 'Enter the body.',
   '본문이 너무 깁니다.': 'The body is too long.',
   '본문이 올바르지 않습니다.': 'Invalid body.',
   '본인에게 온 문의만 처리할 수 있습니다.': 'You can only handle inquiries addressed to you.',
-  '본인이 바꾸지 않았다면 바로 비밀번호를 바꾸고 서버 운영자에게 알려 주세요.': 'If you didn\'t make this change, change your password right away and let the server operator know.',
+  '본인이 바꾸지 않았다면 바로 비밀번호를 바꾸고 서버 운영자에게 알려 주세요.':
+      'If you didn\'t make this change, change your password right away and let the server operator know.',
   '본인이 작성한 공지만 할 수 있습니다.': 'You can only do this for announcements you wrote.',
   '봇 아이콘은 이모지 하나로 넣으세요.': 'The bot icon must be a single emoji.',
   '봇 이름을 넣으세요.': 'Enter a bot name.',
-  '봇 토큰으로는 할 수 없습니다 — 사람 토큰(개인 API 토큰·OAuth 토큰)으로 부르세요.': 'Not allowed with a bot token — use a person\'s token (personal API token or OAuth token).',
+  '봇 토큰으로는 할 수 없습니다 — 사람 토큰(개인 API 토큰·OAuth 토큰)으로 부르세요.':
+      'Not allowed with a bot token — use a person\'s token (personal API token or OAuth token).',
   '봉사료': 'Service charge',
   '부가가치세': 'VAT',
   '부가세': 'VAT',
@@ -882,78 +1132,105 @@ const Map<String, String> serverEn = {
   '부산은행': 'Busan Bank',
   '부서 경로': 'Department path',
   '부서 이름을 넣으세요.': 'Enter a department name.',
-  '부서 트리의 시작 위치(DN)가 올바르지 않습니다.': 'The starting point (DN) of the department tree is invalid.',
+  '부서 트리의 시작 위치(DN)가 올바르지 않습니다.':
+      'The starting point (DN) of the department tree is invalid.',
   '부서(OU)나 상위자 맞추기를 먼저 켜세요.': 'Turn on department (OU) or manager sync first.',
-  '부서·직책 관리 범위가 바뀌어 지금은 쓰지 않는 조직도입니다.': 'This org chart is no longer used because the department/position management scope changed.',
+  '부서·직책 관리 범위가 바뀌어 지금은 쓰지 않는 조직도입니다.':
+      'This org chart is no longer used because the department/position management scope changed.',
   '부서·직책 설정을 따름': 'Follow department/position settings',
-  '부서·직책은 30자 이내로 입력하세요.': 'Department/position must be 30 characters or fewer.',
+  '부서·직책은 30자 이내로 입력하세요.':
+      'Department/position must be 30 characters or fewer.',
   '부서는 30자 이내로 입력하세요.': 'Department must be 30 characters or fewer.',
   '부서를 맞출 방식이 올바르지 않습니다.': 'The department sync mode is invalid.',
-  '부서를 자기 자신이나 그 아래 부서 밑으로 옮길 수 없습니다.': 'A department can\'t be moved under itself or one of its subdepartments.',
+  '부서를 자기 자신이나 그 아래 부서 밑으로 옮길 수 없습니다.':
+      'A department can\'t be moved under itself or one of its subdepartments.',
   '부서를 찾을 수 없습니다.': 'Department not found.',
   '부서장 아이디': 'Head username',
-  '부여할 등급은 준회원/정회원/관리자 중에서 고를 수 있습니다.': 'The level to grant can be guest, member, or admin.',
+  '부여할 등급은 준회원/정회원/관리자 중에서 고를 수 있습니다.':
+      'The level to grant can be guest, member, or admin.',
   '부처님오신날': 'Buddha\'s Birthday',
   '부호는 영문·숫자 10자까지입니다.': 'Codes can be up to 10 letters or digits.',
-  '북마크 목록이 바뀌었습니다. 새로고침한 뒤 다시 시도하세요.': 'The bookmark list has changed. Refresh and try again.',
+  '북마크 목록이 바뀌었습니다. 새로고침한 뒤 다시 시도하세요.':
+      'The bookmark list has changed. Refresh and try again.',
   '북마크 제목을 입력하세요.': 'Enter a bookmark title.',
   '북마크 종류가 올바르지 않습니다.': 'Invalid bookmark type.',
-  '북마크 종류는 만든 뒤에 바꿀 수 없습니다.': 'The bookmark type can\'t be changed after it\'s created.',
-  '북마크 주소는 http:// 또는 https://로 시작하는 올바른 주소여야 합니다(2000자 이내).': 'The bookmark URL must be a valid address starting with http:// or https:// (2000 characters or fewer).',
-  '북마크를 만든 사람 또는 팀 관리자만 고치거나 지울 수 있습니다.': 'Only the bookmark\'s creator or a team admin can edit or delete it.',
+  '북마크 종류는 만든 뒤에 바꿀 수 없습니다.':
+      'The bookmark type can\'t be changed after it\'s created.',
+  '북마크 주소는 http:// 또는 https://로 시작하는 올바른 주소여야 합니다(2000자 이내).':
+      'The bookmark URL must be a valid address starting with http:// or https:// (2000 characters or fewer).',
+  '북마크를 만든 사람 또는 팀 관리자만 고치거나 지울 수 있습니다.':
+      'Only the bookmark\'s creator or a team admin can edit or delete it.',
   '북마크를 찾을 수 없습니다.': 'Bookmark not found.',
   '분류(할 일/진행 중/완료)를 고르세요.': 'Choose a category (to do / in progress / done).',
-  '분류(할 일/진행 중/완료)마다 상태가 하나는 있어야 합니다.': 'Each category (to do / in progress / done) needs at least one status.',
+  '분류(할 일/진행 중/완료)마다 상태가 하나는 있어야 합니다.':
+      'Each category (to do / in progress / done) needs at least one status.',
   '분류가 올바르지 않습니다.': 'Invalid category.',
   '분류를 선택하세요.': 'Select a category.',
   '분식': 'Snack food',
   '브라우저 푸시 서비스의 주소가 아닙니다.': 'This isn\'t a browser push service address.',
-  '비공개 토픽은 초대를 통해서만 참여할 수 있습니다.': 'Private topics can only be joined by invitation.',
-  '비밀 대화 규약 번호(protocol)가 올바르지 않습니다.': 'Invalid secret chat protocol number (protocol).',
-  '비밀 대화는 서버가 내용을 알 수 없어 내보낼 수 없습니다.': 'Secret chats can\'t be exported because the server can\'t read their content.',
+  '비공개 토픽은 초대를 통해서만 참여할 수 있습니다.':
+      'Private topics can only be joined by invitation.',
+  '비밀 대화 규약 번호(protocol)가 올바르지 않습니다.':
+      'Invalid secret chat protocol number (protocol).',
+  '비밀 대화는 서버가 내용을 알 수 없어 내보낼 수 없습니다.':
+      'Secret chats can\'t be exported because the server can\'t read their content.',
   '비밀 대화는 즐겨찾기할 수 없습니다.': 'Secret chats can\'t be added to favorites.',
   '비밀 대화로는 메시지를 공유할 수 없습니다.': 'Messages can\'t be shared to a secret chat.',
   '비밀 대화로는 앨범을 공유할 수 없습니다.': 'Albums can\'t be shared to a secret chat.',
   '비밀 대화를 찾을 수 없습니다.': 'Secret chat not found.',
-  '비밀 대화에는 직접 올린 파일만 보낼 수 있습니다. 파일을 다시 첨부해 주세요.': 'Only files you upload directly can be sent in a secret chat. Please attach the file again.',
+  '비밀 대화에는 직접 올린 파일만 보낼 수 있습니다. 파일을 다시 첨부해 주세요.':
+      'Only files you upload directly can be sent in a secret chat. Please attach the file again.',
   '비밀 대화에서는 공감을 남길 수 없습니다.': 'Reactions aren\'t available in secret chats.',
-  '비밀 대화에서는 아직 화상회의를 쓸 수 없습니다.': 'Video meetings aren\'t available in secret chats yet.',
+  '비밀 대화에서는 아직 화상회의를 쓸 수 없습니다.':
+      'Video meetings aren\'t available in secret chats yet.',
   '비밀 대화에서는 앨범을 쓸 수 없습니다.': 'Albums aren\'t available in secret chats.',
   '비밀 대화에서는 투표를 만들 수 없습니다.': 'Polls can\'t be created in secret chats.',
   '비밀 대화에서는 할 일을 만들 수 없습니다.': 'To-dos can\'t be created in secret chats.',
-  '비밀 대화의 글은 서버에 저장하지 않습니다.': 'Secret chat messages aren\'t stored on the server.',
+  '비밀 대화의 글은 서버에 저장하지 않습니다.':
+      'Secret chat messages aren\'t stored on the server.',
   '비밀 대화의 메시지는 공유할 수 없습니다.': 'Secret chat messages can\'t be shared.',
-  '비밀 대화의 사진·파일 메시지는 수정할 수 없습니다.': 'Photo and file messages in secret chats can\'t be edited.',
-  '비밀대화 요청을 보냈습니다. 상대방이 수락할 때까지 대기 중': 'Secret chat request sent. Waiting for the other person to accept',
+  '비밀 대화의 사진·파일 메시지는 수정할 수 없습니다.':
+      'Photo and file messages in secret chats can\'t be edited.',
+  '비밀대화 요청을 보냈습니다. 상대방이 수락할 때까지 대기 중':
+      'Secret chat request sent. Waiting for the other person to accept',
   '비밀대화가 시작되었습니다': 'Secret chat started',
   '비밀번호 재설정 코드': 'Password reset code',
-  '비밀번호 재설정을 요청해서 보낸 메일입니다. 아래 코드를 비밀번호 찾기 화면에 넣으세요.': 'This email was sent because a password reset was requested. Enter the code below on the Forgot password screen.',
+  '비밀번호 재설정을 요청해서 보낸 메일입니다. 아래 코드를 비밀번호 찾기 화면에 넣으세요.':
+      'This email was sent because a password reset was requested. Enter the code below on the Forgot password screen.',
   '비밀번호 지움': 'Password cleared',
   '비밀번호가 너무 깁니다.': 'The password is too long.',
   '비밀번호가 맞지 않습니다.': 'Incorrect password.',
-  '비밀번호가 생각나지 않으면 로그인 화면의 "비밀번호 찾기"를 이용하세요. 직접 요청하지 않았다면 이 메일은 무시하세요.': 'If you forgot your password, use "Forgot password" on the sign-in screen. If you didn\'t request this, ignore this email.',
+  '비밀번호가 생각나지 않으면 로그인 화면의 "비밀번호 찾기"를 이용하세요. 직접 요청하지 않았다면 이 메일은 무시하세요.':
+      'If you forgot your password, use "Forgot password" on the sign-in screen. If you didn\'t request this, ignore this email.',
   '비밀번호가 올바르지 않습니다.': 'Invalid password.',
   '비밀번호를 넣으세요.': 'Enter a password.',
   '비어 있는 보기가 있습니다.': 'There\'s an empty option.',
   '비품': 'Equipment',
   '비품·소모품': 'Equipment & supplies',
-  '빈 칸은 그 항목을 바꾸지 않습니다. 사람은 아이디 → 사번 → 이름(같은 이름이 없을 때) 순서로 찾습니다.': 'Blank cells leave the item unchanged. People are matched by username, then employee no., then name (when the name is unique).',
+  '빈 칸은 그 항목을 바꾸지 않습니다. 사람은 아이디 → 사번 → 이름(같은 이름이 없을 때) 순서로 찾습니다.':
+      'Blank cells leave the item unchanged. People are matched by username, then employee no., then name (when the name is unique).',
   '빠진 사람': 'Missing',
   '빽다방': 'Paik\'s Coffee',
   '사내 디렉터리 로그인을 먼저 켜세요.': 'Turn on company directory sign-in first.',
-  '사내 디렉터리로 조직도를 맞추는 것은 계정 단위 조직도에서만 됩니다.': 'Syncing the org chart from the company directory only works with an account-wide org chart.',
-  '사내 와이파이 밖에서는 초대 링크로만 가입할 수 있습니다. 초대 링크를 받아 그 코드로 서버에 연결하거나(아이폰은 초대 안내에 있는 웹 앱 주소로 열기), 사내 와이파이에서 가입하세요.': 'Outside the company Wi-Fi, you can only sign up with an invite link. Get an invite link and connect to the server with its code (on iPhone, open the web app address in the invite), or sign up on the company Wi-Fi.',
-  '사내 와이파이에서는 바로 로그인됩니다.': 'On the company Wi-Fi, you\'re signed in right away.',
-  '사내 주소(사설망)·이 서버로는 서버 운영자만 보낼 수 있습니다. 공인 주소(80·443 포트)를 넣으세요.': 'Only the server operator can send to internal (private network) addresses or this server. Enter a public address (port 80/443).',
+  '사내 디렉터리로 조직도를 맞추는 것은 계정 단위 조직도에서만 됩니다.':
+      'Syncing the org chart from the company directory only works with an account-wide org chart.',
+  '사내 와이파이 밖에서는 초대 링크로만 가입할 수 있습니다. 초대 링크를 받아 그 코드로 서버에 연결하거나(아이폰은 초대 안내에 있는 웹 앱 주소로 열기), 사내 와이파이에서 가입하세요.':
+      'Outside the company Wi-Fi, you can only sign up with an invite link. Get an invite link and connect to the server with its code (on iPhone, open the web app address in the invite), or sign up on the company Wi-Fi.',
+  '사내 와이파이에서는 바로 로그인됩니다.':
+      'On the company Wi-Fi, you\'re signed in right away.',
+  '사내 주소(사설망)·이 서버로는 서버 운영자만 보낼 수 있습니다. 공인 주소(80·443 포트)를 넣으세요.':
+      'Only the server operator can send to internal (private network) addresses or this server. Enter a public address (port 80/443).',
   '사람 수는 0~20명입니다.': 'Number of people must be 0–20.',
   '사람과 귀속 연도를 고르세요.': 'Choose a person and tax year.',
   '사무': 'Office',
   '사무실 위치 지움': 'Office location cleared',
-  '사무실 위치(위도·경도)를 확인하세요.': 'Check the office location (latitude and longitude).',
+  '사무실 위치(위도·경도)를 확인하세요.':
+      'Check the office location (latitude and longitude).',
   '사번을 확인하세요.': 'Check the employee numbers.',
   '사업자 종류를 고르세요.': 'Choose the business type.',
   '사업자등록번호': 'Business registration no.',
-  '사업장 이전·근로 조건 변동·임금 체불 등으로 자진 퇴사': 'Voluntary resignation due to relocation, changed working conditions, unpaid wages, etc.',
+  '사업장 이전·근로 조건 변동·임금 체불 등으로 자진 퇴사':
+      'Voluntary resignation due to relocation, changed working conditions, unpaid wages, etc.',
   '사용 건 모양이 아닙니다.': 'Not a transaction.',
   '사용 날짜를 읽지 못했습니다.': 'Couldn\'t read the usage date.',
   '사용 날짜를 확인하세요.': 'Check the date of use.',
@@ -963,20 +1240,25 @@ const Map<String, String> serverEn = {
   '사용일': 'Date of use',
   '사용일시': 'Date and time of use',
   '사용일자': 'Date of use',
-  '사용자 검색 조건에 {username}을 넣으세요(예: (sAMAccountName={username})).': 'Include {username} in the user search filter (e.g. (sAMAccountName={username})).',
+  '사용자 검색 조건에 {username}을 넣으세요(예: (sAMAccountName={username})).':
+      'Include {username} in the user search filter (e.g. (sAMAccountName={username})).',
   '사용자 검색 조건을 넣으세요.': 'Enter a user search filter.',
-  '사용자 검색 조건의 괄호 짝이 맞지 않습니다.': 'The user search filter has unbalanced parentheses.',
+  '사용자 검색 조건의 괄호 짝이 맞지 않습니다.':
+      'The user search filter has unbalanced parentheses.',
   '사용자 정의 필드 값 형식이 올바르지 않습니다.': 'Invalid custom field value format.',
-  '사용자는 이 범위의 정회원 이상만 정할 수 있습니다.': 'Card users must be full members or above in this scope.',
+  '사용자는 이 범위의 정회원 이상만 정할 수 있습니다.':
+      'Card users must be full members or above in this scope.',
   '사용자는 프로젝트 구성원 중에서 고를 수 있습니다.': 'Users can be chosen from project members.',
   '사용자를 찾을 수 없습니다.': 'User not found.',
   '사용자를 찾지 못했습니다.': 'Couldn\'t find the user.',
   '사용자를 확인하세요.': 'Check the card users.',
   '사용처': 'Place of use',
   '사용할 수 없는 계정입니다.': 'This account can\'t be used.',
-  '사용할 수 없는 첨부 링크가 있습니다. 파일을 다시 올려 주세요.': 'Some attachment links can\'t be used. Please upload the files again.',
+  '사용할 수 없는 첨부 링크가 있습니다. 파일을 다시 올려 주세요.':
+      'Some attachment links can\'t be used. Please upload the files again.',
   '사우회비': 'Staff association fee',
-  '사진을 열지 못했습니다. JPG·PNG로 다시 올리세요.': 'Could not open the photo. Upload it again as JPG or PNG.',
+  '사진을 열지 못했습니다. JPG·PNG로 다시 올리세요.':
+      'Could not open the photo. Upload it again as JPG or PNG.',
   '사진을 찾을 수 없습니다.': 'Photo not found.',
   '사진이 너무 큽니다(20MB까지).': 'The photo is too large (up to 20MB).',
   '삭제된 파일입니다.': 'This file has been deleted.',
@@ -996,7 +1278,8 @@ const Map<String, String> serverEn = {
   '상위자 부서장으로': 'Department head as manager',
   '상위자 아이디': 'Manager username',
   '상태 값이 올바르지 않습니다.': 'Invalid status value.',
-  '상태 글에 쓸 수 없는 글자가 있습니다.': 'The status text contains characters that aren\'t allowed.',
+  '상태 글에 쓸 수 없는 글자가 있습니다.':
+      'The status text contains characters that aren\'t allowed.',
   '상태 글은 글자로 넣어야 합니다.': 'The status text must be text.',
   '상태 목록이 올바르지 않습니다.': 'Invalid status list.',
   '상태 이름은 20자 이내로 입력하세요.': 'Status names must be 20 characters or fewer.',
@@ -1008,10 +1291,13 @@ const Map<String, String> serverEn = {
   '상호명': 'Store name',
   '상호저축': 'Savings bank',
   '상환': 'Repayment',
-  '새 계정 등급은 준회원 또는 정회원이어야 합니다.': 'The new account level must be guest or member.',
+  '새 계정 등급은 준회원 또는 정회원이어야 합니다.':
+      'The new account level must be guest or member.',
   '새 이메일 확인 코드': 'New email verification code',
-  '새 이메일로 받은 확인 코드를 넣으세요.': 'Enter the verification code sent to your new email.',
-  '새 편집기에서 만든 규칙입니다. 앱을 업데이트한 뒤 수정해 주세요.': 'This rule was created in the new editor. Update the app before editing it.',
+  '새 이메일로 받은 확인 코드를 넣으세요.':
+      'Enter the verification code sent to your new email.',
+  '새 편집기에서 만든 규칙입니다. 앱을 업데이트한 뒤 수정해 주세요.':
+      'This rule was created in the new editor. Update the app before editing it.',
   '새마을': 'Saemaul',
   '새마을금고': 'Saemaul Geumgo',
   '색상 형식이 올바르지 않습니다.': 'Invalid color format.',
@@ -1022,35 +1308,50 @@ const Map<String, String> serverEn = {
   '샤브': 'Shabu-shabu',
   '서로가 서로의 상위자가 되게 할 수 없습니다.': 'Two people can\'t be each other\'s managers.',
   '서명 그림을 올리세요.': 'Upload a signature image.',
-  '서명은 그림 파일(png·jpg·webp)로 올리세요.': 'Upload the signature as an image file (png, jpg, webp).',
+  '서명은 그림 파일(png·jpg·webp)로 올리세요.':
+      'Upload the signature as an image file (png, jpg, webp).',
   '서명을 확인하세요.': 'Check the signature.',
   '서버 오류가 발생했습니다.': 'A server error occurred.',
   '서버 운영자만': 'Only server operators',
   '서버 운영자만 이모티콘을 관리할 수 있습니다.': 'Only server operators can manage stickers.',
   '서버 운영자만 접근할 수 있습니다.': 'Only server operators can access this.',
   '서버 저장 공간이 부족합니다.': 'The server is running out of storage.',
-  '서버 저장 공간이 부족합니다. 관리자에게 알려 주세요.': 'The server is low on storage. Let an admin know.',
-  '서버 저장 공간이 부족해 녹화 파일을 옮기지 못했습니다(녹화 폴더에 남아 있습니다).': 'Not enough server storage to move the recording file (it\'s still in the recording folder).',
-  '서버 주소·포트·보내는 주소(또는 이메일 모양의 계정)를 먼저 넣고 저장하세요.': 'Enter and save the server address, port, and sender address (or an email-style account) first.',
-  '서버 주소·포트·보내는 주소를 먼저 넣으세요.': 'Enter the server address, port, and sender address first.',
-  '서버 주소가 올바르지 않습니다. 예: smtp.naver.com': 'Invalid server address. e.g. smtp.naver.com',
+  '서버 저장 공간이 부족합니다. 관리자에게 알려 주세요.':
+      'The server is low on storage. Let an admin know.',
+  '서버 저장 공간이 부족해 녹화 파일을 옮기지 못했습니다(녹화 폴더에 남아 있습니다).':
+      'Not enough server storage to move the recording file (it\'s still in the recording folder).',
+  '서버 주소·포트·보내는 주소(또는 이메일 모양의 계정)를 먼저 넣고 저장하세요.':
+      'Enter and save the server address, port, and sender address (or an email-style account) first.',
+  '서버 주소·포트·보내는 주소를 먼저 넣으세요.':
+      'Enter the server address, port, and sender address first.',
+  '서버 주소가 올바르지 않습니다. 예: smtp.naver.com':
+      'Invalid server address. e.g. smtp.naver.com',
   '서버 주소는 글자로 넣어야 합니다.': 'The server address must be text.',
-  '서버 폴더·첨부파일 폴더·이 PC의 백업 폴더 안은 외부 백업 위치로 쓸 수 없습니다 — 다른 드라이브나 NAS를 고르세요.': 'Folders inside the server folder, attachments folder, or this PC\'s backup folder can\'t be used as an external backup location — choose another drive or a NAS.',
-  '서버가 다시 시작되어 보냈는지 확인하지 못했습니다. 대화방을 확인한 뒤 다시 예약하세요.': 'The server restarted, so we couldn\'t confirm whether it was sent. Check the chat, then schedule it again.',
+  '서버 폴더·첨부파일 폴더·이 PC의 백업 폴더 안은 외부 백업 위치로 쓸 수 없습니다 — 다른 드라이브나 NAS를 고르세요.':
+      'Folders inside the server folder, attachments folder, or this PC\'s backup folder can\'t be used as an external backup location — choose another drive or a NAS.',
+  '서버가 다시 시작되어 보냈는지 확인하지 못했습니다. 대화방을 확인한 뒤 다시 예약하세요.':
+      'The server restarted, so we couldn\'t confirm whether it was sent. Check the chat, then schedule it again.',
   '서버가 아직 준비되지 않았습니다.': 'The server isn\'t ready yet.',
-  '서버의 메일 기능이 꺼져 있습니다. 아이디로 로그인한 뒤 내 프로필에서 연결하세요.': 'Mail is turned off on the server. Sign in with your ID and link it from your profile.',
-  '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 없어 OAuth로 연결할 수 없습니다.': 'Can\'t connect with OAuth because the server has no web app address (WEB_DOMAIN with a trusted certificate).',
-  '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 없어 보안 키·패스키를 쓸 수 없습니다.': 'Security keys/passkeys can\'t be used because the server has no web app address (trusted certificate — WEB_DOMAIN).',
-  '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 없어 회사 계정 로그인을 쓸 수 없습니다.': 'Company account sign-in isn\'t available because the server has no web app address (trusted certificate — WEB_DOMAIN).',
-  '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 있어야 회사 계정 로그인을 켤 수 있습니다.': 'The server needs a web app address (trusted certificate — WEB_DOMAIN) before company account sign-in can be turned on.',
+  '서버의 메일 기능이 꺼져 있습니다. 아이디로 로그인한 뒤 내 프로필에서 연결하세요.':
+      'Mail is turned off on the server. Sign in with your ID and link it from your profile.',
+  '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 없어 OAuth로 연결할 수 없습니다.':
+      'Can\'t connect with OAuth because the server has no web app address (WEB_DOMAIN with a trusted certificate).',
+  '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 없어 보안 키·패스키를 쓸 수 없습니다.':
+      'Security keys/passkeys can\'t be used because the server has no web app address (trusted certificate — WEB_DOMAIN).',
+  '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 없어 회사 계정 로그인을 쓸 수 없습니다.':
+      'Company account sign-in isn\'t available because the server has no web app address (trusted certificate — WEB_DOMAIN).',
+  '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 있어야 회사 계정 로그인을 켤 수 있습니다.':
+      'The server needs a web app address (trusted certificate — WEB_DOMAIN) before company account sign-in can be turned on.',
   '서비스 계정 DN 또는 비밀번호가 맞지 않습니다.': 'Incorrect service account DN or password.',
   '서비스 계정 JSON 형식이 올바르지 않습니다.': 'Invalid service account JSON format.',
   '서비스 계정 비밀번호를 넣으세요.': 'Enter the service account password.',
   '서비스 계정으로 연결했습니다.': 'Connected with the service account.',
   '서점': 'Bookstore',
   '선택 필드는 선택지가 하나 이상 필요합니다.': 'Select fields need at least one option.',
-  '선택근무 정산 기간은 1개월 또는 3개월입니다.': 'The selective hours settlement period is 1 or 3 months.',
-  '선택근무 정산 기간은 선택근무·자율 출퇴근에만 정할 수 있습니다.': 'A selective hours settlement period can only be set for selective or free hours.',
+  '선택근무 정산 기간은 1개월 또는 3개월입니다.':
+      'The selective hours settlement period is 1 or 3 months.',
+  '선택근무 정산 기간은 선택근무·자율 출퇴근에만 정할 수 있습니다.':
+      'A selective hours settlement period can only be set for selective or free hours.',
   '선택지가 하나 이상 필요합니다.': 'At least one option is required.',
   '선택지는 30개까지 만들 수 있습니다.': 'You can create up to 30 options.',
   '선택지는 30자 이내로 입력하세요.': 'Options must be 30 characters or fewer.',
@@ -1089,10 +1390,12 @@ const Map<String, String> serverEn = {
   '소유자만 소유권을 넘길 수 있습니다.': 'Only the owner can transfer ownership.',
   '소유자만 팀을 삭제할 수 있습니다.': 'Only the owner can delete the team.',
   '소유자의 권한은 바꿀 수 없습니다.': 'The owner\'s permissions can\'t be changed.',
-  '속성 이름은 영문·숫자(예: displayName)로 넣으세요.': 'Enter the attribute name in English letters and numbers (e.g. displayName).',
+  '속성 이름은 영문·숫자(예: displayName)로 넣으세요.':
+      'Enter the attribute name in English letters and numbers (e.g. displayName).',
   '수락된 비밀 대화가 없습니다.': 'No accepted secret chat.',
   '수락할 수 있는 비밀 대화 요청이 없습니다.': 'No secret chat request to accept.',
-  '수정/삭제 가능 시간은 5분/30분/1시간/24시간/7일 중에서 고를 수 있습니다.': 'The edit/delete window can be 5 min, 30 min, 1 hour, 24 hours, or 7 days.',
+  '수정/삭제 가능 시간은 5분/30분/1시간/24시간/7일 중에서 고를 수 있습니다.':
+      'The edit/delete window can be 5 min, 30 min, 1 hour, 24 hours, or 7 days.',
   '수정할 내용이 없습니다.': 'Nothing to update.',
   '수협': 'Suhyup',
   '수협은행': 'Suhyup Bank',
@@ -1106,17 +1409,20 @@ const Map<String, String> serverEn = {
   '스시': 'Sushi',
   '스타벅스': 'Starbucks',
   '스팸편지함': 'Spam',
-  '슬래시 명령은 서버 운영자만 만들고 바꿀 수 있습니다.': 'Only the server operator can create and change slash commands.',
+  '슬래시 명령은 서버 운영자만 만들고 바꿀 수 있습니다.':
+      'Only the server operator can create and change slash commands.',
   '승인 거절 건입니다.': 'This approval was declined.',
   '승인 취소': 'Approval canceled',
-  '승인 코드가 없거나 이미 썼거나 만료됐습니다.': 'The authorization code is invalid, already used or expired.',
+  '승인 코드가 없거나 이미 썼거나 만료됐습니다.':
+      'The authorization code is invalid, already used or expired.',
   '승인 코드를 이미 썼습니다.': 'The authorization code has already been used.',
   '승인 필요 여부를 확인하세요.': 'Check whether approval is required.',
   '승인No': 'Approval No',
   '승인no': 'Approval no',
   '승인구분': 'Approval type',
   '승인금액': 'Approved amount',
-  '승인되면 출장 기간은 근태에서 결근으로 세지 않습니다.': 'Once approved, the business trip period is not counted as absence in attendance.',
+  '승인되면 출장 기간은 근태에서 결근으로 세지 않습니다.':
+      'Once approved, the business trip period is not counted as absence in attendance.',
   '승인된 결재만 정산할 수 있습니다.': 'Only approved requests can be settled.',
   '승인된 결재만 취소할 수 있습니다.': 'Only approved approvals can be canceled.',
   '승인시각': 'Approval time',
@@ -1140,21 +1446,26 @@ const Map<String, String> serverEn = {
   '시도': 'Attempt',
   '시스템': 'System',
   '시스템 메시지는 즐겨찾기할 수 없습니다.': 'System messages can\'t be added to favorites.',
-  '시작 메뉴 "백업"이 이미 백업하고 있습니다. 끝난 뒤 다시 시도하세요.': 'The Start menu item "Backup" is already running a backup. Try again after it finishes.',
+  '시작 메뉴 "백업"이 이미 백업하고 있습니다. 끝난 뒤 다시 시도하세요.':
+      'The Start menu item "Backup" is already running a backup. Try again after it finishes.',
   '시작 시각이 올바르지 않습니다.': 'Invalid start time.',
   '시작 시각이 허용 범위를 벗어났습니다.': 'The start time is outside the allowed range.',
-  '시작 시간은 시작일과 함께 정해야 합니다.': 'A start time must be set together with a start date.',
+  '시작 시간은 시작일과 함께 정해야 합니다.':
+      'A start time must be set together with a start date.',
   '시작과 종료 시각을 입력하세요.': 'Enter the start and end times.',
   '시작일이 종료일보다 늦습니다.': 'The start date is later than the end date.',
   '시트가 없습니다.': 'The file has no sheet.',
   '시행일': 'Effective date',
-  '시험 메일을 먼저 보내 보세요. 성공하면 켤 수 있습니다.': 'Send a test email first. You can turn this on once it succeeds.',
+  '시험 메일을 먼저 보내 보세요. 성공하면 켤 수 있습니다.':
+      'Send a test email first. You can turn this on once it succeeds.',
   '시험 보내기입니다(TangoTalk).': 'This is a test delivery (TangoTalk).',
   '식당': 'Restaurant',
   '식대': 'Meals',
-  '식별자는 영문으로 시작하는 2~10자의 영문/숫자입니다(예: MKT).': 'The identifier must be 2–10 letters or digits starting with a letter (e.g. MKT).',
+  '식별자는 영문으로 시작하는 2~10자의 영문/숫자입니다(예: MKT).':
+      'The identifier must be 2–10 letters or digits starting with a letter (e.g. MKT).',
   '식비': 'Meals',
-  '신고 기한은 취득일·상실일이 속한 달의 다음 달 15일입니다. 상실일은 퇴직일(마지막 근무일의 다음 날)입니다.': 'The filing deadline is the 15th of the month after the acquisition/loss date. The loss date is the day after the last working day.',
+  '신고 기한은 취득일·상실일이 속한 달의 다음 달 15일입니다. 상실일은 퇴직일(마지막 근무일의 다음 날)입니다.':
+      'The filing deadline is the 15th of the month after the acquisition/loss date. The loss date is the day after the last working day.',
   '신고를 찾을 수 없습니다.': 'Filing not found.',
   '신용카드 등 공제': 'Credit card etc. deduction',
   '신용협동조합': 'Credit union',
@@ -1167,7 +1478,8 @@ const Map<String, String> serverEn = {
   '실수령': 'Net pay',
   '실수령액이 0원 이하': 'Net pay of 0 or less',
   '실행 시점을 고르세요.': 'Choose when to run it.',
-  '쓰기(내 이름으로 메시지·댓글·할 일·일정)': 'Write (messages, comments, to-dos, events as me)',
+  '쓰기(내 이름으로 메시지·댓글·할 일·일정)':
+      'Write (messages, comments, to-dos, events as me)',
   '쓴 날짜를 확인하세요.': 'Check the date written.',
   '쓸 날을 하나 이상 고르세요.': 'Choose at least one day you plan to take off.',
   '쓸 수 없는 계정입니다.': 'This account can\'t be used.',
@@ -1179,17 +1491,22 @@ const Map<String, String> serverEn = {
   '아시아나': 'Asiana',
   '아이디 또는 비밀번호가 올바르지 않습니다.': 'Incorrect username or password.',
   '아이디 안내': 'Your username',
-  '아이디 찾기를 요청해서 보낸 메일입니다.': 'You received this email because a username lookup was requested.',
+  '아이디 찾기를 요청해서 보낸 메일입니다.':
+      'You received this email because a username lookup was requested.',
   '아이디, 이름, 비밀번호, 이메일을 입력하세요.': 'Enter a username, name, password and email.',
-  '아이디·비밀번호가 들어간 주소는 쓸 수 없습니다.': 'URLs containing a username or password can\'t be used.',
+  '아이디·비밀번호가 들어간 주소는 쓸 수 없습니다.':
+      'URLs containing a username or password can\'t be used.',
   '아이디가 너무 깁니다.': 'The username is too long.',
   '아이디가 들어간 비밀번호는 쓸 수 없습니다.': 'Passwords can\'t contain your username.',
   '아이디와 이메일이 일치하는 계정이 없습니다.': 'No account matches that username and email.',
-  '아이폰은 앱 대신 웹 앱을 씁니다 — Safari로 열어 가입하고 홈 화면에 추가하세요': 'On iPhone, use the web app instead of the app — open it in Safari, sign up and add it to your Home Screen',
+  '아이폰은 앱 대신 웹 앱을 씁니다 — Safari로 열어 가입하고 홈 화면에 추가하세요':
+      'On iPhone, use the web app instead of the app — open it in Safari, sign up and add it to your Home Screen',
   '아직 배포된 Android 빌드가 없습니다.': 'No Android build has been released yet.',
   '아직 배포된 Windows 빌드가 없습니다.': 'No Windows build has been released yet.',
-  '아직 오지 않은 기간의 보고는 쓸 수 없습니다.': 'You can\'t write a report for a period that hasn\'t started yet.',
-  '아직 출근을 누르지 않았습니다. 그룹웨어 → 출퇴근에서 눌러 주세요.': 'You haven\'t clocked in yet. Clock in from Groupware → Clock in/out.',
+  '아직 오지 않은 기간의 보고는 쓸 수 없습니다.':
+      'You can\'t write a report for a period that hasn\'t started yet.',
+  '아직 출근을 누르지 않았습니다. 그룹웨어 → 출퇴근에서 눌러 주세요.':
+      'You haven\'t clocked in yet. Clock in from Groupware → Clock in/out.',
   '아직 퇴근을 누르지 않았습니다.': 'You haven\'t clocked out yet.',
   '아카데미': 'Academy',
   '알 수 없는 동작입니다.': 'Unknown action.',
@@ -1205,11 +1522,14 @@ const Map<String, String> serverEn = {
   '알림 목록이 올바르지 않습니다.': 'Invalid notification list.',
   '알림 보내기': 'Send notification',
   '알림 설정을 확인하세요.': 'Check the notification settings.',
-  '알림 시각은 1년 안으로만 정할 수 있습니다.': 'The reminder time can be at most 1 year from now.',
-  '알림 시각은 1분 뒤부터 정할 수 있습니다.': 'The reminder time must be at least 1 minute from now.',
+  '알림 시각은 1년 안으로만 정할 수 있습니다.':
+      'The reminder time can be at most 1 year from now.',
+  '알림 시각은 1분 뒤부터 정할 수 있습니다.':
+      'The reminder time must be at least 1 minute from now.',
   '알림 시각은 지금보다 뒤여야 합니다.': 'The reminder time must be later than now.',
   '알림 시각이 올바르지 않습니다.': 'Invalid reminder time.',
-  '알림을 보낼 채팅방을 찾을 수 없습니다.': 'The chat to send the notification to was not found.',
+  '알림을 보낼 채팅방을 찾을 수 없습니다.':
+      'The chat to send the notification to was not found.',
   '알파': 'Alpha',
   '앞으로의 날은 고칠 수 없습니다.': 'Future days can\'t be edited.',
   '앞으로의 날짜에는 시간을 남길 수 없습니다.': 'You can\'t log time for future dates.',
@@ -1217,15 +1537,19 @@ const Map<String, String> serverEn = {
   '액션 뒤에는 다른 노드를 이을 수 없습니다.': 'No other node can follow an action.',
   '액션 종류가 올바르지 않습니다.': 'Invalid action type.',
   '앨범 설명이 올바르지 않습니다.': 'Invalid album description.',
-  '앨범에는 이미지와 영상만 올릴 수 있습니다.': 'Only images and videos can be uploaded to albums.',
+  '앨범에는 이미지와 영상만 올릴 수 있습니다.':
+      'Only images and videos can be uploaded to albums.',
   '앨범에서 찾을 수 없는 항목이 있습니다.': 'Some items were not found in the album.',
-  '앨범을 만든 사람이나 관리자만 고칠 수 있습니다.': 'Only the album creator or an admin can edit it.',
-  '앨범을 만든 사람이나 팀 관리자만 지울 수 있습니다.': 'Only the album creator or a team admin can delete it.',
+  '앨범을 만든 사람이나 관리자만 고칠 수 있습니다.':
+      'Only the album creator or an admin can edit it.',
+  '앨범을 만든 사람이나 팀 관리자만 지울 수 있습니다.':
+      'Only the album creator or a team admin can delete it.',
   '앨범을 찾을 수 없습니다.': 'Album not found.',
   '앱 비밀이 맞지 않습니다.': 'The app secret is incorrect.',
   '앱 비밀이나 PKCE가 필요합니다.': 'An app secret or PKCE is required.',
   '앱 이름': 'App name',
-  '앱에 들어가 알림 센터에서 확인하세요. 이 메일을 그만 받으려면 앱의 알림 센터 → 알림 설정에서 "멘션 요약 메일 받기"를 끄세요.': 'Open the app and check the notification center. To stop receiving these emails, turn off "Receive mention digest emails" in the app under Notification center → Notification settings.',
+  '앱에 들어가 알림 센터에서 확인하세요. 이 메일을 그만 받으려면 앱의 알림 센터 → 알림 설정에서 "멘션 요약 메일 받기"를 끄세요.':
+      'Open the app and check the notification center. To stop receiving these emails, turn off "Receive mention digest emails" in the app under Notification center → Notification settings.',
   '앱으로 돌아가 다시 시도하세요.': 'Go back to the app and try again.',
   '앱을 찾을 수 없습니다.': 'App not found.',
   '앱을 최신 버전으로 업데이트하세요.': 'Update the app to the latest version.',
@@ -1239,15 +1563,18 @@ const Map<String, String> serverEn = {
   '양식 이름은 30자 이내로 입력하세요.': 'Enter a form name of up to 30 characters.',
   '양식 이름은 40자까지입니다.': 'Layout names can be up to 40 characters.',
   '양식 이름을 입력하세요.': 'Enter a form name.',
-  '양식 종류(급여 이체·취득·상실)를 고르세요.': 'Choose a layout type (payroll transfer, acquisition, loss).',
-  '양식은 "관리자가 만든 양식" 종류에서만 고릅니다.': 'A form can only be chosen for the "Admin-made forms" type.',
+  '양식 종류(급여 이체·취득·상실)를 고르세요.':
+      'Choose a layout type (payroll transfer, acquisition, loss).',
+  '양식은 "관리자가 만든 양식" 종류에서만 고릅니다.':
+      'A form can only be chosen for the "Admin-made forms" type.',
   '양식은 30개까지 만들 수 있습니다.': 'You can create up to 30 forms.',
   '양식을 찾을 수 없습니다.': 'Form not found.',
   '양식을 확인하세요.': 'Check the layout.',
   '어디까지 채울지 고르세요.': 'Choose how far to fill.',
   '어린이날': 'Children\'s Day',
   '어린이날·부처님오신날': 'Children\'s Day / Buddha\'s Birthday',
-  '업로드한 파일 경로가 올바르지 않거나 만료되었습니다.': 'The uploaded file path is invalid or has expired.',
+  '업로드한 파일 경로가 올바르지 않거나 만료되었습니다.':
+      'The uploaded file path is invalid or has expired.',
   '업무 목록이 올바르지 않습니다.': 'Invalid task list.',
   '업무 제목은 200자 이내로 입력하세요.': 'Enter a task title of up to 200 characters.',
   '업무 제목을 입력하세요.': 'Enter a task title.',
@@ -1255,7 +1582,8 @@ const Map<String, String> serverEn = {
   '업무를 찾을 수 없습니다.': 'Task not found.',
   '업무일지를 찾을 수 없습니다.': 'Work report not found.',
   '없는 API입니다.': 'This API doesn\'t exist.',
-  '없는 웹훅 주소입니다(지웠거나 새로 만들었을 수 있습니다).': 'This webhook URL doesn\'t exist (it may have been deleted or regenerated).',
+  '없는 웹훅 주소입니다(지웠거나 새로 만들었을 수 있습니다).':
+      'This webhook URL doesn\'t exist (it may have been deleted or regenerated).',
   '에너지': 'Energy',
   '에어비앤비': 'Airbnb',
   '엑셀 파일(.xlsx)을 보내세요.': 'Send an Excel file (.xlsx).',
@@ -1263,26 +1591,31 @@ const Map<String, String> serverEn = {
   '여기어때': 'Yeogi',
   '여비교통비': 'Travel & transportation',
   '역할 값이 올바르지 않습니다.': 'Invalid role value.',
-  '연결 보안은 SSL, STARTTLS, 없음 중 하나입니다.': 'Connection security must be SSL, STARTTLS or None.',
+  '연결 보안은 SSL, STARTTLS, 없음 중 하나입니다.':
+      'Connection security must be SSL, STARTTLS or None.',
   '연결 위치가 올바르지 않습니다.': 'Invalid connection point.',
   '연결된 노드를 찾을 수 없습니다.': 'Connected node not found.',
-  '연결된 메일 계정이 없습니다. 메일 → 계정 연결에서 먼저 연결하세요.': 'No mail account is connected. Connect one first in Mail → Connect account.',
+  '연결된 메일 계정이 없습니다. 메일 → 계정 연결에서 먼저 연결하세요.':
+      'No mail account is connected. Connect one first in Mail → Connect account.',
   '연결된 앱을 찾을 수 없습니다.': 'Connected app not found.',
   '연결이 순환하지 않도록 이어 주세요.': 'Connect the nodes so they don\'t form a loop.',
   '연결하지 않았습니다': 'Not connected',
   '연결한 카드사·홈택스 계정이 없습니다.': 'No card issuer or Hometax account is linked.',
   '연도를 고르세요.': 'Choose the year.',
   '연동': 'Integration',
-  '연동 기관 코드는 숫자 4자리입니다(비우면 카드사로 정함).': 'The integration institution code is 4 digits (blank uses the card issuer).',
+  '연동 기관 코드는 숫자 4자리입니다(비우면 카드사로 정함).':
+      'The integration institution code is 4 digits (blank uses the card issuer).',
   '연동을 찾을 수 없습니다.': 'Integration not found.',
   '연동이 꺼져 있거나 보낼 주소가 없습니다.': 'The integration is off or has no target URL.',
   '연말정산': 'Year-end tax settlement',
   '연말정산 소득세': 'Year-end income tax',
-  '연말정산 자료를 보려면 비밀번호를 다시 확인하세요.': 'Re-enter your password to view year-end settlement data.',
+  '연말정산 자료를 보려면 비밀번호를 다시 확인하세요.':
+      'Re-enter your password to view year-end settlement data.',
   '연말정산 지방소득세': 'Year-end local income tax',
   '연장': 'Overtime',
   '연장(시간)': 'Overtime (hours)',
-  '연장·야간·휴일근무를 미리(늦어도 한 달 안에) 신청합니다. 승인된 시간은 월 근태에 합쳐 보입니다.': 'Request overtime, night and holiday work in advance (no later than within a month). Approved hours are added to the monthly attendance.',
+  '연장·야간·휴일근무를 미리(늦어도 한 달 안에) 신청합니다. 승인된 시간은 월 근태에 합쳐 보입니다.':
+      'Request overtime, night and holiday work in advance (no later than within a month). Approved hours are added to the monthly attendance.',
   '연장근로수당': 'Overtime pay',
   '연장근무 신청': 'Overtime request',
   '연장근무 신청(시간)': 'Overtime request (hours)',
@@ -1290,25 +1623,33 @@ const Map<String, String> serverEn = {
   '연차': 'Annual leave',
   '연차 기준 입사일': 'Leave basis: hire date',
   '연차 기준 회계연도': 'Leave basis: fiscal year',
-  '연차 기준을 고르세요(입사일·회계연도).': 'Choose the leave basis (hire date or fiscal year).',
+  '연차 기준을 고르세요(입사일·회계연도).':
+      'Choose the leave basis (hire date or fiscal year).',
   '연차 이월 끄기': 'Leave carry-over off',
-  '연차 이월이 꺼져 있습니다. 먼저 이월할 수 있는 일수를 정하세요.': 'Leave carry-over is off. Set the number of days that can be carried over first.',
+  '연차 이월이 꺼져 있습니다. 먼저 이월할 수 있는 일수를 정하세요.':
+      'Leave carry-over is off. Set the number of days that can be carried over first.',
   '연차는 끌 수 없습니다.': 'Annual leave can\'t be turned off.',
   '연차는 지울 수 없습니다.': 'Annual leave can\'t be deleted.',
   '열 머리 글은 40자까지입니다.': 'Column headers can be up to 40 characters.',
-  '영수증 읽기 서비스가 이 파일을 읽지 않았습니다.': 'The receipt reading service declined this file.',
-  '영수증 읽기 서비스의 응답을 읽지 못했습니다.': 'Could not understand the receipt reading service\'s response.',
-  '영수증 읽기가 꺼져 있습니다. 관리자에게 문의하세요.': 'Receipt reading is off. Contact an administrator.',
+  '영수증 읽기 서비스가 이 파일을 읽지 않았습니다.':
+      'The receipt reading service declined this file.',
+  '영수증 읽기 서비스의 응답을 읽지 못했습니다.':
+      'Could not understand the receipt reading service\'s response.',
+  '영수증 읽기가 꺼져 있습니다. 관리자에게 문의하세요.':
+      'Receipt reading is off. Contact an administrator.',
   '영수증 파일을 찾을 수 없습니다.': 'Receipt file not found.',
   '영수증은 5개까지입니다.': 'Up to 5 receipts.',
-  '영수증은 사진(JPG·PNG·WebP)이나 PDF만 읽을 수 있습니다.': 'Only photos (JPG, PNG, WebP) or PDFs can be read as receipts.',
-  '영수증을 읽지 못했습니다. 잠시 뒤 다시 하세요.': 'Could not read the receipt. Try again shortly.',
+  '영수증은 사진(JPG·PNG·WebP)이나 PDF만 읽을 수 있습니다.':
+      'Only photos (JPG, PNG, WebP) or PDFs can be read as receipts.',
+  '영수증을 읽지 못했습니다. 잠시 뒤 다시 하세요.':
+      'Could not read the receipt. Try again shortly.',
   '영풍문고': 'Youngpoong Books',
   '예': 'Yes',
   '예금주는 30자까지입니다.': 'Account holder names are up to 30 characters.',
   '예산(원)': 'Budget (KRW)',
   '예상 경비(원)': 'Estimated cost (KRW)',
-  '예상 시간은 1분~1000시간 사이로 입력하세요.': 'Enter an estimate between 1 minute and 1000 hours.',
+  '예상 시간은 1분~1000시간 사이로 입력하세요.':
+      'Enter an estimate between 1 minute and 1000 hours.',
   '예상 시간을 지웠습니다.': 'Estimate cleared.',
   '예수금': 'Withholdings',
   '예약 메시지를 찾을 수 없습니다.': 'Scheduled message not found.',
@@ -1317,12 +1658,17 @@ const Map<String, String> serverEn = {
   '예약은 180일 앞까지만 잡을 수 있습니다.': 'Bookings can be made up to 180 days ahead.',
   '예약은 한 번에 7일까지입니다.': 'A booking can last up to 7 days.',
   '예약을 찾을 수 없습니다.': 'Booking not found.',
-  '예약할 수 있는 사람에 고를 수 없는 사람이 있습니다.': 'Some of the people allowed to book can\'t be chosen.',
+  '예약할 수 있는 사람에 고를 수 없는 사람이 있습니다.':
+      'Some of the people allowed to book can\'t be chosen.',
   '예약할 수 있는 사람을 확인하세요.': 'Check who can book.',
-  '예약할 수 있는 시간대는 시작과 끝을 함께 정하세요.': 'Set both the start and end of the bookable window.',
-  '예약할 수 있는 시간대를 확인하세요(시작이 끝보다 앞).': 'Check the bookable window (start before end).',
-  '옛 엑셀 형식(.xls)은 읽지 못합니다. 엑셀에서 "다른 이름으로 저장 → Excel 통합 문서(.xlsx)"나 CSV로 저장해 올리세요.': 'The old Excel format (.xls) cannot be read. In Excel, use "Save As → Excel Workbook (.xlsx)" or CSV and upload that.',
-  '오늘 올릴 수 있는 용량을 다 썼습니다. 내일 다시 시도하세요.': 'You\'ve used up today\'s upload quota. Try again tomorrow.',
+  '예약할 수 있는 시간대는 시작과 끝을 함께 정하세요.':
+      'Set both the start and end of the bookable window.',
+  '예약할 수 있는 시간대를 확인하세요(시작이 끝보다 앞).':
+      'Check the bookable window (start before end).',
+  '옛 엑셀 형식(.xls)은 읽지 못합니다. 엑셀에서 "다른 이름으로 저장 → Excel 통합 문서(.xlsx)"나 CSV로 저장해 올리세요.':
+      'The old Excel format (.xls) cannot be read. In Excel, use "Save As → Excel Workbook (.xlsx)" or CSV and upload that.',
+  '오늘 올릴 수 있는 용량을 다 썼습니다. 내일 다시 시도하세요.':
+      'You\'ve used up today\'s upload quota. Try again tomorrow.',
   '오늘은 이미 출근을 눌렀습니다.': 'You\'ve already clocked in today.',
   '오일': 'Oil',
   '오전 반차': 'Morning half-day leave',
@@ -1333,37 +1679,51 @@ const Map<String, String> serverEn = {
   '올린 사람': 'Submitter',
   '올린 사람만 회수할 수 있습니다.': 'Only the person who submitted it can withdraw it.',
   '올린 시각': 'Submitted at',
-  '올릴 그림이 없습니다(PNG·JPG·GIF·WEBP, 한 장 5MB 이하).': 'No image to upload (PNG, JPG, GIF or WEBP, up to 5 MB each).',
+  '올릴 그림이 없습니다(PNG·JPG·GIF·WEBP, 한 장 5MB 이하).':
+      'No image to upload (PNG, JPG, GIF or WEBP, up to 5 MB each).',
   '올릴 파일을 고르세요.': 'Choose a file to upload.',
-  '올바른 주소가 아닙니다. https:// 또는 webcal://로 시작하는 ICS 주소를 넣으세요.': 'Invalid URL. Enter an ICS URL that starts with https:// or webcal://.',
-  '옮길 곳에 같은 이름의 부서가 있습니다.': 'A department with the same name already exists there.',
+  '올바른 주소가 아닙니다. https:// 또는 webcal://로 시작하는 ICS 주소를 넣으세요.':
+      'Invalid URL. Enter an ICS URL that starts with https:// or webcal://.',
+  '옮길 곳에 같은 이름의 부서가 있습니다.':
+      'A department with the same name already exists there.',
   '옮길 메일과 폴더를 확인하세요.': 'Check the mail and folder to move.',
   '옮길 캘린더를 찾을 수 없습니다.': 'The calendar to move to was not found.',
   '옮길 폴더가 없습니다.': 'The destination folder doesn\'t exist.',
   '옮길 프로젝트를 고르세요.': 'Choose a project to move to.',
   '완료 상태를 하나 이상 지정하세요.': 'Set at least one status as done.',
-  '완료가 아닌 상태가 하나 이상 있어야 합니다.': 'There must be at least one status that isn\'t done.',
+  '완료가 아닌 상태가 하나 이상 있어야 합니다.':
+      'There must be at least one status that isn\'t done.',
   '외근 위치 선택': 'Field work location optional',
   '외근 위치 필수': 'Field work location required',
-  '외근 위치 필수를 참/거짓으로 보내세요.': 'Send whether field work location is required as true or false.',
-  '외근은 위치를 함께 보내야 합니다. 앱의 위치 권한을 켜고 다시 누르세요.': 'Field work requires your location. Turn on the app\'s location permission and try again.',
-  '외부 백업 위치(NAS·외장 드라이브)를 정하지 않았습니다 — 이 PC의 디스크가 고장 나면 백업도 함께 사라지고, 첨부파일은 백업되지 않습니다.': 'No external backup location (NAS or external drive) is set — if this PC\'s disk fails, the backups are lost with it, and attachments aren\'t backed up.',
+  '외근 위치 필수를 참/거짓으로 보내세요.':
+      'Send whether field work location is required as true or false.',
+  '외근은 위치를 함께 보내야 합니다. 앱의 위치 권한을 켜고 다시 누르세요.':
+      'Field work requires your location. Turn on the app\'s location permission and try again.',
+  '외부 백업 위치(NAS·외장 드라이브)를 정하지 않았습니다 — 이 PC의 디스크가 고장 나면 백업도 함께 사라지고, 첨부파일은 백업되지 않습니다.':
+      'No external backup location (NAS or external drive) is set — if this PC\'s disk fails, the backups are lost with it, and attachments aren\'t backed up.',
   '외부 백업 위치가 너무 깁니다.': 'The external backup location is too long.',
-  '외부 백업 위치가 서버와 같은 드라이브에 있습니다 — 디스크 고장에 대비하려면 다른 드라이브나 NAS를 고르세요.': 'The external backup location is on the same drive as the server — to guard against disk failure, choose a different drive or a NAS.',
-  '외부 백업 위치는 E:\\TangoTalk백업 같은 드라이브 경로나 \\\\NAS\\공유\\폴더 같은 공유 폴더 경로로 넣으세요.': 'Enter the external backup location as a drive path like E:\\TangoTalkBackup or a shared folder path like \\\\NAS\\Share\\Folder.',
+  '외부 백업 위치가 서버와 같은 드라이브에 있습니다 — 디스크 고장에 대비하려면 다른 드라이브나 NAS를 고르세요.':
+      'The external backup location is on the same drive as the server — to guard against disk failure, choose a different drive or a NAS.',
+  '외부 백업 위치는 E:\\TangoTalk백업 같은 드라이브 경로나 \\\\NAS\\공유\\폴더 같은 공유 폴더 경로로 넣으세요.':
+      'Enter the external backup location as a drive path like E:\\TangoTalkBackup or a shared folder path like \\\\NAS\\Share\\Folder.',
   '외부 백업 위치는 글자로 넣어야 합니다.': 'The external backup location must be text.',
-  '외부 백업 위치는 절대 경로로 넣으세요.': 'Enter the external backup location as an absolute path.',
-  '외부 백업 위치에 . 이나 .. 은 쓸 수 없습니다.': 'The external backup location can\'t contain . or ..',
+  '외부 백업 위치는 절대 경로로 넣으세요.':
+      'Enter the external backup location as an absolute path.',
+  '외부 백업 위치에 . 이나 .. 은 쓸 수 없습니다.':
+      'The external backup location can\'t contain . or ..',
   '외부 백업 위치에 .. 은 쓸 수 없습니다.': 'The external backup location can\'t contain ..',
-  '외부 백업 위치에 쓸 수 없는 글자가 있습니다.': 'The external backup location contains invalid characters.',
+  '외부 백업 위치에 쓸 수 없는 글자가 있습니다.':
+      'The external backup location contains invalid characters.',
   '외부 위치 지움': 'External location cleared',
   '외부 위치로 복사 중': 'Copying to external location',
   '요기요': 'Yogiyo',
   '요약': 'Summary',
-  '요약 모델(CALL_SUMMARY_MODEL)이 정해지지 않았습니다.': 'No summary model (CALL_SUMMARY_MODEL) is configured.',
+  '요약 모델(CALL_SUMMARY_MODEL)이 정해지지 않았습니다.':
+      'No summary model (CALL_SUMMARY_MODEL) is configured.',
   '요율은 0~100(%) 사이 숫자로 넣으세요.': 'Enter rates as numbers between 0 and 100 (%).',
   '요율을 확인하세요.': 'Check the rates.',
-  '요청 내용을 읽지 못했습니다. 다시 시도해 주세요.': 'Couldn\'t read the request. Please try again.',
+  '요청 내용을 읽지 못했습니다. 다시 시도해 주세요.':
+      'Couldn\'t read the request. Please try again.',
   '요청 형식이 올바르지 않습니다.': 'Invalid request format.',
   '요청을 처리하지 못했습니다.': 'Couldn\'t process the request.',
   '요청을 처리할 수 없습니다.': 'The request can\'t be processed.',
@@ -1385,23 +1745,27 @@ const Map<String, String> serverEn = {
   '원본 댓글을 찾을 수 없습니다.': 'Original comment not found.',
   '원본 메시지 정보가 올바르지 않습니다.': 'Invalid original message info.',
   '원본 메시지를 찾을 수 없습니다.': 'Original message not found.',
-  '원천징수 비율은 80%·100%·120% 중 하나입니다.': 'The withholding ratio is 80%, 100% or 120%.',
+  '원천징수 비율은 80%·100%·120% 중 하나입니다.':
+      'The withholding ratio is 80%, 100% or 120%.',
   '원천징수 정보': 'Withholding info',
   '원천징수 정보를 확인하세요.': 'Check the withholding info.',
   '원화금액': 'KRW amount',
   '월 보수액을 원 단위로 넣으세요.': 'Enter monthly pay in KRW.',
-  '월 한도를 원 단위로 넣으세요(없으면 비움).': 'Enter the monthly limit in won (leave blank for none).',
+  '월 한도를 원 단위로 넣으세요(없으면 비움).':
+      'Enter the monthly limit in won (leave blank for none).',
   '웹 앱 HTTPS': 'Web app HTTPS',
   '웹 앱 HTTPS 포트가 아직 열리지 않았습니다.': 'The web app HTTPS port isn\'t open yet.',
   '웹 앱 주소(WEB_DOMAIN)가 없습니다.': 'There is no web app address (WEB_DOMAIN).',
-  '웹훅은 토픽(보드 뷰 제외)과 그룹 대화방에만 붙일 수 있습니다.': 'Webhooks can only be added to topics (except board view) and group chats.',
+  '웹훅은 토픽(보드 뷰 제외)과 그룹 대화방에만 붙일 수 있습니다.':
+      'Webhooks can only be added to topics (except board view) and group chats.',
   '위 부서를 찾을 수 없습니다.': 'Parent department not found.',
   '위 페이지를 찾을 수 없습니다.': 'Parent page not found.',
   '위 폴더를 찾을 수 없습니다.': 'Couldn\'t find the parent folder.',
   '위 폴더를 확인하세요.': 'Check the parent folder.',
   '위치': 'Location',
   '위치 옮김': 'Location changed',
-  '위치가 너무 흐립니다. 잠시 뒤 다시 누르세요.': 'The location is too imprecise. Try again shortly.',
+  '위치가 너무 흐립니다. 잠시 뒤 다시 누르세요.':
+      'The location is too imprecise. Try again shortly.',
   '위치를 확인하세요.': 'Check the location.',
   '유류': 'Fuel',
   '유형 목록이 올바르지 않습니다.': 'Invalid type list.',
@@ -1416,69 +1780,99 @@ const Map<String, String> serverEn = {
   '응답이 너무 큽니다.': 'The response is too large.',
   '응답이 없습니다': 'No response',
   '응답이 올바르지 않습니다.': 'Invalid response.',
-  '이 계정에 등록한 보안 키가 아닙니다.': 'This security key isn\'t registered to this account.',
-  '이 계정은 이메일 코드로 재설정하지 않습니다. 비밀번호 찾기를 처음부터 다시 하세요.': 'This account isn\'t reset with an email code. Start the password reset again from the beginning.',
-  '이 계정은 이메일로 받은 코드로 비밀번호를 찾습니다. 앱을 최신 버전으로 업데이트한 뒤 다시 시도하세요.': 'This account recovers its password with a code sent by email. Update the app to the latest version and try again.',
+  '이 계정에 등록한 보안 키가 아닙니다.':
+      'This security key isn\'t registered to this account.',
+  '이 계정은 이메일 코드로 재설정하지 않습니다. 비밀번호 찾기를 처음부터 다시 하세요.':
+      'This account isn\'t reset with an email code. Start the password reset again from the beginning.',
+  '이 계정은 이메일로 받은 코드로 비밀번호를 찾습니다. 앱을 최신 버전으로 업데이트한 뒤 다시 시도하세요.':
+      'This account recovers its password with a code sent by email. Update the app to the latest version and try again.',
   '이 기기(생체 인증)': 'This device (biometrics)',
-  '이 기기를 확인할 수 없습니다. 앱을 다시 시작한 뒤 시도하세요.': 'This device can\'t be verified. Restart the app and try again.',
-  '이 단추는 더 쓸 수 없습니다(메시지가 바뀌었을 수 있습니다).': 'This button can no longer be used (the message may have changed).',
+  '이 기기를 확인할 수 없습니다. 앱을 다시 시작한 뒤 시도하세요.':
+      'This device can\'t be verified. Restart the app and try again.',
+  '이 단추는 더 쓸 수 없습니다(메시지가 바뀌었을 수 있습니다).':
+      'This button can no longer be used (the message may have changed).',
   '이 대화방에서는 단추를 누를 수 없습니다.': 'Buttons can\'t be used in this room.',
   '이 대화방에서는 슬래시 명령을 쓸 수 없습니다.': 'Slash commands can\'t be used in this chat.',
   '이 대화방의 멤버만 담당자로 지정할 수 있습니다.': 'Only members of this chat can be assigned.',
-  '이 링크로는 더 이상 가입할 수 없습니다. 새 링크를 만들어 보내세요.': 'This link can no longer be used to sign up. Create and send a new link.',
+  '이 링크로는 더 이상 가입할 수 없습니다. 새 링크를 만들어 보내세요.':
+      'This link can no longer be used to sign up. Create and send a new link.',
   '이 메시지는 공유할 수 없습니다.': 'This message can\'t be shared.',
   '이 메시지에 없는 첨부입니다.': 'This attachment isn\'t in this message.',
   '이 메시지에는 공감을 남길 수 없습니다.': 'Reactions can\'t be added to this message.',
   '이 메시지에는 리마인더를 걸 수 없습니다.': 'Reminders can\'t be set on this message.',
-  '이 메시지의 단추를 받을 곳이 없습니다(연동에 응답 주소가 없습니다).': 'Nothing receives this message\'s buttons (the integration has no response URL).',
+  '이 메시지의 단추를 받을 곳이 없습니다(연동에 응답 주소가 없습니다).':
+      'Nothing receives this message\'s buttons (the integration has no response URL).',
   '이 메시지의 파일이 아닙니다.': 'This file doesn\'t belong to this message.',
   '이 메일 계정에는 임시보관함이 없습니다.': 'This mail account has no Drafts folder.',
   '이 방에 없는 앱입니다.': 'This app is not in this room.',
-  '이 방을 관리할 수 있는 사람만 웹훅을 다룰 수 있습니다.': 'Only people who can manage this chat can manage webhooks.',
+  '이 방을 관리할 수 있는 사람만 웹훅을 다룰 수 있습니다.':
+      'Only people who can manage this chat can manage webhooks.',
   '이 범위의 구성원을 고르세요.': 'Choose a member of this scope.',
   '이 범위의 구성원이 아닙니다.': 'You\'re not a member of this scope.',
   '이 보안 키는 이미 등록되어 있습니다.': 'This security key is already registered.',
   '이 봇이 올린 메시지만 고칠 수 있습니다.': 'You can only edit messages posted by this bot.',
   '이 봇이 올린 메시지만 지울 수 있습니다.': 'You can only delete messages posted by this bot.',
-  '이 서버 PC 자신이나 내부 전용 주소로는 메일 서버를 연결할 수 없습니다.': 'Mail servers can\'t be connected via this server PC itself or internal-only addresses.',
-  '이 서버 버전이 모르는 백업 형식입니다 — 서버를 먼저 업데이트하세요.': 'This server version doesn\'t recognize the backup format — update the server first.',
+  '이 서버 PC 자신이나 내부 전용 주소로는 메일 서버를 연결할 수 없습니다.':
+      'Mail servers can\'t be connected via this server PC itself or internal-only addresses.',
+  '이 서버 버전이 모르는 백업 형식입니다 — 서버를 먼저 업데이트하세요.':
+      'This server version doesn\'t recognize the backup format — update the server first.',
   '이 서버는 메일 기능이 꺼져 있습니다.': 'Mail is turned off on this server.',
-  '이 서버는 보안 키·패스키로 바로 로그인하는 것을 막아 두었습니다. 아이디로 로그인하세요.': 'This server doesn\'t allow signing in directly with security keys/passkeys. Sign in with your username.',
-  '이 서버에는 화상회의 녹화가 설정되어 있지 않습니다.': 'Meeting recording isn\'t set up on this server.',
+  '이 서버는 보안 키·패스키로 바로 로그인하는 것을 막아 두었습니다. 아이디로 로그인하세요.':
+      'This server doesn\'t allow signing in directly with security keys/passkeys. Sign in with your username.',
+  '이 서버에는 화상회의 녹화가 설정되어 있지 않습니다.':
+      'Meeting recording isn\'t set up on this server.',
   '이 서버에는 화상회의가 설정되어 있지 않습니다.': 'Video meetings aren\'t set up on this server.',
-  '이 서버에는 회의록(받아쓰기)이 설정되어 있지 않습니다.': 'Meeting minutes (transcription) aren\'t set up on this server.',
-  '이 서버에서 쓸 수 없는 회사 계정 로그인입니다.': 'This company account sign-in isn\'t available on this server.',
-  '이 서버에서 허용한 회사(Google Workspace) 계정이 아닙니다. 회사 계정으로 다시 로그인하세요.': 'This company (Google Workspace) account isn\'t allowed on this server. Sign in again with your company account.',
-  '이 서버에서 허용한 회사(Microsoft Entra) 계정이 아닙니다. 회사 계정으로 다시 로그인하세요.': 'This company (Microsoft Entra) account isn\'t allowed on this server. Sign in again with your company account.',
+  '이 서버에는 회의록(받아쓰기)이 설정되어 있지 않습니다.':
+      'Meeting minutes (transcription) aren\'t set up on this server.',
+  '이 서버에서 쓸 수 없는 회사 계정 로그인입니다.':
+      'This company account sign-in isn\'t available on this server.',
+  '이 서버에서 허용한 회사(Google Workspace) 계정이 아닙니다. 회사 계정으로 다시 로그인하세요.':
+      'This company (Google Workspace) account isn\'t allowed on this server. Sign in again with your company account.',
+  '이 서버에서 허용한 회사(Microsoft Entra) 계정이 아닙니다. 회사 계정으로 다시 로그인하세요.':
+      'This company (Microsoft Entra) account isn\'t allowed on this server. Sign in again with your company account.',
   '이 설문의 결과는 볼 수 없습니다.': 'You can\'t view the results of this survey.',
-  '이 아이디로는 회사 메일 주소를 만들 수 없습니다.': 'A company mail address can\'t be made from this username.',
+  '이 아이디로는 회사 메일 주소를 만들 수 없습니다.':
+      'A company mail address can\'t be made from this username.',
   '이 앨범의 항목이 아닙니다.': 'This item isn\'t in this album.',
-  '이 앱에 등록되지 않은 돌아갈 주소입니다(redirect_uri).': 'redirect_uri is not registered for this app.',
+  '이 앱에 등록되지 않은 돌아갈 주소입니다(redirect_uri).':
+      'redirect_uri is not registered for this app.',
   '이 앱의 팀 멤버만 승인할 수 있습니다.': 'Only members of this app\'s team can approve it.',
   '이 양식에 넣을 수 없는 칸이 있습니다.': 'This layout has a field that can\'t be used.',
-  '이 업무를 선행으로 두면 서로 기다리는 순환이 생깁니다.': 'Making this task a predecessor would create a circular dependency.',
+  '이 업무를 선행으로 두면 서로 기다리는 순환이 생깁니다.':
+      'Making this task a predecessor would create a circular dependency.',
   '이 업무일지를 볼 수 없습니다.': 'You can\'t view this work report.',
-  '이 연차 기간에 이미 1차 촉진을 보냈습니다.': 'The first leave-use reminder has already been sent for this annual leave period.',
-  '이 영수증 읽기 서비스는 PDF를 읽지 못합니다. 사진(JPG·PNG)으로 올리세요.': 'This receipt reading service cannot read PDFs. Upload a photo (JPG or PNG).',
+  '이 연차 기간에 이미 1차 촉진을 보냈습니다.':
+      'The first leave-use reminder has already been sent for this annual leave period.',
+  '이 영수증 읽기 서비스는 PDF를 읽지 못합니다. 사진(JPG·PNG)으로 올리세요.':
+      'This receipt reading service cannot read PDFs. Upload a photo (JPG or PNG).',
   '이 요청을 볼 수 없습니다.': 'You can\'t view this request.',
-  '이 웹훅의 대화방에 더는 올릴 수 없습니다.': 'Posting to this webhook\'s chat is no longer possible.',
-  '이 이메일이 본인 것인지 확인하려고 보낸 메일입니다. 아래 코드를 앱에 넣으세요.': 'You received this email to confirm that this email address is yours. Enter the code below in the app.',
-  '이 이미지는 한국의 영수증(카드 매출전표·간이영수증·세금계산서·온라인 결제 내역 화면 등)입니다. 보이는 글자에서 아래 값을 읽어 JSON 하나로만 답하세요.': 'This image is a Korean receipt (card slip, simple receipt, tax invoice, online payment screen, etc.). Read the values below from the visible text and reply with a single JSON object only.',
+  '이 웹훅의 대화방에 더는 올릴 수 없습니다.':
+      'Posting to this webhook\'s chat is no longer possible.',
+  '이 이메일이 본인 것인지 확인하려고 보낸 메일입니다. 아래 코드를 앱에 넣으세요.':
+      'You received this email to confirm that this email address is yours. Enter the code below in the app.',
+  '이 이미지는 한국의 영수증(카드 매출전표·간이영수증·세금계산서·온라인 결제 내역 화면 등)입니다. 보이는 글자에서 아래 값을 읽어 JSON 하나로만 답하세요.':
+      'This image is a Korean receipt (card slip, simple receipt, tax invoice, online payment screen, etc.). Read the values below from the visible text and reply with a single JSON object only.',
   '이 일정을 삭제할 권한이 없습니다.': 'You don\'t have permission to delete this event.',
   '이 일정을 수정할 권한이 없습니다.': 'You don\'t have permission to edit this event.',
   '이 일정의 회차가 아닙니다.': 'This occurrence doesn\'t belong to this event.',
   '이 자원의 예약을 승인할 수 없습니다.': 'You can\'t approve bookings for this resource.',
   '이 조직도에 없는 사람입니다.': 'This person isn\'t in this org chart.',
-  '이 종류의 상품 주소가 server/.env에 없습니다.': 'server/.env has no product path for this type.',
-  '이 종류의 홈택스 상품 주소가 server/.env에 없습니다.': 'No Hometax product path for this type in server/.env.',
+  '이 종류의 상품 주소가 server/.env에 없습니다.':
+      'server/.env has no product path for this type.',
+  '이 종류의 홈택스 상품 주소가 server/.env에 없습니다.':
+      'No Hometax product path for this type in server/.env.',
   '이 주소로는 접속할 수 없습니다.': 'This address can\'t be accessed.',
-  '이 캘린더에 일정을 만들 권한이 없습니다.': 'You don\'t have permission to create events in this calendar.',
+  '이 캘린더에 일정을 만들 권한이 없습니다.':
+      'You don\'t have permission to create events in this calendar.',
   '이 토픽에서 메시지를 찾을 수 없습니다.': 'Message not found in this topic.',
-  '이 토픽의 멤버만 토픽 관리자로 지정할 수 있습니다.': 'Only members of this topic can be made topic admins.',
+  '이 토픽의 멤버만 토픽 관리자로 지정할 수 있습니다.':
+      'Only members of this topic can be made topic admins.',
   '이 투표는 하나만 고를 수 있습니다.': 'Only one option can be chosen in this poll.',
   '이 투표의 보기가 아닙니다.': 'This isn\'t an option of this poll.',
-  '이 팀의 내 폴더만 순서를 바꿀 수 있습니다.': 'You can only reorder your own folders in this team.',
-  '이 팀의 멤버가 아닌 사람과는 대화를 시작할 수 없습니다.': 'You can\'t start a conversation with someone who isn\'t a member of this team.',
+  '이 팀의 내 폴더만 순서를 바꿀 수 있습니다.':
+      'You can only reorder your own folders in this team.',
+  '이 팀의 멤버가 아닌 사람과는 대화를 시작할 수 없습니다.':
+      'You can\'t start a conversation with someone who isn\'t a member of this team.',
   '이 팀의 멤버가 아닙니다.': 'You\'re not a member of this team.',
   '이 팀의 멤버만 지정할 수 있습니다.': 'Only members of this team can be selected.',
   '이 팀의 연동 앱을 찾을 수 없습니다.': 'Integration app not found in this team.',
@@ -1489,18 +1883,24 @@ const Map<String, String> serverEn = {
   '이 프로젝트의 유형이 아닙니다.': 'This type doesn\'t belong to this project.',
   '이 프로젝트의 필드가 아닙니다.': 'This field doesn\'t belong to this project.',
   '이 할 일을 수정할 권한이 없습니다.': 'You don\'t have permission to edit this to-do.',
-  '이 회사 계정에 연결된 TangoTalk 계정이 없습니다. 아이디로 로그인한 뒤 내 프로필의 "연결된 회사 계정"에서 연결하거나, 관리자에게 문의하세요.': 'No TangoTalk account is linked to this company account. Sign in with your username and link it under "Linked company accounts" in your profile, or contact an admin.',
-  '이 회사 계정은 이미 다른 TangoTalk 계정에 연결되어 있습니다.': 'This company account is already linked to another TangoTalk account.',
-  '이 회사 계정은 이미 다른 계정에 연결되어 있습니다.': 'This company account is already linked to another account.',
-  '이 회사 계정은 이미 다른 계정에 연결되어 있습니다. 관리자에게 문의하세요.': 'This company account is already linked to another account. Contact an admin.',
+  '이 회사 계정에 연결된 TangoTalk 계정이 없습니다. 아이디로 로그인한 뒤 내 프로필의 "연결된 회사 계정"에서 연결하거나, 관리자에게 문의하세요.':
+      'No TangoTalk account is linked to this company account. Sign in with your username and link it under "Linked company accounts" in your profile, or contact an admin.',
+  '이 회사 계정은 이미 다른 TangoTalk 계정에 연결되어 있습니다.':
+      'This company account is already linked to another TangoTalk account.',
+  '이 회사 계정은 이미 다른 계정에 연결되어 있습니다.':
+      'This company account is already linked to another account.',
+  '이 회사 계정은 이미 다른 계정에 연결되어 있습니다. 관리자에게 문의하세요.':
+      'This company account is already linked to another account. Contact an admin.',
   '이 회의실은 태블릿에서 바로 예약할 수 없습니다.': 'This room can\'t be booked on the tablet.',
   '이디야': 'Ediya',
   '이력을 찾을 수 없습니다.': 'History not found.',
-  '이름에 쓸 수 없는 문자가 들어 있습니다.': 'The name contains characters that aren\'t allowed.',
+  '이름에 쓸 수 없는 문자가 들어 있습니다.':
+      'The name contains characters that aren\'t allowed.',
   '이름은 100자 이하여야 합니다.': 'The name must be 100 characters or fewer.',
   '이름을 올바르게 보내세요.': 'Send a valid name.',
   '이름을 입력하세요.': 'Enter a name.',
-  '이름의 평문 페어링 포트(초대 링크·도움말 http://…)까지 https로 바꿔 열어 버려 그 페이지가 열리지 않게 됩니다.': 'name\'s plain-HTTP pairing port (invite links, help at http://…) would also be switched to HTTPS, so those pages would stop opening.',
+  '이름의 평문 페어링 포트(초대 링크·도움말 http://…)까지 https로 바꿔 열어 버려 그 페이지가 열리지 않게 됩니다.':
+      'name\'s plain-HTTP pairing port (invite links, help at http://…) would also be switched to HTTPS, so those pages would stop opening.',
   '이마트24': 'emart24',
   '이메일 미확인': 'Email not verified',
   '이메일 주소를 확인하세요.': 'Check the email address.',
@@ -1512,7 +1912,8 @@ const Map<String, String> serverEn = {
   '이모티콘 정보가 올바르지 않습니다.': 'Invalid sticker info.',
   '이모티콘을 찾을 수 없습니다.': 'Sticker not found.',
   '이미 2차 촉진을 보냈습니다.': 'The second leave-use reminder has already been sent.',
-  '이미 같은 식별자를 쓰는 프로젝트가 있습니다.': 'A project with the same identifier already exists.',
+  '이미 같은 식별자를 쓰는 프로젝트가 있습니다.':
+      'A project with the same identifier already exists.',
   '이미 같은 이름의 상태가 있습니다.': 'A status with the same name already exists.',
   '이미 같은 이름의 양식이 있습니다.': 'A form with the same name already exists.',
   '이미 같은 이름의 우선순위가 있습니다.': 'A priority with the same name already exists.',
@@ -1524,15 +1925,18 @@ const Map<String, String> serverEn = {
   '이미 끝난 결재입니다.': 'This approval is already completed.',
   '이미 녹화하고 있습니다.': 'Already recording.',
   '이미 마감된 투표입니다.': 'This poll has already closed.',
-  '이미 백업하고 있습니다. 끝난 뒤 다시 시도하세요.': 'A backup is already running. Try again after it finishes.',
+  '이미 백업하고 있습니다. 끝난 뒤 다시 시도하세요.':
+      'A backup is already running. Try again after it finishes.',
   '이미 보내기를 취소한 대장입니다.': 'This payroll was already unsent.',
   '이미 보낸 대장입니다.': 'This payroll was already sent.',
-  '이미 보낸 대장입니다. 보내기를 취소하거나 명세서마다 정정하세요.': 'This payroll was already sent. Unsend it or correct each payslip.',
+  '이미 보낸 대장입니다. 보내기를 취소하거나 명세서마다 정정하세요.':
+      'This payroll was already sent. Unsend it or correct each payslip.',
   '이미 사용 중인 아이디입니다.': 'This username is already taken.',
   '이미 사용 중인 이메일입니다.': 'This email is already in use.',
   '이미 삭제된 파일입니다.': 'This file has already been deleted.',
   '이미 소유자입니다.': 'Already the owner.',
-  '이미 시작된 비밀 대화는 거절할 수 없습니다.': 'A secret chat that has already started can\'t be declined.',
+  '이미 시작된 비밀 대화는 거절할 수 없습니다.':
+      'A secret chat that has already started can\'t be declined.',
   '이미 쓸 날을 냈습니다.': 'You\'ve already submitted the days you plan to take off.',
   '이미 연결한 메일 주소입니다.': 'This mail address is already connected.',
   '이미 이 캘린더의 멤버입니다.': 'Already a member of this calendar.',
@@ -1548,14 +1952,16 @@ const Map<String, String> serverEn = {
   '이미 확인된 이메일입니다.': 'This email is already verified.',
   '이미 휴게 중입니다.': 'Already on break.',
   '이미지 주소가 올바르지 않습니다.': 'Invalid image URL.',
-  '이미지를 가져오지 못했습니다. 이미지를 직접 올려 주세요.': 'Couldn\'t fetch the image. Please upload the image directly.',
+  '이미지를 가져오지 못했습니다. 이미지를 직접 올려 주세요.':
+      'Couldn\'t fetch the image. Please upload the image directly.',
   '이번 기간에 이미 이월했습니다.': 'Already carried over this period.',
   '이어 쓸 임시 저장본을 확인하세요.': 'Check the draft to continue.',
   '이어받을 급여 대장을 찾을 수 없습니다.': 'The payroll to carry over from was not found.',
   '이용가맹점': 'Merchant',
   '이용가맹점명': 'Merchant name',
   '이용금액': 'Amount',
-  '이용내역의 머리 줄(이용일자·가맹점·이용금액 같은 열 이름)을 찾지 못했습니다. 카드사에서 받은 엑셀·CSV를 그대로 올리세요.': 'Could not find the statement\'s header row (column names such as date of use, merchant, amount). Upload the Excel or CSV file from the card company as is.',
+  '이용내역의 머리 줄(이용일자·가맹점·이용금액 같은 열 이름)을 찾지 못했습니다. 카드사에서 받은 엑셀·CSV를 그대로 올리세요.':
+      'Could not find the statement\'s header row (column names such as date of use, merchant, amount). Upload the Excel or CSV file from the card company as is.',
   '이용시각': 'Time of use',
   '이용시간': 'Time of use',
   '이용일': 'Date of use',
@@ -1569,12 +1975,14 @@ const Map<String, String> serverEn = {
   '이케아': 'IKEA',
   '익명·복수 선택 설정이 올바르지 않습니다.': 'Invalid anonymous / multiple-choice settings.',
   '인증서 발급에 실패했습니다.': 'Failed to issue the certificate.',
-  '인증서 발급이 30분 넘게 끝나지 않아 실패로 처리했습니다. 다음 시도 때 다시 받습니다.': 'Certificate issuance didn\'t finish within 30 minutes and was marked as failed. It will be requested again on the next attempt.',
+  '인증서 발급이 30분 넘게 끝나지 않아 실패로 처리했습니다. 다음 시도 때 다시 받습니다.':
+      'Certificate issuance didn\'t finish within 30 minutes and was marked as failed. It will be requested again on the next attempt.',
   '인증서 확인용 HTTP': 'HTTP for certificate verification',
   '인증서가 없어 발급받습니다': 'No certificate found; requesting one',
   '인증서와 개인키가 짝이 맞지 않습니다': 'The certificate and private key don\'t match',
   '인증서의 유효기간을 읽지 못했습니다': 'Couldn\'t read the certificate\'s validity period',
-  '인터넷에 공개된 캘린더 주소만 구독할 수 있습니다(IP 주소·사내 주소는 안 됩니다).': 'Only calendar URLs published on the internet can be subscribed to (IP addresses and internal addresses aren\'t allowed).',
+  '인터넷에 공개된 캘린더 주소만 구독할 수 있습니다(IP 주소·사내 주소는 안 됩니다).':
+      'Only calendar URLs published on the internet can be subscribed to (IP addresses and internal addresses aren\'t allowed).',
   '인프런': 'Inflearn',
   '일별 기록': 'Daily records',
   '일식': 'Japanese food',
@@ -1585,23 +1993,30 @@ const Map<String, String> serverEn = {
   '일정을 다시 잡습니다': 'Rescheduling',
   '일정을 찾을 수 없습니다.': 'Event not found.',
   '일치하는 계정이 없습니다.': 'No matching account.',
-  '읽기 전용 토픽에서는 토픽 관리자만 글을 쓸 수 있습니다.': 'In a read-only topic, only topic admins can post.',
-  '읽기 전용 토픽에서는 토픽 관리자만 녹화할 수 있습니다.': 'In a read-only topic, only topic admins can record.',
-  '읽기 전용 토픽에서는 토픽 관리자만 앨범을 쓸 수 있습니다.': 'In a read-only topic, only topic admins can use albums.',
-  '읽기 전용 토픽에서는 토픽 관리자만 화상회의를 시작할 수 있습니다.': 'In a read-only topic, only topic admins can start video meetings.',
+  '읽기 전용 토픽에서는 토픽 관리자만 글을 쓸 수 있습니다.':
+      'In a read-only topic, only topic admins can post.',
+  '읽기 전용 토픽에서는 토픽 관리자만 녹화할 수 있습니다.':
+      'In a read-only topic, only topic admins can record.',
+  '읽기 전용 토픽에서는 토픽 관리자만 앨범을 쓸 수 있습니다.':
+      'In a read-only topic, only topic admins can use albums.',
+  '읽기 전용 토픽에서는 토픽 관리자만 화상회의를 시작할 수 있습니다.':
+      'In a read-only topic, only topic admins can start video meetings.',
   '읽기(내 팀·대화방·메시지·할 일·일정)': 'Read (my teams, rooms, messages, to-dos, events)',
-  '읽을 수 없거나 없는 값은 null로 두세요. 짐작으로 채우지 마세요. 영수증이 아니면 모든 값을 null로 두세요.': 'Set unreadable or missing values to null. Do not guess. If it is not a receipt, set every value to null.',
+  '읽을 수 없거나 없는 값은 null로 두세요. 짐작으로 채우지 마세요. 영수증이 아니면 모든 값을 null로 두세요.':
+      'Set unreadable or missing values to null. Do not guess. If it is not a receipt, set every value to null.',
   '읽을 영수증을 고르세요.': 'Choose a receipt to read.',
   '임시 공개키/서명이 필요합니다.': 'An ephemeral public key/signature is required.',
   '임시 저장': 'Save draft',
   '임시 저장 글이 너무 깁니다.': 'The draft is too long.',
-  '임시 저장본을 찾을 수 없습니다. 다른 곳에서 지웠을 수 있습니다.': 'Couldn\'t find the draft. It may have been deleted elsewhere.',
+  '임시 저장본을 찾을 수 없습니다. 다른 곳에서 지웠을 수 있습니다.':
+      'Couldn\'t find the draft. It may have been deleted elsewhere.',
   '임시 저장본을 확인하세요.': 'Check the draft.',
   '임시 저장본의 첨부를 찾을 수 없습니다.': 'Couldn\'t find the draft\'s attachment.',
   '임시공휴일': 'Temporary public holiday',
   '임시보관함': 'Drafts',
   '입사일을 먼저 정하세요.': 'Set the hire date first.',
-  '입사일을 확인하세요(관리 탭에서 정하거나 직접 넣으세요).': 'Check the hire date (set it in the Admin tab or enter it).',
+  '입사일을 확인하세요(관리 탭에서 정하거나 직접 넣으세요).':
+      'Check the hire date (set it in the Admin tab or enter it).',
   '입사일을 확인하세요.': 'Check the hire date.',
   '입사일이 없거나 아직 입사 전입니다.': 'No hire date, or not hired yet.',
   '입사일이 없습니다.': 'No hire date.',
@@ -1621,12 +2036,16 @@ const Map<String, String> serverEn = {
   '자동 내리기 시각이 올바르지 않습니다.': 'Invalid auto-unpin time.',
   '자동 내리기는 최대 1년 이내로 설정하세요.': 'Auto-unpin can be set up to 1 year ahead.',
   '자동 백업이 꺼져 있습니다.': 'Automatic backup is turned off.',
-  '자동 삭제 시간은 1초~1주 사이여야 합니다.': 'The auto-delete time must be between 1 second and 1 week.',
+  '자동 삭제 시간은 1초~1주 사이여야 합니다.':
+      'The auto-delete time must be between 1 second and 1 week.',
   '자동삭제 타이머를 비활성화 했습니다.': 'Auto-delete timer disabled.',
-  '자동으로 다시 시도합니다. 여러 사람이 함께 쓰는 DDNS 도메인이라 다른 사용자들의 발급까지 함께 세어지는 것이라면, 직접 산 도메인을 ': 'Will retry automatically. If this DDNS domain is shared by many people and other users\' certificate requests are counted together with yours, consider using a domain you own ',
+  '자동으로 다시 시도합니다. 여러 사람이 함께 쓰는 DDNS 도메인이라 다른 사용자들의 발급까지 함께 세어지는 것이라면, 직접 산 도메인을 ':
+      'Will retry automatically. If this DDNS domain is shared by many people and other users\' certificate requests are counted together with yours, consider using a domain you own ',
   '자동화 제목은 40자 이내로 입력하세요.': 'Enter an automation title of up to 40 characters.',
-  '자신의 등급보다 높은 등급은 부여할 수 없습니다.': 'You can\'t grant a level higher than your own.',
-  '자신의 직책보다 높은 직책은 부여할 수 없습니다.': 'You can\'t grant a position higher than your own.',
+  '자신의 등급보다 높은 등급은 부여할 수 없습니다.':
+      'You can\'t grant a level higher than your own.',
+  '자신의 직책보다 높은 직책은 부여할 수 없습니다.':
+      'You can\'t grant a position higher than your own.',
   '자원 이름을 넣으세요.': 'Enter a resource name.',
   '자원 종류를 확인하세요.': 'Check the resource type.',
   '자율 출퇴근': 'Flexible hours',
@@ -1636,18 +2055,25 @@ const Map<String, String> serverEn = {
   '잠시 뒤 다시 하세요.': 'Please try again shortly.',
   '잠시 뒤에 다시 하세요.': 'Please try again shortly.',
   '잡비': 'Miscellaneous',
-  '잡은 사람이나 관리자만 취소할 수 있습니다.': 'Only the person who booked it or an admin can cancel it.',
+  '잡은 사람이나 관리자만 취소할 수 있습니다.':
+      'Only the person who booked it or an admin can cancel it.',
   '장기요양': 'Long-term care',
   '장기요양보험': 'Long-term care insurance',
-  '장기주택저당차입금 이자 공제 한도를 고르세요.': 'Choose the long-term mortgage interest deduction limit.',
-  '저장된 백업 암호를 읽지 못했습니다 — 관리자 콘솔에서 백업 암호를 다시 정하세요.': 'Couldn\'t read the saved backup password — set the backup password again in the Admin console.',
-  '저장된 토큰을 읽지 못했습니다 — 관리자 콘솔에서 토큰을 다시 넣으세요.': 'Couldn\'t read the saved token — enter the token again in the Admin console.',
+  '장기주택저당차입금 이자 공제 한도를 고르세요.':
+      'Choose the long-term mortgage interest deduction limit.',
+  '저장된 백업 암호를 읽지 못했습니다 — 관리자 콘솔에서 백업 암호를 다시 정하세요.':
+      'Couldn\'t read the saved backup password — set the backup password again in the Admin console.',
+  '저장된 토큰을 읽지 못했습니다 — 관리자 콘솔에서 토큰을 다시 넣으세요.':
+      'Couldn\'t read the saved token — enter the token again in the Admin console.',
   '저축은행': 'Savings bank',
   '적요': 'Description',
-  '전결 규정은 그룹웨어 관리자만 정할 수 있습니다.': 'Only groupware admins can set final approval rules.',
+  '전결 규정은 그룹웨어 관리자만 정할 수 있습니다.':
+      'Only groupware admins can set final approval rules.',
   '전결 규정을 찾을 수 없습니다.': 'Final approval rule not found.',
-  '전결은 한 명만 정할 수 있습니다.': 'Only one person can be set for final approval (delegated).',
-  '전결할 직책을 직책 목록에서 고르세요.': 'Choose the final approver position from the position list.',
+  '전결은 한 명만 정할 수 있습니다.':
+      'Only one person can be set for final approval (delegated).',
+  '전결할 직책을 직책 목록에서 고르세요.':
+      'Choose the final approver position from the position list.',
   '전북': 'Jeonbuk',
   '전북은행': 'Jeonbuk Bank',
   '전자랜드': 'Electroland',
@@ -1661,16 +2087,20 @@ const Map<String, String> serverEn = {
   '정년': 'Retirement age',
   '정산 금액을 원 단위 정수로 넣으세요.': 'Enter settlement amounts as whole KRW.',
   '정산분': 'Settlement',
-  '정산할 결재를 찾을 수 없습니다(내가 올린 결재만 정산합니다).': 'Request to settle not found (you can only settle your own requests).',
-  '정지된 계정입니다. 서버 운영자에게 문의하세요.': 'This account is suspended. Contact the server operator.',
-  '정회원 이상만 공개 프로젝트에 참여할 수 있습니다.': 'Only members and above can join public projects.',
+  '정산할 결재를 찾을 수 없습니다(내가 올린 결재만 정산합니다).':
+      'Request to settle not found (you can only settle your own requests).',
+  '정지된 계정입니다. 서버 운영자에게 문의하세요.':
+      'This account is suspended. Contact the server operator.',
+  '정회원 이상만 공개 프로젝트에 참여할 수 있습니다.':
+      'Only members and above can join public projects.',
   '정회원 이상만 설문을 쓸 수 있습니다.': 'Only members and above can create surveys.',
   '정회원 이상만 업무일지를 쓸 수 있습니다.': 'Only members and above can write work reports.',
   '정회원 이상만 지정할 수 있습니다.': 'Only members and above can be selected.',
   '제21대 대통령선거일': '21st Presidential Election Day',
   '제9회 전국동시지방선거일': '9th Nationwide Local Elections Day',
   '제목은 100자 이내로 작성하세요.': 'Keep the title to 100 characters or fewer.',
-  '제목은 보드 뷰 토픽에 올리는 게시글에만 쓸 수 있습니다.': 'Titles can only be used on posts in board view topics.',
+  '제목은 보드 뷰 토픽에 올리는 게시글에만 쓸 수 있습니다.':
+      'Titles can only be used on posts in board view topics.',
   '제목을 변경했습니다.': 'Title changed.',
   '제목을 확인하세요.': 'Check the title.',
   '제외 사유': 'Exclusion reason',
@@ -1685,15 +2115,21 @@ const Map<String, String> serverEn = {
   '조건에 찾을 글을 넣으세요.': 'Enter text to look for in the condition.',
   '조건을 하나 이상 넣으세요.': 'Add at least one condition.',
   '조건을 확인하세요.': 'Check the condition.',
-  '조건의 담당자는 프로젝트 구성원 중에서 고를 수 있습니다.': 'The condition\'s assignee must be a project member.',
+  '조건의 담당자는 프로젝트 구성원 중에서 고를 수 있습니다.':
+      'The condition\'s assignee must be a project member.',
   '조건의 비교 방법을 고르세요.': 'Choose a comparison for the condition.',
-  '조건의 상태가 이 프로젝트의 것이 아닙니다.': 'The condition\'s status doesn\'t belong to this project.',
+  '조건의 상태가 이 프로젝트의 것이 아닙니다.':
+      'The condition\'s status doesn\'t belong to this project.',
   '조건의 우선순위가 올바르지 않습니다.': 'Invalid condition priority.',
-  '조건의 우선순위가 이 프로젝트의 것이 아닙니다.': 'The condition\'s priority doesn\'t belong to this project.',
-  '조건의 유형이 이 프로젝트의 것이 아닙니다.': 'The condition\'s type doesn\'t belong to this project.',
+  '조건의 우선순위가 이 프로젝트의 것이 아닙니다.':
+      'The condition\'s priority doesn\'t belong to this project.',
+  '조건의 유형이 이 프로젝트의 것이 아닙니다.':
+      'The condition\'s type doesn\'t belong to this project.',
   '조건의 필드를 고르세요.': 'Choose a field for the condition.',
-  '조정 사유를 200자 이내로 쓰세요.': 'Write the adjustment reason in 200 characters or fewer.',
-  '조정할 일수를 반일 단위로 넣으세요(최대 60일).': 'Enter the number of days to adjust in half-day units (up to 60 days).',
+  '조정 사유를 200자 이내로 쓰세요.':
+      'Write the adjustment reason in 200 characters or fewer.',
+  '조정할 일수를 반일 단위로 넣으세요(최대 60일).':
+      'Enter the number of days to adjust in half-day units (up to 60 days).',
   '조직도는 관리자 이상만 볼 수 있습니다.': 'Only admins and above can view the org chart.',
   '조직도를 고칠 권한이 없습니다.': 'You don\'t have permission to edit the org chart.',
   '조합비': 'Union dues',
@@ -1703,26 +2139,35 @@ const Map<String, String> serverEn = {
   '조회 시도': 'Lookup attempt',
   '존재하지 않는 날짜입니다.': 'This date doesn\'t exist.',
   '종료 시각이 올바르지 않습니다.': 'Invalid end time.',
-  '종료 시간은 종료일과 함께 정해야 합니다.': 'An end time must be set together with an end date.',
+  '종료 시간은 종료일과 함께 정해야 합니다.':
+      'An end time must be set together with an end date.',
   '종료 여부 값이 올바르지 않습니다.': 'Invalid ended value.',
-  '종료된 프로젝트입니다. 다시 시작한 뒤 수정할 수 있습니다.': 'This project has ended. Reopen it to make changes.',
+  '종료된 프로젝트입니다. 다시 시작한 뒤 수정할 수 있습니다.':
+      'This project has ended. Reopen it to make changes.',
   '종일 여부가 올바르지 않습니다.': 'Invalid all-day value.',
-  '종일 일정의 시작·종료는 날짜(UTC 자정) 단위여야 합니다.': 'All-day events must start and end on whole dates (UTC midnight).',
+  '종일 일정의 시작·종료는 날짜(UTC 자정) 단위여야 합니다.':
+      'All-day events must start and end on whole dates (UTC midnight).',
   '주 52시간 결재를 받게': '52-hour week: require approval',
   '주 52시간 막기': '52-hour week: block',
   '주 52시간 알리기만': '52-hour week: notify only',
-  '주 52시간 지키기 방식을 고르세요(알리기만·결재를 받게·막기).': 'Choose how to enforce the 52-hour week (notify only, require approval, block).',
-  '주 부서와 같은 부서는 겸직으로 넣을 수 없습니다.': 'The main department can\'t be added as a concurrent post.',
+  '주 52시간 지키기 방식을 고르세요(알리기만·결재를 받게·막기).':
+      'Choose how to enforce the 52-hour week (notify only, require approval, block).',
+  '주 부서와 같은 부서는 겸직으로 넣을 수 없습니다.':
+      'The main department can\'t be added as a concurrent post.',
   '주 소정근로시간을 확인하세요(0~68시간).': 'Check weekly contractual hours (0–68).',
-  '주간 보고는 그 주 월요일 날짜로 씁니다.': 'Weekly reports are dated on the Monday of that week.',
+  '주간 보고는 그 주 월요일 날짜로 씁니다.':
+      'Weekly reports are dated on the Monday of that week.',
   '주간 업무보고': 'Weekly report',
-  '주민등록번호는 이 서버에 두지 않습니다 — 내려받을 때 넣은 번호만 이 파일에 들어갑니다. 보수총액은 보낸 급여명세서의 과세 급여 합계입니다.': 'Resident registration numbers are not kept on this server — only numbers entered when downloading go into this file. Total pay is the sum of taxable pay on sent payslips.',
+  '주민등록번호는 이 서버에 두지 않습니다 — 내려받을 때 넣은 번호만 이 파일에 들어갑니다. 보수총액은 보낸 급여명세서의 과세 급여 합계입니다.':
+      'Resident registration numbers are not kept on this server — only numbers entered when downloading go into this file. Total pay is the sum of taxable pay on sent payslips.',
   '주민세': 'Resident tax',
   '주소 모양이 올바르지 않습니다.': 'Invalid URL format.',
   '주소가 너무 깁니다.': 'The URL is too long.',
   '주소를 확인하세요.': 'Check the address.',
-  '주소에 계정 정보를 넣지 마세요(서명으로 확인합니다).': 'Don\'t include account credentials in the URL (it\'s verified with a signature).',
-  '주소에 접근할 권한이 없습니다. 비공개 주소(ICS)를 다시 복사해 넣으세요.': 'No access to this URL. Copy the private (ICS) address again and paste it.',
+  '주소에 계정 정보를 넣지 마세요(서명으로 확인합니다).':
+      'Don\'t include account credentials in the URL (it\'s verified with a signature).',
+  '주소에 접근할 권한이 없습니다. 비공개 주소(ICS)를 다시 복사해 넣으세요.':
+      'No access to this URL. Copy the private (ICS) address again and paste it.',
   '주소에서 캘린더를 찾을 수 없습니다.': 'No calendar found at this URL.',
   '주소의 서버를 찾을 수 없습니다.': 'The server for this URL can\'t be found.',
   '주소의 이름을 찾을 수 없습니다.': 'The address\'s host name couldn\'t be resolved.',
@@ -1733,31 +2178,38 @@ const Map<String, String> serverEn = {
   '준회원은 API 토큰을 만들 수 없습니다.': 'Guests can\'t create API tokens.',
   '준회원은 공유 캘린더에서 읽기만 할 수 있습니다.': 'Guests can only view shared calendars.',
   '준회원은 그룹채팅을 토픽으로 전환할 수 없습니다.': 'Guests can\'t convert group chats to topics.',
-  '준회원은 대화를 시작할 수 없습니다. 초대받은 방에서만 활동할 수 있습니다.': 'Guests can\'t start conversations. They can only take part in chats they\'re invited to.',
+  '준회원은 대화를 시작할 수 없습니다. 초대받은 방에서만 활동할 수 있습니다.':
+      'Guests can\'t start conversations. They can only take part in chats they\'re invited to.',
   '준회원은 드라이브를 볼 수만 있습니다.': 'Guests can only view the drive.',
-  '준회원은 방을 만들 수 없습니다. 초대받은 방에서만 활동할 수 있습니다.': 'Guests can\'t create chats. They can only take part in chats they\'re invited to.',
+  '준회원은 방을 만들 수 없습니다. 초대받은 방에서만 활동할 수 있습니다.':
+      'Guests can\'t create chats. They can only take part in chats they\'re invited to.',
   '준회원은 새 캘린더를 만들 수 없습니다.': 'Guests can\'t create new calendars.',
   '준회원은 앱을 연결할 수 없습니다.': 'Associate members can\'t connect apps.',
   '준회원은 위키를 읽을 수만 있습니다.': 'Guests can only read the wiki.',
   '준회원은 읽기 권한만 줄 수 있습니다.': 'Guests can only be given read access.',
   '준회원은 조직도를 볼 수 없습니다.': 'Guests can\'t view the org chart.',
   '준회원은 참석자를 초대할 수 없습니다.': 'Guests can\'t invite attendees.',
-  '준회원은 초대받은 방에만 참여할 수 있습니다.': 'Guests can only join chats they\'re invited to.',
+  '준회원은 초대받은 방에만 참여할 수 있습니다.':
+      'Guests can only join chats they\'re invited to.',
   '준회원은 캘린더를 구독할 수 없습니다.': 'Guests can\'t subscribe to calendars.',
   '준회원은 토픽 관리자로 지정할 수 없습니다.': 'Guests can\'t be made topic admins.',
-  '준회원은 팀 북마크를 만들 수 없습니다. 개인 북마크를 이용하세요.': 'Guests can\'t create team bookmarks. Use personal bookmarks instead.',
+  '준회원은 팀 북마크를 만들 수 없습니다. 개인 북마크를 이용하세요.':
+      'Guests can\'t create team bookmarks. Use personal bookmarks instead.',
   '준회원은 팀 캘린더를 볼 수 없습니다.': 'Guests can\'t view team calendars.',
   '준회원은 회의실·자원을 예약할 수 없습니다.': 'Guests can\'t book rooms & resources.',
-  '준회원인 소유자는 캘린더 삭제와 나에게만 삭제를 할 수 없습니다. 숨김을 사용하세요.': 'An owner who is a guest can\'t delete the calendar or delete it just for themselves. Hide it instead.',
+  '준회원인 소유자는 캘린더 삭제와 나에게만 삭제를 할 수 없습니다. 숨김을 사용하세요.':
+      'An owner who is a guest can\'t delete the calendar or delete it just for themselves. Hide it instead.',
   '중도정산': 'Mid-year settlement',
   '중복 확인 시도': 'Duplicate check attempt',
   '중식': 'Chinese food',
   '중요': 'Important',
   '증빙을 찾을 수 없습니다.': 'Evidence not found.',
   '지금 결재할 차례가 아닙니다.': 'It\'s not your turn to approve yet.',
-  '지금 보내는 중인 예약 메시지는 바꿀 수 없습니다.': 'A scheduled message that\'s being sent right now can\'t be changed.',
+  '지금 보내는 중인 예약 메시지는 바꿀 수 없습니다.':
+      'A scheduled message that\'s being sent right now can\'t be changed.',
   '지금 쓰는 중인 회의실입니다.': 'This room is in use right now.',
-  '지금은 쓰지 않는 양식입니다. 관리자에게 문의하세요.': 'This form is no longer in use. Contact an admin.',
+  '지금은 쓰지 않는 양식입니다. 관리자에게 문의하세요.':
+      'This form is no longer in use. Contact an admin.',
   '지금은 예약할 수 없는 자원입니다.': 'This resource can\'t be booked right now.',
   '지금은 예약할 수 없는 회의실입니다.': 'This room can\'t be booked right now.',
   '지급 개월': 'Months paid',
@@ -1779,9 +2231,12 @@ const Map<String, String> serverEn = {
   '지출 분류를 하나 이상 넣으세요.': 'Add at least one expense category.',
   '지하철': 'Subway',
   '직원급여': 'Employee salaries',
-  '직접 요청하지 않았다면 이 메일은 무시하세요 — 이 코드 없이는 비밀번호를 바꿀 수 없습니다. 같은 메일이 계속 오면 서버 운영자에게 알려 주세요.': 'If you didn\'t request this, ignore this email — your password can\'t be changed without this code. If you keep getting this email, let the server operator know.',
-  '직접 요청하지 않았다면 이 메일은 무시하세요 — 이 코드 없이는 회사 계정이 연결되지 않습니다. 같은 메일이 계속 오면 서버 운영자에게 알려 주세요.': 'If you didn\'t request this, ignore this email — your company account won\'t be linked without this code. If you keep getting this email, let the server operator know.',
-  '직접 요청하지 않았다면 이 메일은 무시하세요.': 'If you didn\'t request this, ignore this email.',
+  '직접 요청하지 않았다면 이 메일은 무시하세요 — 이 코드 없이는 비밀번호를 바꿀 수 없습니다. 같은 메일이 계속 오면 서버 운영자에게 알려 주세요.':
+      'If you didn\'t request this, ignore this email — your password can\'t be changed without this code. If you keep getting this email, let the server operator know.',
+  '직접 요청하지 않았다면 이 메일은 무시하세요 — 이 코드 없이는 회사 계정이 연결되지 않습니다. 같은 메일이 계속 오면 서버 운영자에게 알려 주세요.':
+      'If you didn\'t request this, ignore this email — your company account won\'t be linked without this code. If you keep getting this email, let the server operator know.',
+  '직접 요청하지 않았다면 이 메일은 무시하세요.':
+      'If you didn\'t request this, ignore this email.',
   '직책 목록에 없는 값입니다.': 'This value isn\'t in the position list.',
   '직책 목록에 있는 직책을 고르세요.': 'Choose a position from the position list.',
   '직책 목록의 기본값 해제': 'Unset the default in the position list',
@@ -1789,11 +2244,13 @@ const Map<String, String> serverEn = {
   '직책 이름을 입력하세요.': 'Enter a position name.',
   '직책은 30자 이내로 입력하세요.': 'Enter a position of up to 30 characters.',
   '직책을 찾을 수 없습니다.': 'Position not found.',
-  '진척률은 0·25·50·75·100 중 하나여야 합니다.': 'Progress must be one of 0, 25, 50, 75 or 100.',
+  '진척률은 0·25·50·75·100 중 하나여야 합니다.':
+      'Progress must be one of 0, 25, 50, 75 or 100.',
   '진행 중인 결재만 회수할 수 있습니다.': 'Only approvals in progress can be withdrawn.',
   '진행 중인 화상회의가 없습니다.': 'There\'s no meeting in progress.',
   '진행자만 녹화를 시작할 수 있습니다.': 'Only the host can start recording.',
-  '차감 소득세(어림 — +추징 / −환급)': 'Settlement income tax (estimate — + additional / − refund)',
+  '차감 소득세(어림 — +추징 / −환급)':
+      'Settlement income tax (estimate — + additional / − refund)',
   '차감 지방소득세(어림)': 'Settlement local income tax (estimate)',
   '차단된 주소입니다.': 'This address is blocked.',
   '차변': 'Debit',
@@ -1805,59 +2262,78 @@ const Map<String, String> serverEn = {
   '참조자를 변경했습니다.': 'CC changed.',
   '참조자에 결재자로 고를 수 없는 사람이 있습니다.': 'Some CC recipients can\'t be chosen.',
   '찾을 수 없습니다.': 'Not found.',
-  '찾을 아이디를 정확히 입력하세요(4~20자).': 'Enter the exact username to look up (4–20 characters).',
-  '채팅방에 보낼 내용은 500자 이내로 입력하세요.': 'Enter a message for the chat of up to 500 characters.',
+  '찾을 아이디를 정확히 입력하세요(4~20자).':
+      'Enter the exact username to look up (4–20 characters).',
+  '채팅방에 보낼 내용은 500자 이내로 입력하세요.':
+      'Enter a message for the chat of up to 500 characters.',
   '채팅방에 보낼 내용을 입력하세요.': 'Enter a message to send to the chat.',
   '채팅방을 찾을 수 없습니다.': 'Chat not found.',
   '처음 출근': 'First clock-in',
   '처음 퇴근': 'First clock-out',
   '첨부 목록이 올바르지 않습니다.': 'Invalid attachment list.',
-  '첨부 파일 정보가 올바르지 않습니다. 다시 올려주세요.': 'Invalid attachment info. Please upload it again.',
-  '첨부 파일은 보드 뷰 토픽의 투표에서만 올릴 수 있습니다.': 'Attachments can only be added to polls in board view topics.',
+  '첨부 파일 정보가 올바르지 않습니다. 다시 올려주세요.':
+      'Invalid attachment info. Please upload it again.',
+  '첨부 파일은 보드 뷰 토픽의 투표에서만 올릴 수 있습니다.':
+      'Attachments can only be added to polls in board view topics.',
   '첨부 파일을 확인할 수 없습니다.': 'The attachment can\'t be verified.',
-  '첨부 파일을 확인할 수 없습니다. 파일을 다시 올린 뒤 보내 주세요.': 'The attachment can\'t be verified. Upload the file again and send it.',
-  '첨부 파일을 확인할 수 없어 보내지 못했습니다. 파일을 다시 올려 예약하세요.': 'The attachment couldn\'t be verified, so it wasn\'t sent. Upload the file again and reschedule.',
-  '첨부를 모두 지우면 남는 내용이 없습니다. 메시지를 삭제하세요.': 'Removing all attachments would leave nothing. Delete the message instead.',
+  '첨부 파일을 확인할 수 없습니다. 파일을 다시 올린 뒤 보내 주세요.':
+      'The attachment can\'t be verified. Upload the file again and send it.',
+  '첨부 파일을 확인할 수 없어 보내지 못했습니다. 파일을 다시 올려 예약하세요.':
+      'The attachment couldn\'t be verified, so it wasn\'t sent. Upload the file again and reschedule.',
+  '첨부를 모두 지우면 남는 내용이 없습니다. 메시지를 삭제하세요.':
+      'Removing all attachments would leave nothing. Delete the message instead.',
   '첨부를 찾을 수 없습니다.': 'Attachment not found.',
   '첨부를 확인하세요.': 'Check the attachments.',
   '첨부파일': 'Attachments',
-  '첨부파일 백업 목록(index.json)을 읽지 못했습니다.': 'Couldn\'t read the attachment backup list (index.json).',
+  '첨부파일 백업 목록(index.json)을 읽지 못했습니다.':
+      'Couldn\'t read the attachment backup list (index.json).',
   '첨부파일 백업 정보를 읽지 못했습니다.': 'Couldn\'t read the attachment backup info.',
-  '첨부파일 백업이 이 백업과 다른 서버(또는 다른 키)의 것입니다 — 첨부파일은 복원하지 않았습니다.': 'The attachment backup is from a different server (or key) than this backup — attachments were not restored.',
+  '첨부파일 백업이 이 백업과 다른 서버(또는 다른 키)의 것입니다 — 첨부파일은 복원하지 않았습니다.':
+      'The attachment backup is from a different server (or key) than this backup — attachments were not restored.',
   '첨부파일 복사 중': 'Copying attachments',
-  '첫 줄에 \'아이디\'·\'사번\'·\'이름\' 중 하나의 열이 있어야 합니다.': 'The first row must have one of the columns \'아이디\' (username), \'사번\' (employee no.) or \'이름\' (name).',
+  '첫 줄에 \'아이디\'·\'사번\'·\'이름\' 중 하나의 열이 있어야 합니다.':
+      'The first row must have one of the columns \'아이디\' (username), \'사번\' (employee no.) or \'이름\' (name).',
   '청구금액': 'Billed amount',
-  '청구한 사용 건은 사용자를 바꿀 수 없습니다.': 'The user of a claimed transaction cannot be changed.',
+  '청구한 사용 건은 사용자를 바꿀 수 없습니다.':
+      'The user of a claimed transaction cannot be changed.',
   '청구한 사용 건은 제외할 수 없습니다.': 'A claimed transaction cannot be excluded.',
   '청구한 사용 건은 지울 수 없습니다.': 'A claimed transaction cannot be deleted.',
   '청구할 카드 사용 건을 고르세요.': 'Choose card transactions to claim.',
-  '청구했거나 내 것이 아닌 사용 건은 고칠 수 없습니다.': 'Claimed transactions and other people\'s transactions cannot be edited.',
+  '청구했거나 내 것이 아닌 사용 건은 고칠 수 없습니다.':
+      'Claimed transactions and other people\'s transactions cannot be edited.',
   '체크리스트 내용을 입력하세요.': 'Enter the checklist item.',
   '체크리스트는 200자 이내로 입력하세요.': 'Enter a checklist item of up to 200 characters.',
   '체크리스트는 업무당 50개까지 만들 수 있습니다.': 'Each task can have up to 50 checklist items.',
-  '초대 링크가 만료·취소되었거나 정해진 인원이 모두 가입해 더는 쓸 수 없습니다. 초대한 사람에게 새 링크를 요청하거나, 사내 와이파이에서 가입하세요.': 'The invite link has expired, been revoked, or reached its member limit, so it can no longer be used. Ask the person who invited you for a new link, or sign up on the company Wi-Fi.',
-  '초대 링크는 서버 운영자·팀 소유자·관리자만 만들 수 있습니다.': 'Only the server operator, team owners and admins can create invite links.',
+  '초대 링크가 만료·취소되었거나 정해진 인원이 모두 가입해 더는 쓸 수 없습니다. 초대한 사람에게 새 링크를 요청하거나, 사내 와이파이에서 가입하세요.':
+      'The invite link has expired, been revoked, or reached its member limit, so it can no longer be used. Ask the person who invited you for a new link, or sign up on the company Wi-Fi.',
+  '초대 링크는 서버 운영자·팀 소유자·관리자만 만들 수 있습니다.':
+      'Only the server operator, team owners and admins can create invite links.',
   '초대 링크를 찾을 수 없습니다.': 'Invite link not found.',
   '초대받은 적이 없다면 이 메일은 무시하세요.': 'If you weren\'t invited, ignore this email.',
-  '초대할 수 없는 사용자가 포함되어 있습니다. (팀 멤버가 아니거나 탈퇴·정지한 사용자)': 'Some users can\'t be invited (not team members, or deleted/suspended users).',
+  '초대할 수 없는 사용자가 포함되어 있습니다. (팀 멤버가 아니거나 탈퇴·정지한 사용자)':
+      'Some users can\'t be invited (not team members, or deleted/suspended users).',
   '초대할 토픽이나 그룹채팅을 선택하세요.': 'Choose a topic or group chat to invite to.',
   '총금액': 'Total amount',
   '총급여(과세)': 'Total salary (taxable)',
   '총액': 'Total',
-  '최근 그곳에서 로그인에 성공한 사람과 사내에서는 그대로 로그인됩니다. ': 'People who recently signed in successfully from there, and anyone on the company network, can still sign in. ',
+  '최근 그곳에서 로그인에 성공한 사람과 사내에서는 그대로 로그인됩니다. ':
+      'People who recently signed in successfully from there, and anyone on the company network, can still sign in. ',
   '최대 90일 뒤까지만 예약할 수 있습니다.': 'Can only be scheduled up to 90 days ahead.',
   '추가할 구성원을 고르세요.': 'Choose members to add.',
-  '추가할 수 있는 멤버가 없습니다. 탈퇴했거나 정지된 계정은 팀에 넣을 수 없습니다.': 'No members can be added. Deleted or suspended accounts can\'t be added to a team.',
+  '추가할 수 있는 멤버가 없습니다. 탈퇴했거나 정지된 계정은 팀에 넣을 수 없습니다.':
+      'No members can be added. Deleted or suspended accounts can\'t be added to a team.',
   '추가할 파일을 선택하세요.': 'Choose a file to add.',
   '추석': 'Chuseok',
   '추석 연휴': 'Chuseok holiday',
   '축협': 'Livestock cooperative',
   '출근 기록을 잊으셨나요?': 'Forgot to clock in?',
-  '출근 기록이 없습니다. 출근을 빠뜨렸으면 근태 수정을 올리세요.': 'No clock-in record. If you missed clocking in, submit an attendance correction.',
+  '출근 기록이 없습니다. 출근을 빠뜨렸으면 근태 수정을 올리세요.':
+      'No clock-in record. If you missed clocking in, submit an attendance correction.',
   '출근 시각을 확인하세요.': 'Check the clock-in time.',
   '출근 형태': 'Work type',
   '출근 형태를 확인하세요.': 'Check the work type.',
-  '출근·퇴근 시각을 HH:MM으로, 출근이 퇴근보다 앞이게 넣으세요.': 'Enter clock-in and clock-out times as HH:MM, with clock-in before clock-out.',
+  '출근·퇴근 시각을 HH:MM으로, 출근이 퇴근보다 앞이게 넣으세요.':
+      'Enter clock-in and clock-out times as HH:MM, with clock-in before clock-out.',
   '출근을 먼저 누르세요.': 'Clock in first.',
   '출근일': 'Workdays',
   '출장 기간': 'Trip period',
@@ -1869,14 +2345,16 @@ const Map<String, String> serverEn = {
   '취득': 'acquisition',
   '취득·상실 중 무엇을 신고할지 고르세요.': 'Choose whether to file an acquisition or a loss.',
   '취득일': 'Acquisition date',
-  '취득일(입사일)·상실일(퇴직일 — 마지막 근무일 다음 날)을 확인하세요.': 'Check the acquisition date (hire date) or loss date (day after the last working day).',
+  '취득일(입사일)·상실일(퇴직일 — 마지막 근무일 다음 날)을 확인하세요.':
+      'Check the acquisition date (hire date) or loss date (day after the last working day).',
   '취소 사유를 쓰세요.': 'Enter a reason for canceling.',
   '취소구분': 'Cancellation type',
   '취소되었습니다': 'Canceled',
   '취소여부': 'Canceled',
   '치킨': 'Chicken',
   '카드 번호 끝 4자리를 넣으세요.': 'Enter the last 4 digits of the card number.',
-  '카드 번호 열이 없습니다. 어느 카드의 이용내역인지 고르고 다시 올리세요.': 'There is no card number column. Choose which card the statement is for and upload it again.',
+  '카드 번호 열이 없습니다. 어느 카드의 이용내역인지 고르고 다시 올리세요.':
+      'There is no card number column. Choose which card the statement is for and upload it again.',
   '카드 사용 건을 찾을 수 없습니다.': 'Card transaction not found.',
   '카드 이름을 쓰세요(예: 영업팀 법인카드).': 'Enter a card name (e.g. Sales team card).',
   '카드를 고르세요.': 'Choose a card.',
@@ -1885,9 +2363,11 @@ const Map<String, String> serverEn = {
   '카드번호': 'Card number',
   '카드사 계정을 먼저 연결하세요.': 'Connect a card company account first.',
   '카드사 계정을 연결하지 못했습니다.': 'Couldn\'t link the card issuer account.',
-  '카드사 기업 회원 아이디와 비밀번호를 넣으세요.': 'Enter the card issuer corporate member ID and password.',
+  '카드사 기업 회원 아이디와 비밀번호를 넣으세요.':
+      'Enter the card issuer corporate member ID and password.',
   '카드사(기관 코드)를 고르세요.': 'Choose the card issuer (institution code).',
-  '카드사·홈택스 연동이 꺼져 있습니다(server/.env의 CODEF_*).': 'Card issuer & Hometax integration is off (CODEF_* in server/.env).',
+  '카드사·홈택스 연동이 꺼져 있습니다(server/.env의 CODEF_*).':
+      'Card issuer & Hometax integration is off (CODEF_* in server/.env).',
   '카카오': 'Kakao',
   '카카오T': 'Kakao T',
   '카카오뱅크': 'KakaoBank',
@@ -1913,9 +2393,11 @@ const Map<String, String> serverEn = {
   '켜기 값을 확인하세요.': 'Check the on/off value.',
   '켜려면 도메인과 토큰을 먼저 넣으세요.': 'Enter the domain and token first to turn this on.',
   '켬': 'On',
-  '코드가 맞지 않거나 시간이 지났습니다. 브라우저의 코드를 다시 확인하세요.': 'The code is wrong or has expired. Check the code in your browser again.',
+  '코드가 맞지 않거나 시간이 지났습니다. 브라우저의 코드를 다시 확인하세요.':
+      'The code is wrong or has expired. Check the code in your browser again.',
   '코드가 맞지 않습니다.': 'The code doesn\'t match.',
-  '코드가 맞지 않습니다. 인증 앱의 지금 코드를 넣으세요(휴대폰 시간이 맞는지도 확인하세요).': 'The code doesn\'t match. Enter the current code from your authenticator app (also check that your phone\'s time is correct).',
+  '코드가 맞지 않습니다. 인증 앱의 지금 코드를 넣으세요(휴대폰 시간이 맞는지도 확인하세요).':
+      'The code doesn\'t match. Enter the current code from your authenticator app (also check that your phone\'s time is correct).',
   '코레일': 'Korail',
   '쿠팡': 'Coupang',
   '쿠팡이츠': 'Coupang Eats',
@@ -1927,18 +2409,24 @@ const Map<String, String> serverEn = {
   '키보드': 'Keyboard',
   '탈퇴한 계정입니다.': 'This account has been deleted.',
   '탈퇴한 사용자': 'Deleted user',
-  '탈퇴했거나 정지된 계정이라 보내지 못했습니다.': 'Not sent because the account was deleted or suspended.',
-  '탈퇴했거나 정지된 사용자는 프로젝트에 추가할 수 없습니다.': 'Deleted or suspended users can\'t be added to the project.',
+  '탈퇴했거나 정지된 계정이라 보내지 못했습니다.':
+      'Not sent because the account was deleted or suspended.',
+  '탈퇴했거나 정지된 사용자는 프로젝트에 추가할 수 없습니다.':
+      'Deleted or suspended users can\'t be added to the project.',
   '태블릿에서 바로 예약 여부를 확인하세요.': 'Check whether booking on the tablet is allowed.',
   '택시': 'Taxi',
   '탱고톡': 'TangoTalk',
-  '탱고톡에 오신 것을 환영합니다! 🎉\n여기는 나만 보는 \'나와의 대화\'예요. 메모나 파일을 자유롭게 저장해 두세요.\n사용법은 오른쪽 위 ☰ 메뉴의 \'도움말\'에서 볼 수 있어요.': 'Welcome to TangoTalk! 🎉\nThis is your "Notes to self" chat that only you can see. Feel free to save notes and files here.\nYou can find how to use the app under "Help" in the ☰ menu at the top right.',
+  '탱고톡에 오신 것을 환영합니다! 🎉\n여기는 나만 보는 \'나와의 대화\'예요. 메모나 파일을 자유롭게 저장해 두세요.\n사용법은 오른쪽 위 ☰ 메뉴의 \'도움말\'에서 볼 수 있어요.':
+      'Welcome to TangoTalk! 🎉\nThis is your "Notes to self" chat that only you can see. Feel free to save notes and files here.\nYou can find how to use the app under "Help" in the ☰ menu at the top right.',
   '텍스트 댓글만 수정할 수 있습니다.': 'Only text comments can be edited.',
-  '텍스트·사진·파일 메시지만 수정할 수 있습니다.': 'Only text, photo and file messages can be edited.',
-  '텍스트와 이미지 메시지만 공지로 등록할 수 있습니다.': 'Only text and image messages can be made announcements.',
+  '텍스트·사진·파일 메시지만 수정할 수 있습니다.':
+      'Only text, photo and file messages can be edited.',
+  '텍스트와 이미지 메시지만 공지로 등록할 수 있습니다.':
+      'Only text and image messages can be made announcements.',
   '템플릿 이름은 40자 이내로 입력하세요.': 'Enter a template name of up to 40 characters.',
   '템플릿 이름을 입력하세요.': 'Enter a template name.',
-  '템플릿을 만든 사람이나 팀 소유자만 고칠 수 있습니다.': 'Only the template creator or the team owner can edit it.',
+  '템플릿을 만든 사람이나 팀 소유자만 고칠 수 있습니다.':
+      'Only the template creator or the team owner can edit it.',
   '템플릿을 찾을 수 없습니다.': 'Template not found.',
   '토너': 'Toner',
   '토스': 'Toss',
@@ -1951,9 +2439,12 @@ const Map<String, String> serverEn = {
   '토큰을 찾을 수 없습니다.': 'Token not found.',
   '토큰이 없습니다.': 'No token.',
   '토큰이 유효하지 않습니다.': 'Invalid token.',
-  '토픽 관리자는 다른 멤버를 토픽 관리자로 지정한 뒤에 나갈 수 있습니다.': 'A topic admin can leave only after making another member a topic admin.',
-  '토픽 관리자는 다른 토픽 관리자를 내보낼 수 없습니다.': 'Topic admins can\'t remove other topic admins.',
-  '토픽 관리자는 다른 토픽 관리자를 해제할 수 없습니다. 팀 소유자·관리자에게 요청하세요.': 'Topic admins can\'t remove other topic admins\' admin role. Ask a team owner or admin.',
+  '토픽 관리자는 다른 멤버를 토픽 관리자로 지정한 뒤에 나갈 수 있습니다.':
+      'A topic admin can leave only after making another member a topic admin.',
+  '토픽 관리자는 다른 토픽 관리자를 내보낼 수 없습니다.':
+      'Topic admins can\'t remove other topic admins.',
+  '토픽 관리자는 다른 토픽 관리자를 해제할 수 없습니다. 팀 소유자·관리자에게 요청하세요.':
+      'Topic admins can\'t remove other topic admins\' admin role. Ask a team owner or admin.',
   '토픽 관리자만 게시글을 고정할 수 있습니다.': 'Only topic admins can pin posts.',
   '토픽 관리자만 필독을 정할 수 있습니다.': 'Only topic admins can mark posts as must-read.',
   '토픽 설명이 올바르지 않습니다.': 'Invalid topic description.',
@@ -1961,49 +2452,62 @@ const Map<String, String> serverEn = {
   '토픽방만 자유롭게 참여할 수 있습니다.': 'Only topics can be joined freely.',
   '토픽에서만 할 수 있습니다.': 'This can only be done in topics.',
   '토픽을 관리할 권한이 없습니다.': 'You don\'t have permission to manage this topic.',
-  '토픽을 만들 수 있는 사람을 한 명 이상 지정하세요.': 'Specify at least one person who can create topics.',
+  '토픽을 만들 수 있는 사람을 한 명 이상 지정하세요.':
+      'Specify at least one person who can create topics.',
   '토픽이 보관되어 보낼 수 없습니다.': 'The topic is archived, so you can\'t send messages.',
   '톨게이트': 'Toll gate',
   '통신': 'Telecom',
   '통지를 찾을 수 없습니다.': 'Notice not found.',
   '퇴근 기록을 잊으셨나요?': 'Forgot to clock out?',
   '퇴근 시각을 확인하세요.': 'Check the clock-out time.',
-  '퇴근 시각이 출근 시각보다 늦어야 합니다.': 'The clock-out time must be later than the clock-in time.',
+  '퇴근 시각이 출근 시각보다 늦어야 합니다.':
+      'The clock-out time must be later than the clock-in time.',
   '퇴직금': 'Severance pay',
   '퇴직소득': 'Retirement income',
   '투썸': 'A Twosome Place',
   '투표 보기를 입력하세요.': 'Enter the poll options.',
   '투표 설명이 올바르지 않습니다.': 'Invalid poll description.',
-  '투표는 /polls/:pollId/favorite로 즐겨찾기합니다.': 'Polls are added to favorites via /polls/:pollId/favorite.',
+  '투표는 /polls/:pollId/favorite로 즐겨찾기합니다.':
+      'Polls are added to favorites via /polls/:pollId/favorite.',
   '투표는 공유할 수 없습니다.': 'Polls can\'t be shared.',
   '투표는 수정할 수 없습니다.': 'Polls can\'t be edited.',
   '투표는 투표 만들기로만 올릴 수 있습니다.': 'Polls can only be posted with Create poll.',
-  '투표를 만든 사람이나 관리자만 마감할 수 있습니다.': 'Only the poll creator or an admin can close it.',
+  '투표를 만든 사람이나 관리자만 마감할 수 있습니다.':
+      'Only the poll creator or an admin can close it.',
   '투표를 찾을 수 없습니다.': 'Poll not found.',
   '트리거 종류가 올바르지 않습니다.': 'Invalid trigger type.',
   '트리거로 들어가는 연결은 만들 수 없습니다.': 'Connections into a trigger aren\'t allowed.',
   '트리거를 하나 추가하세요.': 'Add a trigger.',
-  '트리거에서 이어지는 액션을 하나 이상 연결하세요.': 'Connect at least one action after the trigger.',
+  '트리거에서 이어지는 액션을 하나 이상 연결하세요.':
+      'Connect at least one action after the trigger.',
   '트리거의 필드가 올바르지 않습니다.': 'Invalid trigger field.',
   '티머니': 'T-money',
-  '팀 멤버가 아니거나 탈퇴·정지한 사용자입니다.': 'Not a team member, or the user has been deleted or suspended.',
+  '팀 멤버가 아니거나 탈퇴·정지한 사용자입니다.':
+      'Not a team member, or the user has been deleted or suspended.',
   '팀 북마크 순서는 관리자만 바꿀 수 있습니다.': 'Only admins can reorder team bookmarks.',
-  '팀 생성 권한은 정회원/관리자/서버 운영자 중에서 고를 수 있습니다.': 'Team creation permission can be set to member, admin or server operator.',
+  '팀 생성 권한은 정회원/관리자/서버 운영자 중에서 고를 수 있습니다.':
+      'Team creation permission can be set to member, admin or server operator.',
   '팀 생성(만든 사람이 소유자)': 'Create team (creator becomes owner)',
   '팀 설정을 바꿀 권한이 없습니다.': 'You don\'t have permission to change team settings.',
-  '팀 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.': 'Invalid team icon image. Please upload it again.',
+  '팀 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.':
+      'Invalid team icon image. Please upload it again.',
   '팀 이름은 30자 이내로 입력하세요.': 'Enter a team name of up to 30 characters.',
   '팀 이름을 입력하세요.': 'Enter a team name.',
-  '팀 초대 링크 생성 권한은 정회원/관리자/서버 운영자 중에서 고를 수 있습니다.': 'Team invite link permission can be set to member, admin or server operator.',
-  '팀 초대 링크는 팀 소유자나 관리자만 만들 수 있습니다.': 'Only the team owner or admins can create team invite links.',
+  '팀 초대 링크 생성 권한은 정회원/관리자/서버 운영자 중에서 고를 수 있습니다.':
+      'Team invite link permission can be set to member, admin or server operator.',
+  '팀 초대 링크는 팀 소유자나 관리자만 만들 수 있습니다.':
+      'Only the team owner or admins can create team invite links.',
   '팀 초대 링크를 찾을 수 없습니다.': 'Team invite link not found.',
   '팀 캘린더는 구독하지 않아도 보입니다.': 'Team calendars are visible without subscribing.',
-  '팀 캘린더는 삭제할 수 없습니다. 숨김을 사용하세요.': 'Team calendars can\'t be deleted. Hide it instead.',
+  '팀 캘린더는 삭제할 수 없습니다. 숨김을 사용하세요.':
+      'Team calendars can\'t be deleted. Hide it instead.',
   '팀 캘린더는 설정을 바꿀 수 없습니다.': 'Team calendar settings can\'t be changed.',
   '팀에 추가': 'Add to team',
-  '팀에서 제외되어 보내지 못했습니다.': 'Not sent because the recipient was removed from the team.',
+  '팀에서 제외되어 보내지 못했습니다.':
+      'Not sent because the recipient was removed from the team.',
   '팀원': 'Team member',
-  '팀원 정보를 바꿀 권한이 없습니다.': 'You don\'t have permission to change team member info.',
+  '팀원 정보를 바꿀 권한이 없습니다.':
+      'You don\'t have permission to change team member info.',
   '팀을 고르세요.': 'Choose a team.',
   '팀을 다시 고르세요.': 'Choose the team again.',
   '팀을 선택하세요.': 'Select a team.',
@@ -2012,19 +2516,24 @@ const Map<String, String> serverEn = {
   '팀장에게만 문의할 수 있습니다.': 'You can only contact team leads.',
   '파리바게뜨': 'Paris Baguette',
   '파일 이름': 'File name',
-  '파일 이름이 너무 깁니다. 이름을 줄여 다시 올려 주세요.': 'The file name is too long. Shorten it and upload again.',
+  '파일 이름이 너무 깁니다. 이름을 줄여 다시 올려 주세요.':
+      'The file name is too long. Shorten it and upload again.',
   '파일 정보가 올바르지 않습니다.': 'Invalid file info.',
   '파일 종류(엑셀·CSV)를 고르세요.': 'Choose a file type (Excel, CSV).',
   '파일 크기가 너무 큽니다 (최대 1GB).': 'The file is too large (max 1 GB).',
   '파일 형식 정보가 올바르지 않습니다.': 'Invalid file type info.',
-  '파일을 너무 많이 올렸습니다. 잠시 뒤에 다시 시도하세요.': 'Too many files uploaded. Try again in a moment.',
+  '파일을 너무 많이 올렸습니다. 잠시 뒤에 다시 시도하세요.':
+      'Too many files uploaded. Try again in a moment.',
   '파일을 알 수 없습니다.': 'Unknown file.',
-  '파일을 올린 사람 또는 팀 관리자만 삭제할 수 있습니다.': 'Only the uploader or a team admin can delete this file.',
+  '파일을 올린 사람 또는 팀 관리자만 삭제할 수 있습니다.':
+      'Only the uploader or a team admin can delete this file.',
   '파일을 저장하지 못했습니다. 다시 보내세요.': 'Couldn\'t save the files. Please send again.',
   '파일을 저장하지 못했습니다. 다시 시도하세요.': 'Couldn\'t save the file. Try again.',
-  '파일을 확인할 수 없습니다. 파일을 다시 올려 주세요.': 'The file can\'t be verified. Please upload it again.',
+  '파일을 확인할 수 없습니다. 파일을 다시 올려 주세요.':
+      'The file can\'t be verified. Please upload it again.',
   '파일이 너무 커서 암호화할 수 없습니다.': 'The file is too large to encrypt.',
-  '파일이 모두 합쳐 50MB를 넘습니다. 첨부를 덜 고르세요.': 'The files total more than 50MB. Select fewer attachments.',
+  '파일이 모두 합쳐 50MB를 넘습니다. 첨부를 덜 고르세요.':
+      'The files total more than 50MB. Select fewer attachments.',
   '파일이 비어 있습니다.': 'The file is empty.',
   '파일이 없습니다.': 'No file.',
   '파일이 있는 메시지가 아닙니다.': 'This message has no file.',
@@ -2033,7 +2542,8 @@ const Map<String, String> serverEn = {
   '패스트캠퍼스': 'Fastcampus',
   '페어링 시도': 'Pairing attempt',
   '페이지 제목을 입력하세요.': 'Enter a page title.',
-  '페이지를 자기 아래 페이지로 옮길 수 없습니다.': 'A page can\'t be moved under one of its own subpages.',
+  '페이지를 자기 아래 페이지로 옮길 수 없습니다.':
+      'A page can\'t be moved under one of its own subpages.',
   '페이지를 자기 아래로 옮길 수 없습니다.': 'A page can\'t be moved under itself.',
   '페이지를 찾을 수 없습니다.': 'Page not found.',
   '편의점': 'Convenience store',
@@ -2044,25 +2554,32 @@ const Map<String, String> serverEn = {
   '폴더 순서가 올바르지 않습니다.': 'Invalid folder order.',
   '폴더 이름을 넣으세요.': 'Enter a folder name.',
   '폴더 이름을 입력하세요.': 'Enter a folder name.',
-  '폴더를 자기 아래 폴더로 옮길 수 없습니다.': 'A folder can\'t be moved into one of its own subfolders.',
+  '폴더를 자기 아래 폴더로 옮길 수 없습니다.':
+      'A folder can\'t be moved into one of its own subfolders.',
   '폴더를 자기 안으로 옮길 수 없습니다.': 'A folder can\'t be moved into itself.',
   '폴더를 찾을 수 없습니다.': 'Folder not found.',
-  '폴더를 찾을 수 없습니다. 다른 곳에서 바꿨을 수 있습니다.': 'Couldn\'t find the folder. It may have been changed elsewhere.',
+  '폴더를 찾을 수 없습니다. 다른 곳에서 바꿨을 수 있습니다.':
+      'Couldn\'t find the folder. It may have been changed elsewhere.',
   '폴더를 확인하세요.': 'Check the folder.',
   '품목명': 'Item name',
-  '품의·보고·협조 요청처럼 정해진 양식이 없는 결재(품의서).': 'A general approval without a fixed form, such as a proposal, report or request for cooperation.',
+  '품의·보고·협조 요청처럼 정해진 양식이 없는 결재(품의서).':
+      'A general approval without a fixed form, such as a proposal, report or request for cooperation.',
   '프로젝트 담당자는 제외할 수 없습니다.': 'The project owner can\'t be removed.',
   '프로젝트 만들기': 'Create project',
-  '프로젝트 생성 권한은 정회원/관리자/서버 운영자 중에서 고를 수 있습니다.': 'Project creation permission can be set to member, admin or server operator.',
+  '프로젝트 생성 권한은 정회원/관리자/서버 운영자 중에서 고를 수 있습니다.':
+      'Project creation permission can be set to member, admin or server operator.',
   '프로젝트 이름은 60자 이내로 입력하세요.': 'Enter a project name of up to 60 characters.',
-  '프로젝트는 정회원 이상만 이용할 수 있습니다.': 'Projects are available to members and above only.',
+  '프로젝트는 정회원 이상만 이용할 수 있습니다.':
+      'Projects are available to members and above only.',
   '프로젝트는 정회원 이상만 참여할 수 있습니다.': 'Only members and above can join projects.',
   '프로젝트를 관리할 권한이 없습니다.': 'You don\'t have permission to manage this project.',
   '프로젝트를 만들 권한이 없습니다.': 'You don\'t have permission to create projects.',
   '프로젝트를 찾을 수 없습니다.': 'Project not found.',
-  '프로젝트에 참여 중인 정회원 이상만 담당자로 지정할 수 있습니다.': 'Only members and above who are in the project can be assigned.',
+  '프로젝트에 참여 중인 정회원 이상만 담당자로 지정할 수 있습니다.':
+      'Only members and above who are in the project can be assigned.',
   '프로필 사진 종류가 올바르지 않습니다.': 'Invalid profile photo type.',
-  '프로필 사진을 확인할 수 없습니다. 사진을 다시 올려 주세요.': 'The profile photo can\'t be verified. Please upload the photo again.',
+  '프로필 사진을 확인할 수 없습니다. 사진을 다시 올려 주세요.':
+      'The profile photo can\'t be verified. Please upload the photo again.',
   '프린터': 'Printer',
   '피자': 'Pizza',
   '필드 값을 변경했습니다.': 'Field value changed.',
@@ -2071,18 +2588,21 @@ const Map<String, String> serverEn = {
   '필드는 30개까지 만들 수 있습니다.': 'You can create up to 30 fields.',
   '필드는 프로젝트마다 20개까지 만들 수 있습니다.': 'Each project can have up to 20 fields.',
   '필드를 찾을 수 없습니다.': 'Field not found.',
-  '필요 없는 알림이나 할 일을 지운 뒤 다시 시도하세요.': 'Delete notifications or to-dos you no longer need and try again.',
+  '필요 없는 알림이나 할 일을 지운 뒤 다시 시도하세요.':
+      'Delete notifications or to-dos you no longer need and try again.',
   '하나': 'Hana',
   '하나은행': 'Hana Bank',
   '하루': 'Full day',
-  '하위 업무가 있는 업무는 다른 업무의 하위로 둘 수 없습니다.': 'A task that has subtasks can\'t be made a subtask of another task.',
+  '하위 업무가 있는 업무는 다른 업무의 하위로 둘 수 없습니다.':
+      'A task that has subtasks can\'t be made a subtask of another task.',
   '하위 업무를 상위 업무로 둘 수 없습니다.': 'A subtask can\'t be made a parent task.',
   '하위 업무에는 또 하위 업무를 둘 수 없습니다.': 'A subtask can\'t have its own subtasks.',
   '하이마트': 'Himart',
   '하이패스': 'Hi-pass',
   '학원': 'Academy',
   '한 번에 300건까지 보낼 수 있습니다.': 'Up to 300 transactions per request.',
-  '한 번에 쓸 수 있는 시간은 15분~7일로 정하세요.': 'Set the maximum booking length between 15 minutes and 7 days.',
+  '한 번에 쓸 수 있는 시간은 15분~7일로 정하세요.':
+      'Set the maximum booking length between 15 minutes and 7 days.',
   '한 일이나 할 일을 쓰세요.': 'Write what you did or plan to do.',
   '한국씨티은행': 'Citibank Korea',
   '한글날': 'Hangul Day',
@@ -2091,7 +2611,8 @@ const Map<String, String> serverEn = {
   '할 일 제목을 입력하세요.': 'Enter a to-do title.',
   '할 일 추가': 'Add to-do',
   '할 일은 다른 대화방으로 옮길 수 없습니다.': 'To-dos can\'t be moved to another chat.',
-  '할 일을 만든 사람만 삭제할 수 있습니다.': 'Only the person who created the to-do can delete it.',
+  '할 일을 만든 사람만 삭제할 수 있습니다.':
+      'Only the person who created the to-do can delete it.',
   '할 일을 만들': 'create to-dos',
   '할 일을 하나 이상 고르세요.': 'Choose at least one action.',
   '합계가 너무 큽니다.': 'The total is too large.',
@@ -2101,7 +2622,8 @@ const Map<String, String> serverEn = {
   '항목 틀': 'Item template',
   '항목을 선택하세요.': 'Select an item.',
   '항목을 찾을 수 없습니다.': 'Item not found.',
-  '핵심 시간대를 HH:MM으로, 시작이 끝보다 앞이게 넣으세요.': 'Enter core hours as HH:MM, with the start before the end.',
+  '핵심 시간대를 HH:MM으로, 시작이 끝보다 앞이게 넣으세요.':
+      'Enter core hours as HH:MM, with the start before the end.',
   '허용하지 않는 포트입니다.': 'This port isn\'t allowed.',
   '현대': 'Hyundai',
   '현대오일': 'Hyundai Oilbank',
@@ -2111,47 +2633,72 @@ const Map<String, String> serverEn = {
   '호텔': 'Hotel',
   '혼자 쓰는 카드의 사용 건입니다.': 'This transaction is on a single-user card.',
   '홈택스 connectedId를 먼저 넣으세요.': 'Enter the Hometax connectedId first.',
-  '화면을 찾을 수 없습니다. 관리자에게 새 주소를 받으세요.': 'Display not found. Ask your admin for a new address.',
+  '화면을 찾을 수 없습니다. 관리자에게 새 주소를 받으세요.':
+      'Display not found. Ask your admin for a new address.',
   '화상회의 서버에 연결할 수 없습니다.': 'Can\'t connect to the video meeting server.',
   '화상회의 시도': 'video meeting attempts',
-  '화상회의 연결을 확인하지 못했습니다. 다시 참여해 주세요.': 'Couldn\'t confirm the video meeting connection. Please rejoin.',
-  '화상회의에 들어와 있을 때만 녹화할 수 있습니다.': 'You can only record while you\'re in the meeting.',
-  '확인 시간이 지났습니다. 처음부터 다시 로그인하세요.': 'Verification timed out. Sign in again from the start.',
+  '화상회의 연결을 확인하지 못했습니다. 다시 참여해 주세요.':
+      'Couldn\'t confirm the video meeting connection. Please rejoin.',
+  '화상회의에 들어와 있을 때만 녹화할 수 있습니다.':
+      'You can only record while you\'re in the meeting.',
+  '확인 시간이 지났습니다. 처음부터 다시 로그인하세요.':
+      'Verification timed out. Sign in again from the start.',
   '확인 코드': 'Verification code',
-  '확인 코드 모양이 아닙니다. 메일로 받은 6자리 숫자를 넣으세요.': 'That doesn\'t look like a verification code. Enter the 6-digit number from the email.',
-  '확인 코드가 없거나 만료되었습니다. 코드를 다시 받으세요.': 'The verification code is missing or has expired. Request a new code.',
-  '확인 코드를 너무 많이 틀렸습니다. 코드를 다시 받으세요.': 'Too many incorrect verification codes. Request a new code.',
+  '확인 코드 모양이 아닙니다. 메일로 받은 6자리 숫자를 넣으세요.':
+      'That doesn\'t look like a verification code. Enter the 6-digit number from the email.',
+  '확인 코드가 없거나 만료되었습니다. 코드를 다시 받으세요.':
+      'The verification code is missing or has expired. Request a new code.',
+  '확인 코드를 너무 많이 틀렸습니다. 코드를 다시 받으세요.':
+      'Too many incorrect verification codes. Request a new code.',
   '확인되지 않은 Google 메일 주소입니다.': 'This Google email address isn\'t verified.',
   '확인을 위해 팀 이름을 정확히 입력하세요.': 'To confirm, enter the team name exactly.',
   '확인할 공제 자료가 없습니다.': 'There is no deduction data to confirm.',
-  '확인했습니다. TangoTalk 앱으로 돌아가세요. 이 창은 닫아도 됩니다.': 'Verified. Go back to the TangoTalk app. You can close this window.',
+  '확인했습니다. TangoTalk 앱으로 돌아가세요. 이 창은 닫아도 됩니다.':
+      'Verified. Go back to the TangoTalk app. You can close this window.',
   '환수': 'Recovery',
-  '회계연도가 시작하는 달을 1~12로 정하세요.': 'Set the fiscal year start month between 1 and 12.',
-  '회사 계정 로그인 시간이 지났습니다. 처음부터 다시 하세요.': 'Company account sign-in timed out. Start over.',
+  '회계연도가 시작하는 달을 1~12로 정하세요.':
+      'Set the fiscal year start month between 1 and 12.',
+  '회사 계정 로그인 시간이 지났습니다. 처음부터 다시 하세요.':
+      'Company account sign-in timed out. Start over.',
   '회사 계정 로그인 시도': 'company account sign-in attempts',
   '회사 계정 로그인 확인': 'Confirm company account sign-in',
-  '회사 계정 로그인을 취소했거나 허용하지 않았습니다.': 'Company account sign-in was canceled or not allowed.',
+  '회사 계정 로그인을 취소했거나 허용하지 않았습니다.':
+      'Company account sign-in was canceled or not allowed.',
   '회사 계정 연결 확인 코드': 'Company account link verification code',
-  '회사 계정 확인에 실패했습니다(NameID 없음).': 'Company account verification failed (no NameID).',
-  '회사 계정(Google·Microsoft)으로 로그인하는 계정이라 이 앱의 비밀번호가 없습니다.': 'This account signs in with a company account (Google/Microsoft), so it has no password in this app.',
-  '회사 계정(Google·Microsoft)으로만 로그인하는 계정이라 비밀번호로 확인할 수 없습니다. 관리자에게 요청하세요.': 'This account signs in only with a company account (Google/Microsoft), so it can\'t be verified with a password. Ask an admin.',
-  '회사 계정(Google·Microsoft)을 이 이메일의 TangoTalk 계정에 연결하려고 보낸 메일입니다. 아래 코드를 앱에 넣으면 연결되고, 그다음부터 회사 계정으로 로그인할 수 있습니다.': 'This email was sent to link a company account (Google/Microsoft) to the TangoTalk account for this email address. Enter the code below in the app to link it; after that, you can sign in with your company account.',
-  '회사 계정(Google·Microsoft·SAML)으로 로그인하는 계정이라 이 앱의 비밀번호가 없습니다.': 'This account signs in with a company account (Google, Microsoft, SAML), so it has no password for this app.',
-  '회사 계정(SAML) 로그아웃 요청을 확인하지 못했습니다.': 'Couldn\'t verify the company account (SAML) logout request.',
-  '회사 계정(SAML) 로그인 주소를 만들지 못했습니다. 관리자에게 설정을 확인해 달라고 하세요.': 'Couldn\'t build the company account (SAML) sign-in URL. Ask your administrator to check the settings.',
-  '회사 계정에서 로그아웃되었습니다. 다시 로그인해 주세요.': 'You were signed out of your company account. Please sign in again.',
-  '회사 계정에서도 로그아웃했습니다. 이 창은 닫아도 됩니다.': 'Also signed out of your company account. You can close this window.',
+  '회사 계정 확인에 실패했습니다(NameID 없음).':
+      'Company account verification failed (no NameID).',
+  '회사 계정(Google·Microsoft)으로 로그인하는 계정이라 이 앱의 비밀번호가 없습니다.':
+      'This account signs in with a company account (Google/Microsoft), so it has no password in this app.',
+  '회사 계정(Google·Microsoft)으로만 로그인하는 계정이라 비밀번호로 확인할 수 없습니다. 관리자에게 요청하세요.':
+      'This account signs in only with a company account (Google/Microsoft), so it can\'t be verified with a password. Ask an admin.',
+  '회사 계정(Google·Microsoft)을 이 이메일의 TangoTalk 계정에 연결하려고 보낸 메일입니다. 아래 코드를 앱에 넣으면 연결되고, 그다음부터 회사 계정으로 로그인할 수 있습니다.':
+      'This email was sent to link a company account (Google/Microsoft) to the TangoTalk account for this email address. Enter the code below in the app to link it; after that, you can sign in with your company account.',
+  '회사 계정(Google·Microsoft·SAML)으로 로그인하는 계정이라 이 앱의 비밀번호가 없습니다.':
+      'This account signs in with a company account (Google, Microsoft, SAML), so it has no password for this app.',
+  '회사 계정(SAML) 로그아웃 요청을 확인하지 못했습니다.':
+      'Couldn\'t verify the company account (SAML) logout request.',
+  '회사 계정(SAML) 로그인 주소를 만들지 못했습니다. 관리자에게 설정을 확인해 달라고 하세요.':
+      'Couldn\'t build the company account (SAML) sign-in URL. Ask your administrator to check the settings.',
+  '회사 계정에서 로그아웃되었습니다. 다시 로그인해 주세요.':
+      'You were signed out of your company account. Please sign in again.',
+  '회사 계정에서도 로그아웃했습니다. 이 창은 닫아도 됩니다.':
+      'Also signed out of your company account. You can close this window.',
   '회사 계정으로 다시 로그인해 주세요.': 'Please sign in again with your company account.',
-  '회사 계정으로만 로그인하는 계정이라 마지막 연결은 끊을 수 없습니다.': 'This account signs in only with a company account, so its last link can\'t be removed.',
-  '회사 계정은 확인했지만 이 서버에 계정이 없습니다. 관리자에게 계정을 만들어 달라고 하세요.': 'Your company account was verified, but you don\'t have an account on this server. Ask an admin to create one for you.',
-  '회사 계정을 쓸 수 없습니다. 다시 로그인하거나 관리자에게 문의하세요.': 'Your company account can\'t be used. Sign in again or contact an admin.',
+  '회사 계정으로만 로그인하는 계정이라 마지막 연결은 끊을 수 없습니다.':
+      'This account signs in only with a company account, so its last link can\'t be removed.',
+  '회사 계정은 확인했지만 이 서버에 계정이 없습니다. 관리자에게 계정을 만들어 달라고 하세요.':
+      'Your company account was verified, but you don\'t have an account on this server. Ask an admin to create one for you.',
+  '회사 계정을 쓸 수 없습니다. 다시 로그인하거나 관리자에게 문의하세요.':
+      'Your company account can\'t be used. Sign in again or contact an admin.',
   '회사 계정을 연결했습니다': 'Company account linked',
   '회사 계정을 확인했습니다': 'Company account verified',
   '회사 계정이 응답을 보내지 않았습니다.': 'The company account sent no response.',
   '회사 계정이 코드를 보내지 않았습니다.': 'The company account didn\'t send a code.',
   '회사 도메인 값이 올바르지 않습니다.': 'Invalid company domain.',
-  '회사 도메인은 company.com처럼 넣으세요(여럿이면 쉼표로).': 'Enter company domains like company.com (separate multiple domains with commas).',
-  '회사 디렉터리(LDAP) 서버에 연결하지 못했습니다. 잠시 뒤 다시 시도하세요.': 'Couldn\'t connect to the company directory (LDAP) server. Try again in a moment.',
+  '회사 도메인은 company.com처럼 넣으세요(여럿이면 쉼표로).':
+      'Enter company domains like company.com (separate multiple domains with commas).',
+  '회사 디렉터리(LDAP) 서버에 연결하지 못했습니다. 잠시 뒤 다시 시도하세요.':
+      'Couldn\'t connect to the company directory (LDAP) server. Try again in a moment.',
   '회사 메일함': 'Company mailbox',
   '회사 메일함 복사 중': 'Copying company mailboxes',
   '회사 메일함에 없는 폴더입니다.': 'That folder doesn\'t exist in the company mailbox.',
@@ -2159,23 +2706,32 @@ const Map<String, String> serverEn = {
   '회사 메일함은 연결을 끊을 수 없습니다.': 'The company mailbox can\'t be disconnected.',
   '회사 이름': 'Company name',
   '회사 이름은 60자까지입니다.': 'The company name can be up to 60 characters.',
-  '회사(Windows 도메인) 계정으로 로그인하는 계정입니다. 비밀번호는 회사 계정에서 바꾸세요.': 'This account signs in with a company (Windows domain) account. Change your password in the company account.',
+  '회사(Windows 도메인) 계정으로 로그인하는 계정입니다. 비밀번호는 회사 계정에서 바꾸세요.':
+      'This account signs in with a company (Windows domain) account. Change your password in the company account.',
   '회식': 'Team dinner',
-  '회원가입을 마치려면 아래 확인 코드를 가입 화면에 넣으세요.': 'To finish signing up, enter the verification code below on the sign-up screen.',
-  '회의록 본문만 쓰고 앞뒤 인사말은 쓰지 마세요.': 'Write only the minutes, with no greeting or closing.',
-  '회의록용 녹음을 시작하지 못했습니다(영상 녹화는 계속합니다).': 'Couldn\'t start the audio recording for minutes (video recording continues).',
-  '회의록은 녹화를 시작한 사람이나 토픽 관리자가, 녹음이 남아 있을 때만 다시 만들 수 있습니다.': 'Minutes can be recreated only by the person who started the recording or a topic admin, and only while the audio is still available.',
-  '회의록을 이미 만들고 있거나 다시 만들 수 없는 녹화입니다.': 'The minutes are already being created, or can\'t be recreated for this recording.',
+  '회원가입을 마치려면 아래 확인 코드를 가입 화면에 넣으세요.':
+      'To finish signing up, enter the verification code below on the sign-up screen.',
+  '회의록 본문만 쓰고 앞뒤 인사말은 쓰지 마세요.':
+      'Write only the minutes, with no greeting or closing.',
+  '회의록용 녹음을 시작하지 못했습니다(영상 녹화는 계속합니다).':
+      'Couldn\'t start the audio recording for minutes (video recording continues).',
+  '회의록은 녹화를 시작한 사람이나 토픽 관리자가, 녹음이 남아 있을 때만 다시 만들 수 있습니다.':
+      'Minutes can be recreated only by the person who started the recording or a topic admin, and only while the audio is still available.',
+  '회의록을 이미 만들고 있거나 다시 만들 수 없는 녹화입니다.':
+      'The minutes are already being created, or can\'t be recreated for this recording.',
   '회의실·자원 예약 거절': 'Room/resource booking rejected',
   '회의실·자원 예약 승인': 'Room/resource booking approved',
   '회의실·자원 예약 승인 요청': 'Room/resource booking approval request',
   '회의실·자원 예약 취소': 'Room & resource booking canceled',
-  '회의실·자원을 잡은 일정은 반복할 수 없습니다. 먼저 회의실·자원을 빼세요.': 'Events with booked rooms or resources can\'t repeat. Remove the rooms or resources first.',
+  '회의실·자원을 잡은 일정은 반복할 수 없습니다. 먼저 회의실·자원을 빼세요.':
+      'Events with booked rooms or resources can\'t repeat. Remove the rooms or resources first.',
   '회의실·자원을 찾을 수 없습니다.': 'Room or resource not found.',
   '회의실·자원을 확인하세요.': 'Check the room or resource.',
   '후결 요청': 'Post-approval request',
-  '후결은 결재선 맨 뒤에만 둘 수 있습니다.': 'Post-approval can only be at the end of the approval line.',
-  '후결은 확인만 할 수 있습니다. 의견이 있으면 확인하며 남기세요.': 'Post-approval can only be confirmed. Leave any comment when confirming.',
+  '후결은 결재선 맨 뒤에만 둘 수 있습니다.':
+      'Post-approval can only be at the end of the approval line.',
+  '후결은 확인만 할 수 있습니다. 의견이 있으면 확인하며 남기세요.':
+      'Post-approval can only be confirmed. Leave any comment when confirming.',
   '휴가 날짜를 확인하세요.': 'Check the leave dates.',
   '휴가 종류 목록을 보내세요.': 'Send the list of leave types.',
   '휴가 종류를 고르세요.': 'Choose a leave type.',
@@ -2199,22 +2755,32 @@ const Map<String, String> serverTemplatesEn = {
   ' · {0} 직책': ' · {0} position',
   ' — IdP 상태 {0}': ' — IdP status {0}',
   ' 부여, {0}일, {1}명)': ', {0} days, {1} people)',
-  '"{0}" {1}번째 줄의 "{2}" 날짜를 확인하세요.': 'Check the date in "{2}" on row {1} of "{0}".',
-  '"{0}" {1}번째 줄의 "{2}"에 숫자를 넣으세요.': 'Enter a number in "{2}" on row {1} of "{0}".',
-  '"{0}" {1}번째 줄의 "{2}"에 원 단위 금액을 넣으세요.': 'Enter an amount in won in "{2}" on row {1} of "{0}".',
-  '"{0}" {1}번째 줄의 "{2}"은(는) {3}자 이내로 넣으세요.': '"{2}" on row {1} of "{0}" must be {3} characters or fewer.',
+  '"{0}" {1}번째 줄의 "{2}" 날짜를 확인하세요.':
+      'Check the date in "{2}" on row {1} of "{0}".',
+  '"{0}" {1}번째 줄의 "{2}"에 숫자를 넣으세요.':
+      'Enter a number in "{2}" on row {1} of "{0}".',
+  '"{0}" {1}번째 줄의 "{2}"에 원 단위 금액을 넣으세요.':
+      'Enter an amount in won in "{2}" on row {1} of "{0}".',
+  '"{0}" {1}번째 줄의 "{2}"은(는) {3}자 이내로 넣으세요.':
+      '"{2}" on row {1} of "{0}" must be {3} characters or fewer.',
   '"{0}" {1}번째 줄의 품명을 넣으세요.': 'Enter the item name on line {1} of "{0}".',
-  '"{0}" 값은 2026-10-01 형식의 날짜로 입력하세요.': 'Enter "{0}" as a date like 2026-10-01.',
+  '"{0}" 값은 2026-10-01 형식의 날짜로 입력하세요.':
+      'Enter "{0}" as a date like 2026-10-01.',
   '"{0}" 값은 숫자로 입력하세요.': 'Enter a number for "{0}".',
   '"{0}" 날짜를 확인하세요.': 'Check the "{0}" date.',
-  '"{0}" 양식이 둘 있습니다. 이름을 다르게 하세요.': 'There are two "{0}" layouts. Use different names.',
-  '"{0}" 칸의 설명은 {1}자 이내로 넣으세요.': 'The description of the "{0}" field must be {1} characters or fewer.',
+  '"{0}" 양식이 둘 있습니다. 이름을 다르게 하세요.':
+      'There are two "{0}" layouts. Use different names.',
+  '"{0}" 칸의 설명은 {1}자 이내로 넣으세요.':
+      'The description of the "{0}" field must be {1} characters or fewer.',
   '"{0}" 칸의 종류를 고르세요.': 'Choose a type for the "{0}" field.',
-  '"{0}" 표에 같은 이름의 열이 두 개 있습니다: {1}': 'The "{0}" table has two columns with the same name: {1}',
-  '"{0}" 표의 {1}번째 열 이름을 넣으세요.': 'Enter a name for column {1} of the "{0}" table.',
+  '"{0}" 표에 같은 이름의 열이 두 개 있습니다: {1}':
+      'The "{0}" table has two columns with the same name: {1}',
+  '"{0}" 표의 {1}번째 열 이름을 넣으세요.':
+      'Enter a name for column {1} of the "{0}" table.',
   '"{0}" 표의 열을 하나 이상 만드세요.': 'Create at least one column for the "{0}" table.',
   '"{0}" 필드에 선택지를 하나 이상 만드세요.': 'Add at least one option to the "{0}" field.',
-  '"{0}"·"{1}" 시트가 없습니다. 내보낸 엑셀을 고쳐서 가져오세요.': 'The "{0}" and "{1}" sheets are missing. Edit an exported Excel file and import it.',
+  '"{0}"·"{1}" 시트가 없습니다. 내보낸 엑셀을 고쳐서 가져오세요.':
+      'The "{0}" and "{1}" sheets are missing. Edit an exported Excel file and import it.',
   '"{0}"에 고를 수 없는 사람이 있습니다.': '"{0}" has someone who can\'t be chosen.',
   '"{0}"에 숫자를 넣으세요.': 'Enter a number in "{0}".',
   '"{0}"에 품목을 하나 이상 넣으세요.': 'Add at least one item to "{0}".',
@@ -2223,7 +2789,8 @@ const Map<String, String> serverTemplatesEn = {
   '"{0}"에는 한 사람만 고르세요.': 'Choose only one person for "{0}".',
   '"{0}"에서 하나를 고르세요.': 'Choose one option for "{0}".',
   '"{0}"은(는) 0~100 사이의 숫자여야 합니다.': '"{0}" must be a number between 0 and 100.',
-  '"{0}"은(는) 500자 이내의 글자여야 합니다.': '"{0}" must be text of 500 characters or fewer.',
+  '"{0}"은(는) 500자 이내의 글자여야 합니다.':
+      '"{0}" must be text of 500 characters or fewer.',
   '"{0}"은(는) {1}일 안으로 고르세요.': 'Choose "{0}" within {1} days.',
   '"{0}"은(는) {1}자 이내로 넣으세요.': '"{0}" must be {1} characters or fewer.',
   '"{0}"은(는) {1}줄까지 넣을 수 있습니다.': '"{0}" can have up to {1} rows.',
@@ -2236,9 +2803,11 @@ const Map<String, String> serverTemplatesEn = {
   '"{0}"의 고를 거리를 둘 이상 넣으세요.': 'Add at least two options to "{0}".',
   '"{0}"의 금액이 너무 큽니다.': 'The amount in "{0}" is too large.',
   '"{0}"의 끝 날짜가 시작보다 빠릅니다.': 'The end date of "{0}" is before its start date.',
-  '"{0}"의 단가를 원 단위 숫자로 넣으세요.': 'Enter the unit price of "{0}" as a number in won.',
+  '"{0}"의 단가를 원 단위 숫자로 넣으세요.':
+      'Enter the unit price of "{0}" as a number in won.',
   '"{0}"의 선택지에 없는 값입니다.': 'Not one of the options for "{0}".',
-  '"{0}"의 수량을 1 이상 정수로 넣으세요.': 'Enter the quantity of "{0}" as a whole number of 1 or more.',
+  '"{0}"의 수량을 1 이상 정수로 넣으세요.':
+      'Enter the quantity of "{0}" as a whole number of 1 or more.',
   '"{0}"의 시작과 끝이 같습니다.': '"{0}" has the same start and end.',
   '"{0}"의 합계가 너무 큽니다.': 'The total of "{0}" is too large.',
   '"{0}"이(가) 너무 큽니다.': '"{0}" is too large.',
@@ -2248,59 +2817,94 @@ const Map<String, String> serverTemplatesEn = {
   '\'{0}\' 열이 두 번 있습니다.': 'The \'{0}\' column appears twice.',
   '\'{0}\'의 금액을 원 단위 숫자로 넣으세요.': 'Enter the amount of \'{0}\' in whole won.',
   '\'{0}\'이(가) 이미 있습니다.': '\'{0}\' already exists.',
-  '\'{0}\'이(가) 이미 있습니다. 새 판으로 올릴 수 있습니다.': '\'{0}\' already exists. You can upload it as a new version.',
+  '\'{0}\'이(가) 이미 있습니다. 새 판으로 올릴 수 있습니다.':
+      '\'{0}\' already exists. You can upload it as a new version.',
   '(PC·안드로이드 앱은 지금처럼 포트 {0})': '(PC and Android apps keep using port {0})',
   '(외부 80 → 이 PC {0})로 확인합니다.': '(external 80 → this PC {0}).',
-  '/{0} 명령을 처리하는 서버가 {1}초 안에 답하지 않았습니다.': 'The server handling /{0} didn\'t respond within {1} seconds.',
-  '/{0} 명령을 처리하는 서버에 연결하지 못했습니다.': 'Couldn\'t connect to the server handling /{0}.',
+  '/{0} 명령을 처리하는 서버가 {1}초 안에 답하지 않았습니다.':
+      'The server handling /{0} didn\'t respond within {1} seconds.',
+  '/{0} 명령을 처리하는 서버에 연결하지 못했습니다.':
+      'Couldn\'t connect to the server handling /{0}.',
   '/{0} 명령이 없습니다.': 'The /{0} command doesn\'t exist.',
   '/{0} 명령이 이미 있습니다.': 'The /{0} command already exists.',
-  '1일 평균임금 {0} × 30일 × {1}일 ÷ 365': 'Daily average wage {0} × 30 days × {1} days ÷ 365',
+  '1일 평균임금 {0} × 30일 × {1}일 ÷ 365':
+      'Daily average wage {0} × 30 days × {1} days ÷ 365',
   '2단계 인증: {0}': 'Two-step verification: {0}',
-  '4대보험 {0} 신고 자료 내려받기 ({1}명, {2}{3})': 'Downloaded 4 social insurance {0} filing data ({1} people, {2}{3})',
+  '4대보험 {0} 신고 자료 내려받기 ({1}명, {2}{3})':
+      'Downloaded 4 social insurance {0} filing data ({1} people, {2}{3})',
   '4대보험-{0}-{1}': '4-insurance-{0}-{1}',
   '8~20세 자녀 {0}명': 'Children aged 8–20: {0}',
   'ACME_EMAIL 형식이 올바르지 않습니다: {0}': 'Invalid ACME_EMAIL format: {0}',
-  'ACME_HTTP_PORT({0})가 다른 포트와 겹칩니다 — 인증서 확인용 HTTP 포트 없이(TLS-ALPN-01만) 진행합니다.': 'ACME_HTTP_PORT ({0}) conflicts with another port — continuing without an HTTP port for certificate validation (TLS-ALPN-01 only).',
-  'ACME_STAGING 값을 알 수 없습니다({0}) — 1(시험용) 또는 0(정식)만 씁니다. 정식 인증서로 진행합니다.': 'Unknown ACME_STAGING value ({0}) — only 1 (staging) or 0 (production) is allowed. Continuing with a production certificate.',
+  'ACME_HTTP_PORT({0})가 다른 포트와 겹칩니다 — 인증서 확인용 HTTP 포트 없이(TLS-ALPN-01만) 진행합니다.':
+      'ACME_HTTP_PORT ({0}) conflicts with another port — continuing without an HTTP port for certificate validation (TLS-ALPN-01 only).',
+  'ACME_STAGING 값을 알 수 없습니다({0}) — 1(시험용) 또는 0(정식)만 씁니다. 정식 인증서로 진행합니다.':
+      'Unknown ACME_STAGING value ({0}) — only 1 (staging) or 0 (production) is allowed. Continuing with a production certificate.',
   'API 토큰은 {0}개까지 만들 수 있습니다.': 'You can create up to {0} API tokens.',
-  'CODEF 응답 오류({0})입니다. 잠시 뒤 다시 하세요.': 'CODEF response error ({0}). Try again shortly.',
+  'CODEF 응답 오류({0})입니다. 잠시 뒤 다시 하세요.':
+      'CODEF response error ({0}). Try again shortly.',
   'DKIM 서명 {0}(선택자 {1})': 'DKIM signing {0} (selector {1})',
-  'DuckDNS 도메인 이름이 올바르지 않습니다: {0} (예: tangotalk 또는 tangotalk.duckdns.org)': 'Invalid DuckDNS domain name: {0} (e.g. tangotalk or tangotalk.duckdns.org)',
+  'DuckDNS 도메인 이름이 올바르지 않습니다: {0} (예: tangotalk 또는 tangotalk.duckdns.org)':
+      'Invalid DuckDNS domain name: {0} (e.g. tangotalk or tangotalk.duckdns.org)',
   'DuckDNS가 오류로 답했습니다(HTTP {0}).': 'DuckDNS returned an error (HTTP {0}).',
   'DuckDNS에 연결하지 못했습니다({0}).': 'Couldn\'t connect to DuckDNS ({0}).',
-  'EXTERNAL_ADDRESS 형식이 올바르지 않습니다(도메인 또는 IPv4만 가능): {0}': 'Invalid EXTERNAL_ADDRESS format (domain or IPv4 only): {0}',
-  'EXTERNAL_ADDRESS의 포트가 올바르지 않습니다: {0}': 'Invalid port in EXTERNAL_ADDRESS: {0}',
-  'HTTP.sys 예약 등을 확인하세요(관리자 명령 프롬프트: netstat -ano | findstr :{0}). 그 프로그램을 끄거나 .env의 {1}를 ': 'HTTP.sys reservations, etc. (admin command prompt: netstat -ano | findstr :{0}). Close that program or change {1} in .env ',
+  'EXTERNAL_ADDRESS 형식이 올바르지 않습니다(도메인 또는 IPv4만 가능): {0}':
+      'Invalid EXTERNAL_ADDRESS format (domain or IPv4 only): {0}',
+  'EXTERNAL_ADDRESS의 포트가 올바르지 않습니다: {0}':
+      'Invalid port in EXTERNAL_ADDRESS: {0}',
+  'HTTP.sys 예약 등을 확인하세요(관리자 명령 프롬프트: netstat -ano | findstr :{0}). 그 프로그램을 끄거나 .env의 {1}를 ':
+      'HTTP.sys reservations, etc. (admin command prompt: netstat -ano | findstr :{0}). Close that program or change {1} in .env ',
   'LDAP 서버에 연결하지 못했습니다: {0}': 'Couldn\'t connect to the LDAP server: {0}',
-  'Let\'s Encrypt 계정 키({0})가 깨져 있는데 옮기지 못했습니다({1}).': 'The Let\'s Encrypt account key ({0}) is corrupted but couldn\'t be moved ({1}).',
-  'Let\'s Encrypt 계정 키({0})를 읽지 못했습니다({1}) — 파일 권한을 확인하세요.': 'Couldn\'t read the Let\'s Encrypt account key ({0}) ({1}) — check the file permissions.',
-  'Let\'s Encrypt 계정 키를 {0}에 저장하지 못했습니다({1}) — 폴더 권한을 확인하세요.': 'Couldn\'t save the Let\'s Encrypt account key to {0} ({1}) — check the folder permissions.',
-  'Let\'s Encrypt 발급 한도에 걸렸습니다(rateLimited) — 이 도메인(또는 같은 상위 도메인)으로 최근 너무 많이 요청했습니다. {0} ': 'Hit the Let\'s Encrypt issuance limit (rateLimited) — too many recent requests for this domain (or the same parent domain). {0} ',
-  'Let\'s Encrypt 서버({0})에 연결하지 못했습니다 — 이 PC의 인터넷 연결·방화벽·프록시를 확인하세요. 나중에 자동으로 다시 시도합니다.': 'Couldn\'t connect to the Let\'s Encrypt server ({0}) — check this PC\'s internet connection, firewall, and proxy. It will retry automatically later.',
-  'Let\'s Encrypt가 ACME_EMAIL({0})을 받지 않았습니다 — 비우거나 올바른 주소로 고치세요.': 'Let\'s Encrypt rejected ACME_EMAIL ({0}) — leave it empty or correct the address.',
-  'Let\'s Encrypt가 {0} 이름으로는 인증서를 발급하지 않습니다(정책상 거부) — 다른 도메인을 WEB_DOMAIN으로 쓰세요.': 'Let\'s Encrypt won\'t issue certificates for the name {0} (rejected by policy) — use a different domain for WEB_DOMAIN.',
-  'Let\'s Encrypt가 {0} 확인을 내주지 않았습니다({1}).': 'Let\'s Encrypt didn\'t provide a challenge for {0} ({1}).',
-  'Let\'s Encrypt가 {0}을(를) DNS에서 찾지 못했습니다 — 공유기의 DDNS 등록 상태(이름·공인 IP)를 확인하세요.': 'Let\'s Encrypt couldn\'t find {0} in DNS — check the router\'s DDNS registration (name and public IP).',
-  'Let\'s Encrypt가 요청을 거절했습니다({0}){1}': 'Let\'s Encrypt rejected the request ({0}){1}',
+  'Let\'s Encrypt 계정 키({0})가 깨져 있는데 옮기지 못했습니다({1}).':
+      'The Let\'s Encrypt account key ({0}) is corrupted but couldn\'t be moved ({1}).',
+  'Let\'s Encrypt 계정 키({0})를 읽지 못했습니다({1}) — 파일 권한을 확인하세요.':
+      'Couldn\'t read the Let\'s Encrypt account key ({0}) ({1}) — check the file permissions.',
+  'Let\'s Encrypt 계정 키를 {0}에 저장하지 못했습니다({1}) — 폴더 권한을 확인하세요.':
+      'Couldn\'t save the Let\'s Encrypt account key to {0} ({1}) — check the folder permissions.',
+  'Let\'s Encrypt 발급 한도에 걸렸습니다(rateLimited) — 이 도메인(또는 같은 상위 도메인)으로 최근 너무 많이 요청했습니다. {0} ':
+      'Hit the Let\'s Encrypt issuance limit (rateLimited) — too many recent requests for this domain (or the same parent domain). {0} ',
+  'Let\'s Encrypt 서버({0})에 연결하지 못했습니다 — 이 PC의 인터넷 연결·방화벽·프록시를 확인하세요. 나중에 자동으로 다시 시도합니다.':
+      'Couldn\'t connect to the Let\'s Encrypt server ({0}) — check this PC\'s internet connection, firewall, and proxy. It will retry automatically later.',
+  'Let\'s Encrypt가 ACME_EMAIL({0})을 받지 않았습니다 — 비우거나 올바른 주소로 고치세요.':
+      'Let\'s Encrypt rejected ACME_EMAIL ({0}) — leave it empty or correct the address.',
+  'Let\'s Encrypt가 {0} 이름으로는 인증서를 발급하지 않습니다(정책상 거부) — 다른 도메인을 WEB_DOMAIN으로 쓰세요.':
+      'Let\'s Encrypt won\'t issue certificates for the name {0} (rejected by policy) — use a different domain for WEB_DOMAIN.',
+  'Let\'s Encrypt가 {0} 확인을 내주지 않았습니다({1}).':
+      'Let\'s Encrypt didn\'t provide a challenge for {0} ({1}).',
+  'Let\'s Encrypt가 {0}을(를) DNS에서 찾지 못했습니다 — 공유기의 DDNS 등록 상태(이름·공인 IP)를 확인하세요.':
+      'Let\'s Encrypt couldn\'t find {0} in DNS — check the router\'s DDNS registration (name and public IP).',
+  'Let\'s Encrypt가 요청을 거절했습니다({0}){1}':
+      'Let\'s Encrypt rejected the request ({0}){1}',
   'WEB_DOMAIN 형식이 올바르지 않습니다: {0} — {1}': 'Invalid WEB_DOMAIN format: {0} — {1}',
-  'WEB_DOMAIN에는 IP 주소를 쓸 수 없습니다: {0} — {1}': 'WEB_DOMAIN can\'t be an IP address: {0} — {1}',
-  'WEB_DOMAIN에는 와일드카드(*)를 쓸 수 없습니다: {0} — {1}': 'WEB_DOMAIN can\'t contain a wildcard (*): {0} — {1}',
-  'WEB_HTTPS_PORT({0})가 메인 포트({1})·페어링 포트({2})와 겹칩니다. 다른 번호(기본 443)를 쓰세요.': 'WEB_HTTPS_PORT ({0}) conflicts with the main port ({1}) or pairing port ({2}). Use a different number (default 443).',
-  '[backup] {0} 미러 키가 바뀌어 {1} 백업을 새로 만듭니다.': '[backup] The {0} mirror key changed, so the {1} backup is being recreated.',
+  'WEB_DOMAIN에는 IP 주소를 쓸 수 없습니다: {0} — {1}':
+      'WEB_DOMAIN can\'t be an IP address: {0} — {1}',
+  'WEB_DOMAIN에는 와일드카드(*)를 쓸 수 없습니다: {0} — {1}':
+      'WEB_DOMAIN can\'t contain a wildcard (*): {0} — {1}',
+  'WEB_HTTPS_PORT({0})가 메인 포트({1})·페어링 포트({2})와 겹칩니다. 다른 번호(기본 443)를 쓰세요.':
+      'WEB_HTTPS_PORT ({0}) conflicts with the main port ({1}) or pairing port ({2}). Use a different number (default 443).',
+  '[backup] {0} 미러 키가 바뀌어 {1} 백업을 새로 만듭니다.':
+      '[backup] The {0} mirror key changed, so the {1} backup is being recreated.',
   '[backup] 예약 백업 실패: {0}': '[backup] Scheduled backup failed: {0}',
   '[ddns] {0} → {1} 갱신': '[ddns] Updated {0} → {1}',
   '[ddns] 갱신 실패: {0}': '[ddns] Update failed: {0}',
-  '[projects] 공개 프로젝트 생성 알림이 시간당 상한을 넘어 건너뜀 (팀 {0}, 만든 사람 {1})': '[projects] Skipped public project creation notification: hourly limit exceeded (team {0}, creator {1})',
-  '[web-tls]   Let\'s Encrypt 응답: {0}': '[web-tls]   Let\'s Encrypt response: {0}',
-  '[web-tls]   http-01 확인 응답 준비 — Let\'s Encrypt가 http://{0}/.well-known/acme-challenge/…': '[web-tls]   Preparing http-01 challenge response — Let\'s Encrypt will check http://{0}/.well-known/acme-challenge/…',
-  '[web-tls]   tls-alpn-01 확인 응답 준비 — Let\'s Encrypt가 {0}:443(외부 443 → 이 PC {1})으로 확인합니다.': '[web-tls]   Preparing tls-alpn-01 challenge response — Let\'s Encrypt will check {0}:443 (external 443 → this PC {1}).',
-  '[web-tls]   → {0} 방식으로 바로 다시 시도합니다.': '[web-tls]   → Retrying right away with {0}.',
-  '[web-tls] Let\'s Encrypt 계정 키가 깨져 있어 {0}로 옮기고 새로 만듭니다.': '[web-tls] The Let\'s Encrypt account key is corrupted; moving it to {0} and creating a new one.',
-  '[web-tls] Let\'s Encrypt 계정 키를 새로 만들었습니다({0}) — 이 파일은 공유하거나 지우지 마세요.': '[web-tls] Created a new Let\'s Encrypt account key ({0}) — don\'t share or delete this file.',
+  '[projects] 공개 프로젝트 생성 알림이 시간당 상한을 넘어 건너뜀 (팀 {0}, 만든 사람 {1})':
+      '[projects] Skipped public project creation notification: hourly limit exceeded (team {0}, creator {1})',
+  '[web-tls]   Let\'s Encrypt 응답: {0}':
+      '[web-tls]   Let\'s Encrypt response: {0}',
+  '[web-tls]   http-01 확인 응답 준비 — Let\'s Encrypt가 http://{0}/.well-known/acme-challenge/…':
+      '[web-tls]   Preparing http-01 challenge response — Let\'s Encrypt will check http://{0}/.well-known/acme-challenge/…',
+  '[web-tls]   tls-alpn-01 확인 응답 준비 — Let\'s Encrypt가 {0}:443(외부 443 → 이 PC {1})으로 확인합니다.':
+      '[web-tls]   Preparing tls-alpn-01 challenge response — Let\'s Encrypt will check {0}:443 (external 443 → this PC {1}).',
+  '[web-tls]   → {0} 방식으로 바로 다시 시도합니다.':
+      '[web-tls]   → Retrying right away with {0}.',
+  '[web-tls] Let\'s Encrypt 계정 키가 깨져 있어 {0}로 옮기고 새로 만듭니다.':
+      '[web-tls] The Let\'s Encrypt account key is corrupted; moving it to {0} and creating a new one.',
+  '[web-tls] Let\'s Encrypt 계정 키를 새로 만들었습니다({0}) — 이 파일은 공유하거나 지우지 마세요.':
+      '[web-tls] Created a new Let\'s Encrypt account key ({0}) — don\'t share or delete this file.',
   '[web-tls] {0} 이메일 없이 다시 시도합니다.': '[web-tls] {0} Retrying without an email.',
-  '[{0}] Let\'s Encrypt가 {1}(외부 {2} 포트)에서 받은 확인 응답이 이 서버의 것이 아닙니다 — DDNS가 이 사무실의 ': '[{0}] The challenge response Let\'s Encrypt received from {1} (external port {2}) didn\'t come from this server — check that DDNS points to this office\'s ',
-  '[{0}] Let\'s Encrypt가 {1}의 외부 {2} 포트로 접속해 확인하지 못했습니다 — {3}.{4}': '[{0}] Let\'s Encrypt couldn\'t connect to external port {2} of {1} to validate — {3}.{4}',
+  '[{0}] Let\'s Encrypt가 {1}(외부 {2} 포트)에서 받은 확인 응답이 이 서버의 것이 아닙니다 — DDNS가 이 사무실의 ':
+      '[{0}] The challenge response Let\'s Encrypt received from {1} (external port {2}) didn\'t come from this server — check that DDNS points to this office\'s ',
+  '[{0}] Let\'s Encrypt가 {1}의 외부 {2} 포트로 접속해 확인하지 못했습니다 — {3}.{4}':
+      '[{0}] Let\'s Encrypt couldn\'t connect to external port {2} of {1} to validate — {3}.{4}',
   '[{0}] {1} {2}\n{3}\n(실행한 사람: {4})': '[{0}] {1} {2}\n{3}\n(run by: {4})',
   '[게시글] {0}\n{1}': '[Post] {0}\n{1}',
   '[사진: {0}]': '[Photo: {0}]',
@@ -2309,27 +2913,39 @@ const Map<String, String> serverTemplatesEn = {
   '[필독] {0}': '[Must-read] {0}',
   '[할 일] {0}': '[To-do] {0}',
   'boardLevel은 {0} 중 하나여야 합니다.': 'boardLevel must be one of {0}.',
-  'excludedportrange protocol=tcp). .env의 {0}를 다른 번호로 바꾸세요. {1}': 'excludedportrange protocol=tcp). Change {0} in .env to a different number. {1}',
+  'excludedportrange protocol=tcp). .env의 {0}를 다른 번호로 바꾸세요. {1}':
+      'excludedportrange protocol=tcp). Change {0} in .env to a different number. {1}',
   'kind는 {0} 중 하나여야 합니다.': 'kind must be one of {0}.',
   'participated는 {0} 중 하나여야 합니다.': 'participated must be one of {0}.',
   'scope는 {0} 중 하나여야 합니다.': 'scope must be one of {0}.',
   'sort는 {0} 중 하나여야 합니다.': 'sort must be one of {0}.',
   'status는 {0} 중 하나여야 합니다.': 'status must be one of {0}.',
-  'topicCreationPolicy는 {0} 중 하나여야 합니다.': 'topicCreationPolicy must be one of {0}.',
+  'topicCreationPolicy는 {0} 중 하나여야 합니다.':
+      'topicCreationPolicy must be one of {0}.',
   'type은 {0} 중 하나여야 합니다.': 'type must be one of {0}.',
   '{0}\n…(이후 생략)': '{0}\n…(truncated)',
-  '{0}\n칸: merchant, bizNo, date, time, total, vat, cardLast4, approvalNo, items': '{0}\nFields: merchant, bizNo, date, time, total, vat, cardLast4, approvalNo, items',
-  '{0}     (ACME_HTTP_PORT=0 — 80 포트는 쓰지 않고 TLS-ALPN-01(외부 443)로만 인증서를 확인합니다)': '{0}     (ACME_HTTP_PORT=0 — port 80 isn\'t used; certificates are validated only via TLS-ALPN-01 (external 443))',
-  '{0}     외부 443 → 이 PC의 443 — 웹 앱 접속 + 인증서 확인(TLS-ALPN-01)': '{0}     External 443 → this PC\'s 443 — web app access + certificate validation (TLS-ALPN-01)',
-  '{0}     외부 443 → 이 PC의 {1} — 인증서 확인(TLS-ALPN-01 — Let\'s Encrypt는 443으로만 확인합니다. HTTP-01이 되면 없어도 됩니다)': '{0}     External 443 → this PC\'s {1} — certificate validation (TLS-ALPN-01 — Let\'s Encrypt validates only on 443; not needed if HTTP-01 works)',
-  '{0}     외부 80 → 이 PC의 {1} — 인증서 확인(HTTP-01) + http:// 주소를 https로 이동': '{0}     External 80 → this PC\'s {1} — certificate validation (HTTP-01) + redirect http:// to https',
-  '{0}     외부 {1} → 이 PC의 {2} — 웹 앱 접속': '{0}     External {1} → this PC\'s {2} — web app access',
-  '{0}   ACME_STAGING=1 — 시험용 인증서(브라우저가 신뢰하지 않음)로 포트포워딩만 확인하는 중입니다. 확인되면 .env에서 지우고 서버를 다시 시작하세요.': '{0}   ACME_STAGING=1 — checking port forwarding only, with a staging certificate (not trusted by browsers). Once confirmed, remove it from .env and restart the server.',
-  '{0}   HSTS 머리글은 보내지 않습니다 — WEB_DOMAIN이 외부 접속 주소(EXTERNAL_ADDRESS)와 같은 이름이라, 보내면 브라우저가 이 ': '{0}   Not sending the HSTS header — WEB_DOMAIN has the same name as the external address (EXTERNAL_ADDRESS), so if it were sent, browsers would also switch this ',
+  '{0}\n칸: merchant, bizNo, date, time, total, vat, cardLast4, approvalNo, items':
+      '{0}\nFields: merchant, bizNo, date, time, total, vat, cardLast4, approvalNo, items',
+  '{0}     (ACME_HTTP_PORT=0 — 80 포트는 쓰지 않고 TLS-ALPN-01(외부 443)로만 인증서를 확인합니다)':
+      '{0}     (ACME_HTTP_PORT=0 — port 80 isn\'t used; certificates are validated only via TLS-ALPN-01 (external 443))',
+  '{0}     외부 443 → 이 PC의 443 — 웹 앱 접속 + 인증서 확인(TLS-ALPN-01)':
+      '{0}     External 443 → this PC\'s 443 — web app access + certificate validation (TLS-ALPN-01)',
+  '{0}     외부 443 → 이 PC의 {1} — 인증서 확인(TLS-ALPN-01 — Let\'s Encrypt는 443으로만 확인합니다. HTTP-01이 되면 없어도 됩니다)':
+      '{0}     External 443 → this PC\'s {1} — certificate validation (TLS-ALPN-01 — Let\'s Encrypt validates only on 443; not needed if HTTP-01 works)',
+  '{0}     외부 80 → 이 PC의 {1} — 인증서 확인(HTTP-01) + http:// 주소를 https로 이동':
+      '{0}     External 80 → this PC\'s {1} — certificate validation (HTTP-01) + redirect http:// to https',
+  '{0}     외부 {1} → 이 PC의 {2} — 웹 앱 접속':
+      '{0}     External {1} → this PC\'s {2} — web app access',
+  '{0}   ACME_STAGING=1 — 시험용 인증서(브라우저가 신뢰하지 않음)로 포트포워딩만 확인하는 중입니다. 확인되면 .env에서 지우고 서버를 다시 시작하세요.':
+      '{0}   ACME_STAGING=1 — checking port forwarding only, with a staging certificate (not trusted by browsers). Once confirmed, remove it from .env and restart the server.',
+  '{0}   HSTS 머리글은 보내지 않습니다 — WEB_DOMAIN이 외부 접속 주소(EXTERNAL_ADDRESS)와 같은 이름이라, 보내면 브라우저가 이 ':
+      '{0}   Not sending the HSTS header — WEB_DOMAIN has the same name as the external address (EXTERNAL_ADDRESS), so if it were sent, browsers would also switch this ',
   '{0}   Let\'s Encrypt 응답: {1}': '{0}   Let\'s Encrypt response: {1}',
-  '{0}   Windows 방화벽에서도 위 포트의 인바운드 TCP를 허용해야 합니다. 인증서는 Let\'s Encrypt에서 자동으로 받고, 만료 30일 전부터 자동으로 갱신합니다.': '{0}   Windows Firewall must also allow inbound TCP on the ports above. Certificates are obtained automatically from Let\'s Encrypt and renewed automatically starting 30 days before expiry.',
+  '{0}   Windows 방화벽에서도 위 포트의 인바운드 TCP를 허용해야 합니다. 인증서는 Let\'s Encrypt에서 자동으로 받고, 만료 30일 전부터 자동으로 갱신합니다.':
+      '{0}   Windows Firewall must also allow inbound TCP on the ports above. Certificates are obtained automatically from Let\'s Encrypt and renewed automatically starting 30 days before expiry.',
   '{0}   공유기 포트포워딩(TCP):': '{0}   Router port forwarding (TCP):',
-  '{0}   다음 시도: {1} ({2} 뒤, 연속 {3}번째 실패)': '{0}   Next attempt: {1} (in {2}, failure #{3} in a row)',
+  '{0}   다음 시도: {1} ({2} 뒤, 연속 {3}번째 실패)':
+      '{0}   Next attempt: {1} (in {2}, failure #{3} in a row)',
   '{0} ({1} 로그인)': '{0} ({1} sign-in)',
   '{0} (기한 {1}{2})': '{0} (due {1}{2})',
   '{0} (나갔음)': '{0} (left)',
@@ -2338,7 +2954,8 @@ const Map<String, String> serverTemplatesEn = {
   '{0} (판 {1})': '{0} (version {1})',
   '{0} (판 {1}){2}': '{0} (version {1}){2}',
   '{0} [비밀대화 요청]{1}': '{0} [Secret chat request]{1}',
-  '{0} {1} — Let\'s Encrypt{2}에 요청(인증 방식: {3}).': '{0} {1} — requesting from Let\'s Encrypt{2} (validation method: {3}).',
+  '{0} {1} — Let\'s Encrypt{2}에 요청(인증 방식: {3}).':
+      '{0} {1} — requesting from Let\'s Encrypt{2} (validation method: {3}).',
   '{0} {1} 예약이 거절되었습니다.{2}': 'Your booking of {0} at {1} was rejected.{2}',
   '{0} {1} 예약이 승인되었습니다.': 'Your booking of {0} at {1} was approved.',
   '{0} {1} 포트 오류:': '{0} {1} port error:',
@@ -2346,16 +2963,23 @@ const Map<String, String> serverTemplatesEn = {
   '{0} · 남은 가입 인원: {1}명': '{0} · Sign-ups remaining: {1}',
   '{0} · 인원 {1}명': '{0} · {1} people',
   '{0} · 화상회의 요청': '{0} · Video meeting request',
-  '{0} — TangoTalk 앱으로 돌아가세요. 이 창은 닫아도 됩니다.': '{0} — return to the TangoTalk app. You can close this window.',
+  '{0} — TangoTalk 앱으로 돌아가세요. 이 창은 닫아도 됩니다.':
+      '{0} — return to the TangoTalk app. You can close this window.',
   '{0} — {1}메시지를 확인하세요': '{0} — check {1}messages',
-  '{0} — 이메일 없이 Let\'s Encrypt 계정을 만듭니다.': '{0} — creating a Let\'s Encrypt account without an email.',
-  '{0} — 인증서 확인용 HTTP 포트 없이(TLS-ALPN-01만) 진행합니다.': '{0} — continuing without an HTTP port for certificate validation (TLS-ALPN-01 only).',
-  '{0} — 지금은 예약할 수 없는 자원입니다.': '{0} — this resource can\'t be booked right now.',
+  '{0} — 이메일 없이 Let\'s Encrypt 계정을 만듭니다.':
+      '{0} — creating a Let\'s Encrypt account without an email.',
+  '{0} — 인증서 확인용 HTTP 포트 없이(TLS-ALPN-01만) 진행합니다.':
+      '{0} — continuing without an HTTP port for certificate validation (TLS-ALPN-01 only).',
+  '{0} — 지금은 예약할 수 없는 자원입니다.':
+      '{0} — this resource can\'t be booked right now.',
   '{0} — 지급일 {1}': '{0} — pay date {1}',
-  '{0} ⚠ 웹 앱 전용 포트가 열릴 때까지 웹 앱 주소와 인증서 발급은 꺼져 있습니다(메인 서버는 정상).': '{0} ⚠ The web app address and certificate issuance are off until the web app port opens (the main server is fine).',
-  '{0} ⚠ 웹 앱 전용 포트를 준비하지 못했습니다 — 메인 서버(앱 접속)는 그대로 돕니다:': '{0} ⚠ Couldn\'t set up the web app port — the main server (app access) keeps running:',
+  '{0} ⚠ 웹 앱 전용 포트가 열릴 때까지 웹 앱 주소와 인증서 발급은 꺼져 있습니다(메인 서버는 정상).':
+      '{0} ⚠ The web app address and certificate issuance are off until the web app port opens (the main server is fine).',
+  '{0} ⚠ 웹 앱 전용 포트를 준비하지 못했습니다 — 메인 서버(앱 접속)는 그대로 돕니다:':
+      '{0} ⚠ Couldn\'t set up the web app port — the main server (app access) keeps running:',
   '{0} ✔ 이제 포트 {1}({2})를 열었습니다.': '{0} ✔ Port {1} ({2}) is now open.',
-  '{0} ✔ 인증서를 받았습니다 — 만료 {1}{2}. 웹 포트에 바로 적용합니다(재시작 필요 없음).': '{0} ✔ Certificate obtained — expires {1}{2}. Applying it to the web port now (no restart needed).',
+  '{0} ✔ 인증서를 받았습니다 — 만료 {1}{2}. 웹 포트에 바로 적용합니다(재시작 필요 없음).':
+      '{0} ✔ Certificate obtained — expires {1}{2}. Applying it to the web port now (no restart needed).',
   '{0} ✖ 인증서 발급 실패: {1}': '{0} ✖ Certificate issuance failed: {1}',
   '{0} 가져오기 — {1}건': '{0} imported — {1}',
   '{0} 값이 올바르지 않습니다: {1} ({2})': 'Invalid {0} value: {1} ({2})',
@@ -2365,24 +2989,33 @@ const Map<String, String> serverTemplatesEn = {
   '{0} 결재 취소 — {1}': '{0} approval canceled — {1}',
   '{0} 경로가 너무 깁니다.': 'The {0} path is too long.',
   '{0} 경로가 올바르지 않습니다.': 'The {0} path is invalid.',
-  '{0} 경로는 이 PC 드라이브(C:\\…)나 사내망 공유 폴더(\\\\서버\\…)만 지정할 수 있습니다.': 'The {0} path can only be a drive on this PC (C:\\…) or a shared folder on the company network (\\\\server\\…).',
-  '{0} 경로의 서버 \'{1}\'은(는) 사내망 주소가 아닙니다. 이 PC 드라이브나 사내망 공유 폴더만 지정할 수 있습니다.': 'The server \'{1}\' in the {0} path isn\'t on the company network. You can only use a drive on this PC or a shared folder on the company network.',
-  '{0} 경로의 서버 \'{1}\'은(는) 허용된 사내 서버가 아닙니다. 사내 컴퓨터 이름(영문·숫자)이나 사설 IP': 'The server \'{1}\' in the {0} path isn\'t an allowed company server. Use a company computer name (letters and digits) or a private IP',
-  '{0} 계정에 보안 키·패스키를 등록합니다. 직접 시작한 것이 아니면 이 창을 닫으세요.': 'Registering a security key/passkey for the account {0}. If you didn\'t start this, close this window.',
+  '{0} 경로는 이 PC 드라이브(C:\\…)나 사내망 공유 폴더(\\\\서버\\…)만 지정할 수 있습니다.':
+      'The {0} path can only be a drive on this PC (C:\\…) or a shared folder on the company network (\\\\server\\…).',
+  '{0} 경로의 서버 \'{1}\'은(는) 사내망 주소가 아닙니다. 이 PC 드라이브나 사내망 공유 폴더만 지정할 수 있습니다.':
+      'The server \'{1}\' in the {0} path isn\'t on the company network. You can only use a drive on this PC or a shared folder on the company network.',
+  '{0} 경로의 서버 \'{1}\'은(는) 허용된 사내 서버가 아닙니다. 사내 컴퓨터 이름(영문·숫자)이나 사설 IP':
+      'The server \'{1}\' in the {0} path isn\'t an allowed company server. Use a company computer name (letters and digits) or a private IP',
+  '{0} 계정에 보안 키·패스키를 등록합니다. 직접 시작한 것이 아니면 이 창을 닫으세요.':
+      'Registering a security key/passkey for the account {0}. If you didn\'t start this, close this window.',
   '{0} 계정으로 로그인했습니다.': 'Signed in with the {0} account.',
-  '{0} 계정의 로그인을 보안 키로 확인합니다.': 'Confirm the sign-in of {0} with a security key.',
-  '{0} 규칙을 열어 다시 저장한 뒤 켜세요.': 'Open the {0} rule, save it again, then turn it on.',
+  '{0} 계정의 로그인을 보안 키로 확인합니다.':
+      'Confirm the sign-in of {0} with a security key.',
+  '{0} 규칙을 열어 다시 저장한 뒤 켜세요.':
+      'Open the {0} rule, save it again, then turn it on.',
   '{0} 그룹': '{0} group',
   '{0} 근무 형태 — {1}': '{0} work schedule — {1}',
-  '{0} 늦게 도착한 인증서를 쓰지 못했습니다: {1}': '{0} Couldn\'t use the certificate that arrived late: {1}',
+  '{0} 늦게 도착한 인증서를 쓰지 못했습니다: {1}':
+      '{0} Couldn\'t use the certificate that arrived late: {1}',
   '{0} 님의 생일': '{0}\'s birthday',
   '{0} 님이 {1} 님을 내보냈습니다.': '{0} removed {1}.',
   '{0} 님이 {1} 님을 초대했습니다.': '{0} invited {1}.',
   '{0} 님이 {1}에 참여했습니다.': '{0} joined {1}.',
   '{0} 님이 {1}에서 제외되었습니다.': '{0} was removed from {1}.',
-  '{0} 님이 그룹 채팅 이름을 \'{1}\'(으)로 바꿨습니다.': '{0} renamed the group chat to \'{1}\'.',
+  '{0} 님이 그룹 채팅 이름을 \'{1}\'(으)로 바꿨습니다.':
+      '{0} renamed the group chat to \'{1}\'.',
   '{0} 님이 그룹 채팅 이름을 지웠습니다.': '{0} cleared the group chat name.',
-  '{0} 님이 그룹채팅을 \'{1}\' 토픽으로 전환했습니다.': '{0} converted the group chat into the topic \'{1}\'.',
+  '{0} 님이 그룹채팅을 \'{1}\' 토픽으로 전환했습니다.':
+      '{0} converted the group chat into the topic \'{1}\'.',
   '{0} 님이 나갔습니다.': '{0} left.',
   '{0} 님이 읽기 전용을 설정했습니다.': '{0} made the chat read-only.',
   '{0} 님이 읽기 전용을 해제했습니다.': '{0} turned off read-only.',
@@ -2390,7 +3023,8 @@ const Map<String, String> serverTemplatesEn = {
   '{0} 님이 채팅 정보를 변경했습니다.': '{0} changed the chat info.',
   '{0} 님이 토픽 관리자를 {1} 님으로 지정했습니다.': '{0} made {1} the topic admin.',
   '{0} 님이 토픽 보관을 해제했습니다.': '{0} unarchived the topic.',
-  '{0} 님이 토픽 이름을 \'{1}\'에서 \'{2}\'(으)로 바꿨습니다.': '{0} renamed the topic from \'{1}\' to \'{2}\'.',
+  '{0} 님이 토픽 이름을 \'{1}\'에서 \'{2}\'(으)로 바꿨습니다.':
+      '{0} renamed the topic from \'{1}\' to \'{2}\'.',
   '{0} 님이 토픽을 공개로 바꿨습니다.': '{0} made the topic public.',
   '{0} 님이 토픽을 보관했습니다.': '{0} archived the topic.',
   '{0} 님이 토픽을 비공개로 바꿨습니다.': '{0} made the topic private.',
@@ -2398,17 +3032,26 @@ const Map<String, String> serverTemplatesEn = {
   '{0} 님이 팀 멤버가 아니어서 나갔습니다.': '{0} left because they\'re not a team member.',
   '{0} 님이 팀에서 제외되어 나갔습니다.': '{0} left because they were removed from the team.',
   '{0} 댓글': '{0} comment',
-  '{0} 로그인 확인에 실패했습니다{1}. 관리자에게 메일 권한 설정을 확인해 달라고 하세요.': '{0} sign-in verification failed{1}. Ask an admin to check the mail permission settings.',
-  '{0} 로그인 확인에 실패했습니다{1}. 관리자에게 설정을 확인해 달라고 하세요.': '{0} sign-in verification failed{1}. Ask an admin to check the settings.',
-  '{0} 로그인이 끝났거나 권한이 취소되었습니다. 메일 → 계정 바꾸기에서 다시 로그인하세요.': 'The {0} sign-in has ended or access was revoked. Sign in again from Mail → Change account.',
-  '{0} 명세서가 도착했습니다. 그룹웨어 → 급여에서 확인하세요.': 'Your {0} payslip has arrived. Check it in Groupware → Payroll.',
-  '{0} 명세서가 정정되었습니다. 그룹웨어 → 급여에서 확인하세요.': 'Your {0} payslip was corrected. Check it in Groupware → Payroll.',
+  '{0} 로그인 확인에 실패했습니다{1}. 관리자에게 메일 권한 설정을 확인해 달라고 하세요.':
+      '{0} sign-in verification failed{1}. Ask an admin to check the mail permission settings.',
+  '{0} 로그인 확인에 실패했습니다{1}. 관리자에게 설정을 확인해 달라고 하세요.':
+      '{0} sign-in verification failed{1}. Ask an admin to check the settings.',
+  '{0} 로그인이 끝났거나 권한이 취소되었습니다. 메일 → 계정 바꾸기에서 다시 로그인하세요.':
+      'The {0} sign-in has ended or access was revoked. Sign in again from Mail → Change account.',
+  '{0} 명세서가 도착했습니다. 그룹웨어 → 급여에서 확인하세요.':
+      'Your {0} payslip has arrived. Check it in Groupware → Payroll.',
+  '{0} 명세서가 정정되었습니다. 그룹웨어 → 급여에서 확인하세요.':
+      'Your {0} payslip was corrected. Check it in Groupware → Payroll.',
   '{0} 목록이 올바르지 않습니다.': 'Invalid {0} list.',
-  '{0} 백업 목록(index.json)을 읽지 못했습니다.': 'Couldn\'t read the {0} backup list (index.json).',
+  '{0} 백업 목록(index.json)을 읽지 못했습니다.':
+      'Couldn\'t read the {0} backup list (index.json).',
   '{0} 백업 정보를 읽지 못했습니다.': 'Couldn\'t read the {0} backup info.',
-  '{0} 백업이 이 백업과 다른 서버(또는 다른 키)의 것입니다 — {1}은(는) 복원하지 않았습니다.': 'The {0} backup is from a different server (or key) than this backup — {1} wasn\'t restored.',
-  '{0} 새 인증서를 웹 포트에 걸지 못했습니다(서버를 다시 시작하면 적용됩니다): {1}': '{0} Couldn\'t apply the new certificate to the web port (it will apply after a server restart): {1}',
-  '{0} 서버 PC 시계가 뒤로 바뀐 것 같습니다(기록된 시각 {1}이 지금보다 한참 뒤입니다) — 그 기록을 버리고 {2}.': '{0} The server PC\'s clock seems to have moved backward (the recorded time {1} is well ahead of now) — discarding that record and {2}.',
+  '{0} 백업이 이 백업과 다른 서버(또는 다른 키)의 것입니다 — {1}은(는) 복원하지 않았습니다.':
+      'The {0} backup is from a different server (or key) than this backup — {1} wasn\'t restored.',
+  '{0} 새 인증서를 웹 포트에 걸지 못했습니다(서버를 다시 시작하면 적용됩니다): {1}':
+      '{0} Couldn\'t apply the new certificate to the web port (it will apply after a server restart): {1}',
+  '{0} 서버 PC 시계가 뒤로 바뀐 것 같습니다(기록된 시각 {1}이 지금보다 한참 뒤입니다) — 그 기록을 버리고 {2}.':
+      '{0} The server PC\'s clock seems to have moved backward (the recorded time {1} is well ahead of now) — discarding that record and {2}.',
   '{0} 서버 주소가 올바르지 않습니다.': 'Invalid {0} server address.',
   '{0} 서비스가 {1}로 거절했습니다{2}': 'The {0} service refused with {1}{2}',
   '{0} 시각이 올바르지 않습니다.': 'Invalid {0} time.',
@@ -2419,28 +3062,39 @@ const Map<String, String> serverTemplatesEn = {
   '{0} 실지급': '{0} net payment',
   '{0} 실패(종료 코드 {1}){2}': '{0} failed (exit code {1}){2}',
   '{0} 알림 {1}': '{0} reminder {1}',
-  '{0} 연결 보안은 SSL 또는 STARTTLS여야 합니다(암호화 없는 연결은 쓸 수 없음).': '{0} connection security must be SSL or STARTTLS (unencrypted connections aren\'t allowed).',
+  '{0} 연결 보안은 SSL 또는 STARTTLS여야 합니다(암호화 없는 연결은 쓸 수 없음).':
+      '{0} connection security must be SSL or STARTTLS (unencrypted connections aren\'t allowed).',
   '{0} 연동 계정 연결{1}': '{0} integration account linked{1}',
   '{0} 연동 끊음': '{0} integration disconnected',
   '{0} 예약': '{0} booking',
   '{0} 예약 {1}분 전': '{0} booking in {1} min',
-  '{0} 예약 — {1} 회의실을 빼고 옮기세요.': '{0} booking — remove the {1} room and move it.',
+  '{0} 예약 — {1} 회의실을 빼고 옮기세요.':
+      '{0} booking — remove the {1} room and move it.',
   '{0} 외 {1}명': '{0} and {1} others',
-  '{0} 웹 앱 전용 주소: {1} — 아이폰 등 앱이 없는 기기는 브라우저(Safari)로 이 주소를 엽니다{2}.': '{0} Web app address: {1} — devices without the app, such as iPhones, open this address in a browser (Safari){2}.',
-  '{0} 웹 앱 전용 주소와 인증서 발급은 꺼져 있습니다(메인 서버는 정상).': '{0} The web app address and certificate issuance are off (the main server is fine).',
+  '{0} 웹 앱 전용 주소: {1} — 아이폰 등 앱이 없는 기기는 브라우저(Safari)로 이 주소를 엽니다{2}.':
+      '{0} Web app address: {1} — devices without the app, such as iPhones, open this address in a browser (Safari){2}.',
+  '{0} 웹 앱 전용 주소와 인증서 발급은 꺼져 있습니다(메인 서버는 정상).':
+      '{0} The web app address and certificate issuance are off (the main server is fine).',
   '{0} 이름 "{1}"이(가) 겹칩니다.': '{0} name "{1}" is a duplicate.',
   '{0} 이름은 20자 이내로 입력하세요.': '{0} name must be 20 characters or fewer.',
   '{0} 이름을 입력하세요.': 'Enter a {0} name.',
   '{0} 이후에': 'after {0}',
-  '{0} 인증서 파일을 다루다 오류가 났습니다:': '{0} Error while handling the certificate files:',
-  '{0} 인증서 확인 중 예기치 못한 오류:': '{0} Unexpected error while checking the certificate:',
+  '{0} 인증서 파일을 다루다 오류가 났습니다:':
+      '{0} Error while handling the certificate files:',
+  '{0} 인증서 확인 중 예기치 못한 오류:':
+      '{0} Unexpected error while checking the certificate:',
   '{0} 자동으로 다시 시도합니다.': 'It will retry automatically {0}.',
-  '{0} 저장된 인증서({1})를 쓸 수 없습니다: {2} — 새로 받습니다.': '{0} The saved certificate ({1}) can\'t be used: {2} — getting a new one.',
-  '{0} 저장된 인증서가 {1}에 만료되어 새로 받습니다.': '{0} The saved certificate expired on {1}; getting a new one.',
-  '{0} 저장된 인증서는 시험용(staging)이라 정식 인증서를 새로 받습니다.': '{0} The saved certificate is a staging certificate; getting a new production certificate.',
-  '{0} 저장된 인증서를 씁니다 — 만료 {1} ({2} 남음){3}.': '{0} Using the saved certificate — expires {1} ({2} left){3}.',
+  '{0} 저장된 인증서({1})를 쓸 수 없습니다: {2} — 새로 받습니다.':
+      '{0} The saved certificate ({1}) can\'t be used: {2} — getting a new one.',
+  '{0} 저장된 인증서가 {1}에 만료되어 새로 받습니다.':
+      '{0} The saved certificate expired on {1}; getting a new one.',
+  '{0} 저장된 인증서는 시험용(staging)이라 정식 인증서를 새로 받습니다.':
+      '{0} The saved certificate is a staging certificate; getting a new production certificate.',
+  '{0} 저장된 인증서를 씁니다 — 만료 {1} ({2} 남음){3}.':
+      '{0} Using the saved certificate — expires {1} ({2} left){3}.',
   '{0} 주소가 올바르지 않습니다: {1}': 'Invalid {0} address: {1}',
-  '{0} 지난번 발급이 실패(또는 중단)해 {1}에 다시 시도합니다(재시작해도 앞당기지 않습니다 — Let\'s Encrypt 요청 한도 보호).': '{0} The last issuance failed (or was interrupted); retrying at {1} (restarting won\'t make it sooner — this protects the Let\'s Encrypt request limit).',
+  '{0} 지난번 발급이 실패(또는 중단)해 {1}에 다시 시도합니다(재시작해도 앞당기지 않습니다 — Let\'s Encrypt 요청 한도 보호).':
+      '{0} The last issuance failed (or was interrupted); retrying at {1} (restarting won\'t make it sooner — this protects the Let\'s Encrypt request limit).',
   '{0} 지우기': 'Delete {0}',
   '{0} 출장': '{0} business trip',
   '{0} 출장 · {1}': '{0} business trip · {1}',
@@ -2448,42 +3102,55 @@ const Map<String, String> serverTemplatesEn = {
   '{0} 파일을 보냈습니다': '{0} sent a file',
   '{0} 포트는 {1} 중 하나여야 합니다.': '{0} port must be one of {1}.',
   '{0} 폴더({1})를 찾을 수 없습니다.': 'Couldn\'t find the {0} folder ({1}).',
-  '{0} 폴더에 다른 파일이 들어 있어 {1}을(를) 백업하지 않습니다.': 'The {0} folder contains other files, so {1} isn\'t being backed up.',
-  '{0} 폴더에 다른 파일이 들어 있어 쓰지 않습니다 — 비우거나 다른 위치를 고르세요.': 'The {0} folder contains other files, so it won\'t be used — empty it or choose another location.',
-  '{0} 폴더에 다른 파일이 들어 있어 첨부파일을 백업하지 않습니다.': 'The {0} folder contains other files, so attachments aren\'t backed up.',
+  '{0} 폴더에 다른 파일이 들어 있어 {1}을(를) 백업하지 않습니다.':
+      'The {0} folder contains other files, so {1} isn\'t being backed up.',
+  '{0} 폴더에 다른 파일이 들어 있어 쓰지 않습니다 — 비우거나 다른 위치를 고르세요.':
+      'The {0} folder contains other files, so it won\'t be used — empty it or choose another location.',
+  '{0} 폴더에 다른 파일이 들어 있어 첨부파일을 백업하지 않습니다.':
+      'The {0} folder contains other files, so attachments aren\'t backed up.',
   '{0} 항목 \'{1}\'이(가) 두 번 있습니다.': '{0} item \'{1}\' appears twice.',
   '{0} 항목은 {1}개까지입니다.': 'Up to {1} {0} items.',
   '{0} 항목을 확인하세요.': 'Check the {0} items.',
-  '{0} 회계 전표 — 법인카드는 사용일, 지출 결재는 쓴 날, 증빙은 작성일 기준입니다.': '{0} journal vouchers — card use by usage date, expense approvals by spending date, evidence by issue date.',
+  '{0} 회계 전표 — 법인카드는 사용일, 지출 결재는 쓴 날, 증빙은 작성일 기준입니다.':
+      '{0} journal vouchers — card use by usage date, expense approvals by spending date, evidence by issue date.',
   '{0}(기준 {1}회) — ': '{0} (threshold {1}) — ',
   '{0}(실패)': '{0} (failed)',
   '{0}(실패: {1})': '{0} (failed: {1})',
   '{0}: {1} 외': '{0}: {1} and more',
   '{0}: 공제 항목이 너무 많습니다.': '{0}: too many deduction items.',
-  '{0}: 주민등록번호(외국인등록번호) 13자리를 확인하세요.': '{0}: check the 13-digit resident (or alien) registration number.',
+  '{0}: 주민등록번호(외국인등록번호) 13자리를 확인하세요.':
+      '{0}: check the 13-digit resident (or alien) registration number.',
   '{0}: 항목이 {1}개를 넘습니다.': '{0}: more than {1} items.',
   '{0}{1}{2}시간': '{0}{1}{2}h',
   '{0}{1}마다': 'Every {0} {1}',
   '{0}·공지': '{0} · Announcement',
   '{0}·댓글': '{0} · Comment',
-  '{0}가 갱신 토큰을 주지 않았습니다. 다시 시도하세요(Microsoft는 offline_access 권한이 필요합니다).': '{0} didn\'t provide a refresh token. Please try again (Microsoft needs the offline_access permission).',
+  '{0}가 갱신 토큰을 주지 않았습니다. 다시 시도하세요(Microsoft는 offline_access 권한이 필요합니다).':
+      '{0} didn\'t provide a refresh token. Please try again (Microsoft needs the offline_access permission).',
   '{0}가 너무 많습니다. {1} 후 다시 시도하세요.': 'Too many {0}. Try again in {1}.',
-  '{0}가 링크(정션/심볼릭 링크)라 안전을 위해 백업하지 않습니다 — 링크를 지우고 다시 시도하세요.': '{0} is a link (junction/symbolic link), so it isn\'t backed up for safety — remove the link and try again.',
+  '{0}가 링크(정션/심볼릭 링크)라 안전을 위해 백업하지 않습니다 — 링크를 지우고 다시 시도하세요.':
+      '{0} is a link (junction/symbolic link), so it isn\'t backed up for safety — remove the link and try again.',
   '{0}가 폴더가 아닙니다.': '{0} isn\'t a folder.',
-  '{0}까지는 받은 사람이 쓸 날을 낼 수 있습니다.': 'Recipients can submit the dates they\'ll use until {0}.',
+  '{0}까지는 받은 사람이 쓸 날을 낼 수 있습니다.':
+      'Recipients can submit the dates they\'ll use until {0}.',
   '{0}년 {1}월 급여': '{1}/{0} payroll',
+  '{0}년 귀속 세법이 아직 들어가 있지 않아 어림은 {1}년 귀속 세법으로 셌습니다.':
+      'The {0} tax-year law isn\'t included yet, so the estimate uses the {1} tax-year law.',
   '{0}년 귀속 연말정산': 'Year-end settlement for {0}',
   '{0}년 급여 집계 내려받기': '{0} payroll summary downloaded',
-  '{0}년 지급일의 보낸 급여명세서를 모은 표입니다(근로소득 원천징수부·연말정산 자료로 씁니다).': 'Sent payslips with pay dates in {0} (for the earned income withholding ledger and year-end settlement).',
+  '{0}년 지급일의 보낸 급여명세서를 모은 표입니다(근로소득 원천징수부·연말정산 자료로 씁니다).':
+      'Sent payslips with pay dates in {0} (for the earned income withholding ledger and year-end settlement).',
   '{0}년 집계': '{0} summary',
   '{0}는 true/false여야 합니다.': '{0} must be true/false.',
   '{0}는 문자열이어야 합니다.': '{0} must be a string.',
   '{0}는 참/거짓이어야 합니다.': '{0} must be true or false.',
-  '{0}님, {1}일 넘게 {2}에 접속하지 않으신 동안 읽지 않은 멘션이 {3}개 쌓였습니다.': '{0}, while you haven\'t visited {2} for more than {1} days, {3} unread mentions have piled up.',
+  '{0}님, {1}일 넘게 {2}에 접속하지 않으신 동안 읽지 않은 멘션이 {3}개 쌓였습니다.':
+      '{0}, while you haven\'t visited {2} for more than {1} days, {3} unread mentions have piled up.',
   '{0}님이 /{1}{2} 실행\n\n{3}': '{0} ran /{1}{2}\n\n{3}',
   '{0}님이 {1} 초대했습니다': '{0} invited you {1}',
   '{0}님이 {1}를 올렸습니다 ({2}).': '{0} posted {1} ({2}).',
-  '{0}님이 {1}에 초대했습니다. 아래 링크를 열면 앱을 설치하고 이 서버에 연결해 가입할 수 있습니다.': '{0} invited you to {1}. Open the link below to install the app, connect to this server, and sign up.',
+  '{0}님이 {1}에 초대했습니다. 아래 링크를 열면 앱을 설치하고 이 서버에 연결해 가입할 수 있습니다.':
+      '{0} invited you to {1}. Open the link below to install the app, connect to this server, and sign up.',
   '{0}님이 게시글을 수정했습니다: {1}': '{0} edited a post: {1}',
   '{0}님이 공개 프로젝트를 만들었습니다: {1}': '{0} created a public project: {1}',
   '{0}님이 두 줄에 있습니다.': '{0} appears on two rows.',
@@ -2492,39 +3159,47 @@ const Map<String, String> serverTemplatesEn = {
   '{0}님이 상태를 \'{1}\'(으)로 바꿨습니다: {2}': '{0} changed the status to \'{1}\': {2}',
   '{0}님이 설문을 보냈습니다: {1}': '{0} sent a survey: {1}',
   '{0}님이 앱 "{1}"을(를) 이 방에서 뺐습니다.': '{0} removed the app "{1}" from this room.',
-  '{0}님이 앱 "{1}"을(를) 추가했습니다. 이 앱은 이 방의 메시지를 읽고 쓸 수 있습니다.': '{0} added the app "{1}". This app can read and post messages in this room.',
+  '{0}님이 앱 "{1}"을(를) 추가했습니다. 이 앱은 이 방의 메시지를 읽고 쓸 수 있습니다.':
+      '{0} added the app "{1}". This app can read and post messages in this room.',
   '{0}님이 업무를 만들었습니다: {1}': '{0} created a task: {1}',
   '{0}님이 업무를 배정했습니다: {1}': '{0} assigned a task: {1}',
   '{0}님이 업무를 삭제했습니다: {1}': '{0} deleted a task: {1}',
-  '{0}님이 우선순위를 \'{1}\'(으)로 바꿨습니다: {2}': '{0} changed the priority to \'{1}\': {2}',
+  '{0}님이 우선순위를 \'{1}\'(으)로 바꿨습니다: {2}':
+      '{0} changed the priority to \'{1}\': {2}',
   '{0}님이 유형을 \'{1}\'(으)로 바꿨습니다: {2}': '{0} changed the type to \'{1}\': {2}',
   '{0}님이 참조자로 지정했습니다: {1}': '{0} added you as CC: {1}',
   '{0}님이 추가 정보를 바꿨습니다: {1}': '{0} changed the additional info: {1}',
   '{0}님이 회수했습니다: {1}': '{0} withdrew it: {1}',
   '{0}님이 회원님을 멘션했습니다: {1}': '{0} mentioned you: {1}',
   '{0}마다 다시 열어 봅니다.': 'Checking again every {0}.',
-  '{0}번 문항에 같은 보기가 있습니다: \'{1}\'': 'Question {0} has duplicate options: \'{1}\'',
+  '{0}번 문항에 같은 보기가 있습니다: \'{1}\'':
+      'Question {0} has duplicate options: \'{1}\'',
   '{0}번 문항에 답하세요.': 'Answer question {0}.',
   '{0}번 문항에 보기를 {1}개 이상 넣으세요.': 'Add at least {1} options to question {0}.',
   '{0}번 문항은 1~{1}점으로 답하세요.': 'Answer question {0} with a score from 1 to {1}.',
   '{0}번 문항은 {1}자까지 쓸 수 있습니다.': 'Question {0} allows up to {1} characters.',
   '{0}번 문항의 보기는 {1}개까지 넣을 수 있습니다.': 'Question {0} can have up to {1} options.',
-  '{0}번 문항의 보기는 {1}자까지 쓸 수 있습니다.': 'Options for question {0} can be up to {1} characters.',
+  '{0}번 문항의 보기는 {1}자까지 쓸 수 있습니다.':
+      'Options for question {0} can be up to {1} characters.',
   '{0}번 문항의 보기를 다시 고르세요.': 'Choose the options for question {0} again.',
   '{0}번 문항의 종류를 고르세요.': 'Choose a type for question {0}.',
   '{0}번 문항의 질문을 넣으세요.': 'Enter the text for question {0}.',
   '{0}번 포트를 열 권한이 없습니다.': 'No permission to open port {0}.',
-  '{0}번 포트를 이미 다른 프로그램이 쓰고 있습니다.': 'Port {0} is already used by another program.',
+  '{0}번 포트를 이미 다른 프로그램이 쓰고 있습니다.':
+      'Port {0} is already used by another program.',
   '{0}번째 칸의 이름을 넣으세요.': 'Enter a name for field {0}.',
   '{0}부터 {1}까지의 날만 고를 수 있습니다.': 'You can only choose dates from {0} to {1}.',
   '{0}부터 다시 시도합니다': 'Retrying from {0}',
   '{0}분': '{0} min',
-  '{0}분 동안 쓸 수 있습니다. 코드는 다른 사람에게 알려 주지 마세요.': 'Valid for {0} minutes. Don\'t share the code with anyone.',
+  '{0}분 동안 쓸 수 있습니다. 코드는 다른 사람에게 알려 주지 마세요.':
+      'Valid for {0} minutes. Don\'t share the code with anyone.',
   '{0}시간': '{0} h',
   '{0}시간 {1}분': '{0} h {1} min',
-  '{0}에 연결하지 못했습니다. 서버의 인터넷 연결을 확인하세요.': 'Couldn\'t connect to {0}. Check the server\'s internet connection.',
+  '{0}에 연결하지 못했습니다. 서버의 인터넷 연결을 확인하세요.':
+      'Couldn\'t connect to {0}. Check the server\'s internet connection.',
   '{0}에서 {1} 님의 {2} 삭제': 'Deleted {1}\'s {2} in {0}',
-  '{0}에서 백업 정보(manifest.json)를 읽지 못했습니다 — TangoTalk 백업 폴더를 고르세요.': 'Couldn\'t read the backup info (manifest.json) in {0} — choose a TangoTalk backup folder.',
+  '{0}에서 백업 정보(manifest.json)를 읽지 못했습니다 — TangoTalk 백업 폴더를 고르세요.':
+      'Couldn\'t read the backup info (manifest.json) in {0} — choose a TangoTalk backup folder.',
   '{0}에서 새 접근 토큰을 받지 못했습니다.': 'Couldn\'t get a new access token from {0}.',
   '{0}으로 쓸 수 없는 글자입니다.': 'These characters can\'t be used for {0}.',
   '{0}은 {1}자까지 쓸 수 있습니다.': '{0} can be up to {1} characters.',
@@ -2533,10 +3208,12 @@ const Map<String, String> serverTemplatesEn = {
   '{0}은(는) {1}요일에만 예약할 수 있습니다.': '{0} can only be booked on {1}.',
   '{0}은(는) {1}자 이내로 넣으세요.': '{0} must be {1} characters or fewer.',
   '{0}은(는) {1}자 이내로 입력하세요.': '{0} must be {1} characters or fewer.',
-  '{0}은(는) 서버 운영자만 만들고 바꿀 수 있습니다.': 'Only the server operator can create and change {0}.',
+  '{0}은(는) 서버 운영자만 만들고 바꿀 수 있습니다.':
+      'Only the server operator can create and change {0}.',
   '{0}은(는) 정해진 사람만 예약할 수 있습니다.': 'Only designated people can book {0}.',
   '{0}은(는) 한 달 안으로만 정할 수 있습니다.': '{0} can only be set within one month.',
-  '{0}은(는) 한 번에 {1}까지 예약할 수 있습니다.': '{0} can be booked for up to {1} at a time.',
+  '{0}은(는) 한 번에 {1}까지 예약할 수 있습니다.':
+      '{0} can be booked for up to {1} at a time.',
   '{0}을 {1}(으)로 변경했습니다.': 'Changed {0} to {1}.',
   '{0}을 입력하세요.': 'Enter {0}.',
   '{0}을 지웠습니다.': 'Cleared {0}.',
@@ -2544,53 +3221,68 @@ const Map<String, String> serverTemplatesEn = {
   '{0}을(를) 입력하세요.': 'Enter {0}.',
   '{0}을(를) 확인하세요.': 'Check {0}.',
   '{0}의 "{1}" 팀': '{0}\'s "{1}" team',
-  '{0}의 CAA 설정이 Let\'s Encrypt의 발급을 허용하지 않습니다 — 도메인 DNS의 CAA 레코드를 확인하세요.': 'The CAA settings for {0} don\'t allow Let\'s Encrypt to issue certificates — check the CAA records in the domain\'s DNS.',
-  '{0}의 DNS에 MX 레코드로 {1}를 넣고, 공유기에서 바깥 25번 포트를 이 PC의 {2}번으로 넘기세요.': 'Add an MX record for {0} pointing to {1}, and forward external port 25 on your router to port {2} on this PC.',
+  '{0}의 CAA 설정이 Let\'s Encrypt의 발급을 허용하지 않습니다 — 도메인 DNS의 CAA 레코드를 확인하세요.':
+      'The CAA settings for {0} don\'t allow Let\'s Encrypt to issue certificates — check the CAA records in the domain\'s DNS.',
+  '{0}의 DNS에 MX 레코드로 {1}를 넣고, 공유기에서 바깥 25번 포트를 이 PC의 {2}번으로 넘기세요.':
+      'Add an MX record for {0} pointing to {1}, and forward external port 25 on your router to port {2} on this PC.',
   '{0}이 올바르지 않습니다. (HH:mm)': 'Invalid {0}. (HH:mm)',
   '{0}이 올바르지 않습니다. (YYYY-MM-DD)': 'Invalid {0}. (YYYY-MM-DD)',
-  '{0}이(가) 없어져 잡아 둔 예약이 취소되었습니다.': '{0} no longer exists, so the booking was canceled.',
+  '{0}이(가) 없어져 잡아 둔 예약이 취소되었습니다.':
+      '{0} no longer exists, so the booking was canceled.',
   '{0}일': '{0} days',
   '{0}초': '{0} sec',
-  '가산율은 0~{0}% 사이 정수로 넣으세요.': 'Enter premium rates as whole numbers between 0 and {0}%.',
+  '가산율은 0~{0}% 사이 정수로 넣으세요.':
+      'Enter premium rates as whole numbers between 0 and {0}%.',
   '가족 {0}명': '{0} dependents',
   '간이세액표 {0}': 'Simplified table {0}',
   '같은 이름의 말머리가 있습니다: {0}': 'A category with the same name already exists: {0}',
   '같은 이름의 칸이 두 개 있습니다: {0}': 'Two fields have the same name: {0}',
-  '같은 이름의 폴더가 있습니다: \'{0}\'': 'A folder with the same name already exists: \'{0}\'',
-  '같은 이름의 휴가 종류가 있습니다: {0}': 'A leave type with the same name already exists: {0}',
+  '같은 이름의 폴더가 있습니다: \'{0}\'':
+      'A folder with the same name already exists: \'{0}\'',
+  '같은 이름의 휴가 종류가 있습니다: {0}':
+      'A leave type with the same name already exists: {0}',
   '같은 지출 분류가 있습니다: {0}': 'The same expense category already exists: {0}',
   '개인키를 읽지 못했습니다({0})': 'Couldn\'t read the private key ({0})',
   '검색어는 {0}자 이내로 입력하세요.': 'Search terms must be {0} characters or fewer.',
   '검색어는 {0}자까지입니다.': 'Search terms can be up to {0} characters.',
   '게시글: {0}': 'Post: {0}',
-  '결재를 너무 많이 올렸습니다. {0} 뒤에 다시 시도하세요.': 'You\'ve submitted too many approvals. Try again in {0}.',
+  '결재를 너무 많이 올렸습니다. {0} 뒤에 다시 시도하세요.':
+      'You\'ve submitted too many approvals. Try again in {0}.',
   '결재선 규칙은 {0}개까지입니다.': 'Up to {0} approval line rules are allowed.',
-  '결재선 이름을 {0}자 이내로 쓰세요.': 'Approval line names must be {0} characters or fewer.',
+  '결재선 이름을 {0}자 이내로 쓰세요.':
+      'Approval line names must be {0} characters or fewer.',
   '결재선은 {0}개까지 저장할 수 있습니다.': 'You can save up to {0} approval lines.',
   '결재자는 {0}명까지 고를 수 있습니다.': 'You can choose up to {0} approvers.',
   '결재통계_{0}_{1}_{2}.xlsx': 'ApprovalStats_{0}_{1}_{2}.xlsx',
   '겸직 넣기 — {0}{1}': 'Add concurrent post — {0}{1}',
   '겸직은 {0}개 부서까지입니다.': 'Concurrent posts are limited to {0} departments.',
-  '계정의 이메일이 {0} 로 바뀌었습니다. 이 주소로는 더 이상 아이디·비밀번호 찾기 메일이 가지 않습니다.': 'Your account email was changed to {0}. Username and password recovery emails will no longer be sent to this address.',
+  '계정의 이메일이 {0} 로 바뀌었습니다. 이 주소로는 더 이상 아이디·비밀번호 찾기 메일이 가지 않습니다.':
+      'Your account email was changed to {0}. Username and password recovery emails will no longer be sent to this address.',
   '고를 거리는 {0}개까지입니다.': 'Up to {0} options.',
   '고를 거리는 {0}자 이내로 넣으세요.': 'Options must be {0} characters or fewer.',
-  '공유기에서 외부 TCP {0} → 이 PC의 TCP {1} 포트포워딩과 Windows 방화벽(인바운드 TCP {2})을 확인하세요': 'Check the router port forwarding from external TCP {0} → this PC\'s TCP {1} and Windows Firewall (inbound TCP {2})',
-  '공인 IP를 가리키는지, 외부 {0} 포트가 이 PC가 아닌 다른 기기(공유기의 원격 관리 페이지 등)로 가지 않는지 확인하세요({1}).': 'public IP and that external port {0} isn\'t going to another device instead of this PC (such as the router\'s remote admin page) ({1}).',
-  '공제대상가족 수는 본인을 넣어 1~{0}명입니다.': 'Dependents (including the employee) must be 1–{0}.',
+  '공유기에서 외부 TCP {0} → 이 PC의 TCP {1} 포트포워딩과 Windows 방화벽(인바운드 TCP {2})을 확인하세요':
+      'Check the router port forwarding from external TCP {0} → this PC\'s TCP {1} and Windows Firewall (inbound TCP {2})',
+  '공인 IP를 가리키는지, 외부 {0} 포트가 이 PC가 아닌 다른 기기(공유기의 원격 관리 페이지 등)로 가지 않는지 확인하세요({1}).':
+      'public IP and that external port {0} isn\'t going to another device instead of this PC (such as the router\'s remote admin page) ({1}).',
+  '공제대상가족 수는 본인을 넣어 1~{0}명입니다.':
+      'Dependents (including the employee) must be 1–{0}.',
   '공지는 {0}자 이내로 작성하세요.': 'Announcements must be {0} characters or fewer.',
   '관리자가 {0} {1} 예약을 취소했습니다.': 'An admin canceled the {0} {1} booking.',
   '교육비는 {0}줄까지입니다.': 'Education costs can have up to {0} rows.',
   '구매 요청 — {0}{1} ({2}원)': 'Purchase request — {0}{1} (₩{2})',
   '규칙 이름은 {0}자 이내로 넣으세요.': 'Rule names can be up to {0} characters.',
-  '그 기간에 이미 신청한 휴가가 있습니다: {0}': 'You already have leave requested for that period: {0}',
+  '그 기간에 이미 신청한 휴가가 있습니다: {0}':
+      'You already have leave requested for that period: {0}',
   '그룹 규칙 {0}': 'Group rules {0}',
   '그룹 규칙 더함 — {0}{1}': 'Group rule added — {0}{1}',
   '그룹 규칙은 {0}개까지입니다.': 'Up to {0} group rules are allowed.',
-  '그룹 채팅 이름은 {0}자 이내로 입력하세요.': 'Group chat names must be {0} characters or fewer.',
+  '그룹 채팅 이름은 {0}자 이내로 입력하세요.':
+      'Group chat names must be {0} characters or fewer.',
   '그룹 출처는 {0} 중 하나여야 합니다.': 'Group source must be one of {0}.',
   '그룹웨어 범위: {0}': 'Groupware scope: {0}',
   '그룹웨어 설정 — {0}': 'Groupware settings — {0}',
-  '그림을 늘 볼 보낸 사람은 {0}명까지입니다.': 'You can always show images from up to {0} senders.',
+  '그림을 늘 볼 보낸 사람은 {0}명까지입니다.':
+      'You can always show images from up to {0} senders.',
   '근무 시간 {0}~{1}': 'Working hours {0}~{1}',
   '근속 {0}년': '{0} years of service',
   '근태 수정 ({0})': 'Attendance correction ({0})',
@@ -2600,7 +3292,8 @@ const Map<String, String> serverTemplatesEn = {
   '급여 담당자는 {0}명까지입니다.': 'Up to {0} payroll staff.',
   '급여 대장 삭제 — {0}': 'Payroll deleted — {0}',
   '급여 설정 — {0}': 'Payroll settings — {0}',
-  '급여 이체 파일 내려받기 — {0} ({1}명, {2})': 'Downloaded payroll transfer file — {0} ({1} people, {2})',
+  '급여 이체 파일 내려받기 — {0} ({1}명, {2})':
+      'Downloaded payroll transfer file — {0} ({1} people, {2})',
   '급여 전표 내려받기 — {0}': 'Payroll vouchers downloaded — {0}',
   '급여대장 내려받기 — {0}': 'Payroll sheet downloaded — {0}',
   '급여대장-{0}-{1}.xlsx': 'payroll-{0}-{1}.xlsx',
@@ -2616,12 +3309,15 @@ const Map<String, String> serverTemplatesEn = {
   '기본 양식 {0} — {1}': 'Default form {0} — {1}',
   '기본 참조자는 {0}명까지입니다.': 'Up to {0} default CCs are allowed.',
   '기안 — {0}': 'Draft — {0}',
-  '끝 4자리가 같은 카드가 이미 있습니다: {0}': 'A card with the same last 4 digits already exists: {0}',
+  '끝 4자리가 같은 카드가 이미 있습니다: {0}':
+      'A card with the same last 4 digits already exists: {0}',
   '나가는 웹훅 만들기 — {0} → {1}': 'Create outgoing webhook — {0} → {1}',
   '날짜를 읽지 못했습니다: {0}': 'Could not read the date: {0}',
   '남은 기간: {0}': 'Time remaining: {0}',
-  '남은 연차({0})보다 많이 신청했습니다. 관리자에게 연차 조정을 요청하거나 다른 휴가 종류를 고르세요.': 'You requested more than your remaining annual leave ({0}). Ask an admin to adjust your annual leave or choose another leave type.',
-  '남은 연차({0}일)보다 많이 고를 수 없습니다.': 'You can\'t choose more than your remaining annual leave ({0} days).',
+  '남은 연차({0})보다 많이 신청했습니다. 관리자에게 연차 조정을 요청하거나 다른 휴가 종류를 고르세요.':
+      'You requested more than your remaining annual leave ({0}). Ask an admin to adjust your annual leave or choose another leave type.',
+  '남은 연차({0}일)보다 많이 고를 수 없습니다.':
+      'You can\'t choose more than your remaining annual leave ({0} days).',
   '내보내기 양식 저장 ({0}개)': 'Saved export layouts ({0})',
   '내용은 {0}자 이내로 쓰세요.': 'Content must be {0} characters or fewer.',
   '내용은 {0}자 이내로 입력하세요.': 'Content must be {0} characters or fewer.',
@@ -2630,15 +3326,21 @@ const Map<String, String> serverTemplatesEn = {
   '너무 자주 눌렀습니다. {0} 뒤에 다시 하세요.': 'You clicked too often. Try again in {0}.',
   '너무 자주 시험했습니다. {0} 뒤에 다시 하세요.': 'You tested too often. Try again in {0}.',
   '노드는 {0}개까지 넣을 수 있습니다.': 'You can add up to {0} nodes.',
-  '녹화 파일을 대화방에 올리지 못했습니다: {0}': 'Couldn\'t post the recording file to the chat: {0}',
-  '녹화를 너무 자주 시작했습니다. {0}분 후 다시 시도하세요.': 'Recording was started too often. Try again in {0} min.',
+  '녹화 파일을 대화방에 올리지 못했습니다: {0}':
+      'Couldn\'t post the recording file to the chat: {0}',
+  '녹화를 너무 자주 시작했습니다. {0}분 후 다시 시도하세요.':
+      'Recording was started too often. Try again in {0} min.',
   '늘 붙일 결재자는 {0}명까지입니다.': 'Up to {0} fixed approvers are allowed.',
-  '다른 번호로 바꾸세요(공유기 포트포워딩도 함께). {0}': 'to a different number (update the router port forwarding too). {0}',
-  '단추를 처리하는 서버가 {0}초 안에 답하지 않았습니다.': 'The server that handles the button didn\'t respond within {0} seconds.',
-  '단추를 처리하는 서버가 오류를 돌려줬습니다({0}).': 'The server that handles the button returned an error ({0}).',
+  '다른 번호로 바꾸세요(공유기 포트포워딩도 함께). {0}':
+      'to a different number (update the router port forwarding too). {0}',
+  '단추를 처리하는 서버가 {0}초 안에 답하지 않았습니다.':
+      'The server that handles the button didn\'t respond within {0} seconds.',
+  '단추를 처리하는 서버가 오류를 돌려줬습니다({0}).':
+      'The server that handles the button returned an error ({0}).',
   '담당자는 {0}명까지 지정할 수 있습니다.': 'You can assign up to {0} assignees.',
   '담당자를 {0}(으)로 지정했습니다.': 'Set the assignee to {0}.',
-  '대결은 {0}일까지 맡길 수 있습니다.': 'Proxy approval can be delegated for up to {0} days.',
+  '대결은 {0}일까지 맡길 수 있습니다.':
+      'Proxy approval can be delegated for up to {0} days.',
   '대상은 {0}명까지 고를 수 있습니다.': 'You can choose up to {0} recipients.',
   '댓글은 {0}자까지 쓸 수 있습니다.': 'Comments can be up to {0} characters.',
   '도메인 {0}': 'Domain {0}',
@@ -2651,12 +3353,18 @@ const Map<String, String> serverTemplatesEn = {
   '등급 {0} → {1}({2})': 'Role {0} → {1} ({2})',
   '등록된 카드가 아닙니다: {0}': 'Not a registered card: {0}',
   '디렉터리를 읽지 못했습니다: {0}': 'Couldn\'t read the directory: {0}',
-  '디렉터리와 맞추기 — {0}명 중 부서 {1}명·상위자 {2}명, 부서 {3}개 만듦': 'Directory sync — of {0} people, {1} departments and {2} managers changed, {3} departments created',
-  '로그의 "Let\'s Encrypt 응답"에 있는 안내 링크로 해제하면, {0} 자동으로 다시 받습니다.': 'Once you lift it via the link in the "Let\'s Encrypt response" in the log, it will be obtained again automatically {0}.',
-  '로그인 시도가 너무 많습니다. {0} 후 다시 시도하세요.': 'Too many sign-in attempts. Try again in {0}.',
-  '로그인에 실패했습니다. 계정과 비밀번호를 확인하세요 — Gmail·네이버는 계정 비밀번호가 아니라 "앱 비밀번호"를 넣어야 하고, 네이버는 메일 환경설정에서 SMTP 사용을 켜야 합니다.{0}': 'Sign-in failed. Check the account and password — Gmail and Naver require an "app password" instead of your account password, and Naver requires SMTP to be enabled in mail settings.{0}',
-  '로그인에 실패했습니다. 아이디와 비밀번호를 확인하세요 — Gmail·네이버 등은 계정 비밀번호가 아니라 "앱 비밀번호"를 넣어야 하고, 메일 설정에서 IMAP 사용을 켜야 합니다.{0}': 'Sign-in failed. Check the username and password — Gmail, Naver, etc. require an "app password" instead of your account password, and IMAP must be enabled in mail settings.{0}',
-  '리마인더는 {0}개까지 걸어 둘 수 있습니다. 지난 것을 지운 뒤 다시 거세요.': 'You can set up to {0} reminders. Delete past ones and try again.',
+  '디렉터리와 맞추기 — {0}명 중 부서 {1}명·상위자 {2}명, 부서 {3}개 만듦':
+      'Directory sync — of {0} people, {1} departments and {2} managers changed, {3} departments created',
+  '로그의 "Let\'s Encrypt 응답"에 있는 안내 링크로 해제하면, {0} 자동으로 다시 받습니다.':
+      'Once you lift it via the link in the "Let\'s Encrypt response" in the log, it will be obtained again automatically {0}.',
+  '로그인 시도가 너무 많습니다. {0} 후 다시 시도하세요.':
+      'Too many sign-in attempts. Try again in {0}.',
+  '로그인에 실패했습니다. 계정과 비밀번호를 확인하세요 — Gmail·네이버는 계정 비밀번호가 아니라 "앱 비밀번호"를 넣어야 하고, 네이버는 메일 환경설정에서 SMTP 사용을 켜야 합니다.{0}':
+      'Sign-in failed. Check the account and password — Gmail and Naver require an "app password" instead of your account password, and Naver requires SMTP to be enabled in mail settings.{0}',
+  '로그인에 실패했습니다. 아이디와 비밀번호를 확인하세요 — Gmail·네이버 등은 계정 비밀번호가 아니라 "앱 비밀번호"를 넣어야 하고, 메일 설정에서 IMAP 사용을 켜야 합니다.{0}':
+      'Sign-in failed. Check the username and password — Gmail, Naver, etc. require an "app password" instead of your account password, and IMAP must be enabled in mail settings.{0}',
+  '리마인더는 {0}개까지 걸어 둘 수 있습니다. 지난 것을 지운 뒤 다시 거세요.':
+      'You can set up to {0} reminders. Delete past ones and try again.',
   '마감이 임박했습니다: {0}': 'Due soon: {0}',
   '만료까지 {0} 남아 갱신합니다': 'Renewing with {0} left before expiry',
   '만료는 1~{0}일로 정하세요.': 'Set the expiry to 1–{0} days.',
@@ -2666,58 +3374,83 @@ const Map<String, String> serverTemplatesEn = {
   '맥락 서명({0})이 올바르지 않습니다.': 'Invalid context signature ({0}).',
   '메모는 {0}자까지 쓸 수 있습니다.': 'Memos can be up to {0} characters.',
   '메모는 {0}자까지입니다.': 'The memo can be up to {0} characters.',
-  '메시지가 {0} 이후에 자동삭제가 되도록 설정했습니다.': 'Messages will be automatically deleted after {0}.',
+  '메시지가 {0} 이후에 자동삭제가 되도록 설정했습니다.':
+      'Messages will be automatically deleted after {0}.',
   '메시지는 {0}자 이내로 입력하세요.': 'Messages must be {0} characters or fewer.',
-  '메시지를 너무 빠르게 보내고 있습니다. {0} 후 다시 시도하세요.': 'You\'re sending messages too quickly. Try again in {0}.',
-  '메일 OAuth: Google {0}, Microsoft {1}': 'Mail OAuth: Google {0}, Microsoft {1}',
+  '메시지를 너무 빠르게 보내고 있습니다. {0} 후 다시 시도하세요.':
+      'You\'re sending messages too quickly. Try again in {0}.',
+  '메일 OAuth: Google {0}, Microsoft {1}':
+      'Mail OAuth: Google {0}, Microsoft {1}',
   '메일 계정은 {0}개까지 연결할 수 있습니다.': 'You can connect up to {0} mail accounts.',
-  '메일 서버 주소를 찾지 못했습니다. 서버 주소를 확인하세요.{0}': 'Couldn\'t find the mail server address. Check the server address.{0}',
+  '메일 서버 주소를 찾지 못했습니다. 서버 주소를 확인하세요.{0}':
+      'Couldn\'t find the mail server address. Check the server address.{0}',
   '메일 서버 주소를 찾지 못했습니다: {0}': 'Couldn\'t find the mail server address: {0}',
-  '메일 서버가 보내는 주소나 받는 주소를 거절했습니다. Gmail·네이버는 보내는 주소가 로그인한 계정과 같아야 합니다.{0}': 'The mail server rejected the sender or recipient address. Gmail and Naver require the sender address to match the signed-in account.{0}',
-  '메일 서버에 연결하지 못했습니다. 서버 주소·포트·연결 보안(465는 SSL, 587은 STARTTLS)을 확인하고, 서버 PC의 방화벽이 그 포트로 나가는 연결을 막지 않는지 보세요.{0}': 'Couldn\'t connect to the mail server. Check the server address, port, and connection security (SSL for 465, STARTTLS for 587), and make sure the server PC\'s firewall isn\'t blocking outgoing connections on that port.{0}',
-  '메일 서버에 연결하지 못했습니다. 주소·포트(IMAP 993은 SSL, 143은 STARTTLS)를 확인하고, 서버 PC의 방화벽이 그 포트로 나가는 연결을 막지 않는지 보세요.{0}': 'Couldn\'t connect to the mail server. Check the address and port (SSL for IMAP 993, STARTTLS for 143), and make sure the server PC\'s firewall isn\'t blocking outgoing connections on that port.{0}',
+  '메일 서버가 보내는 주소나 받는 주소를 거절했습니다. Gmail·네이버는 보내는 주소가 로그인한 계정과 같아야 합니다.{0}':
+      'The mail server rejected the sender or recipient address. Gmail and Naver require the sender address to match the signed-in account.{0}',
+  '메일 서버에 연결하지 못했습니다. 서버 주소·포트·연결 보안(465는 SSL, 587은 STARTTLS)을 확인하고, 서버 PC의 방화벽이 그 포트로 나가는 연결을 막지 않는지 보세요.{0}':
+      'Couldn\'t connect to the mail server. Check the server address, port, and connection security (SSL for 465, STARTTLS for 587), and make sure the server PC\'s firewall isn\'t blocking outgoing connections on that port.{0}',
+  '메일 서버에 연결하지 못했습니다. 주소·포트(IMAP 993은 SSL, 143은 STARTTLS)를 확인하고, 서버 PC의 방화벽이 그 포트로 나가는 연결을 막지 않는지 보세요.{0}':
+      'Couldn\'t connect to the mail server. Check the address and port (SSL for IMAP 993, STARTTLS for 143), and make sure the server PC\'s firewall isn\'t blocking outgoing connections on that port.{0}',
   '메일 서버와 통신하지 못했습니다.{0}': 'Couldn\'t communicate with the mail server.{0}',
-  '메일 요청이 너무 많습니다. {0} 후 다시 시도하세요.': 'Too many mail requests. Try again in {0}.',
+  '메일 요청이 너무 많습니다. {0} 후 다시 시도하세요.':
+      'Too many mail requests. Try again in {0}.',
   '메일: {0}': 'Mail: {0}',
-  '메일을 너무 많이 요청했습니다. {0} 뒤에 다시 시도하세요.': 'Too many mail requests. Try again in {0}.',
+  '메일을 너무 많이 요청했습니다. {0} 뒤에 다시 시도하세요.':
+      'Too many mail requests. Try again in {0}.',
   '메일을 보내지 못했습니다.{0}': 'Couldn\'t send the mail.{0}',
   '멘션 요약 {0}{1}': 'Mention digest {0}{1}',
-  '멘션 요약 기준은 {0}~{1}일 사이로 정하세요.': 'Set the mention digest threshold between {0} and {1} days.',
-  '명령을 너무 자주 실행했습니다. {0} 뒤에 다시 하세요.': 'You ran commands too often. Try again in {0}.',
-  '명령을 처리하는 서버가 오류를 돌려줬습니다({0}).': 'The server handling the command returned an error ({0}).',
+  '멘션 요약 기준은 {0}~{1}일 사이로 정하세요.':
+      'Set the mention digest threshold between {0} and {1} days.',
+  '명령을 너무 자주 실행했습니다. {0} 뒤에 다시 하세요.':
+      'You ran commands too often. Try again in {0}.',
+  '명령을 처리하는 서버가 오류를 돌려줬습니다({0}).':
+      'The server handling the command returned an error ({0}).',
   '문항은 {0}개까지 넣을 수 있습니다.': 'You can add up to {0} questions.',
-  '반대 의견이 남았습니다(결재는 계속 진행): {0}': 'A disagreement was recorded (approval continues): {0}',
+  '반대 의견이 남았습니다(결재는 계속 진행): {0}':
+      'A disagreement was recorded (approval continues): {0}',
   '반려되었습니다: {0}': 'Rejected: {0}',
-  '반복 {0}회 중 {1}회가 겹칩니다 — {2}. 겹치는 회차를 빼고 잡으려면 "겹치는 날 빼고"를 고르세요.': '{1} of {0} occurrences conflict — {2}. To book the rest, choose "Skip conflicting dates".',
+  '반복 {0}회 중 {1}회가 겹칩니다 — {2}. 겹치는 회차를 빼고 잡으려면 "겹치는 날 빼고"를 고르세요.':
+      '{1} of {0} occurrences conflict — {2}. To book the rest, choose "Skip conflicting dates".',
   '반복 간격은 1~{0} 사이여야 합니다.': 'The repeat interval must be between 1 and {0}.',
-  '반복 간격은 1~{0} 사이의 정수입니다.': 'The repeat interval is a whole number from 1 to {0}.',
-  '반복 업무 — 다음 회차 {0}를 만들었습니다.': 'Recurring task — created the next occurrence {0}.',
+  '반복 간격은 1~{0} 사이의 정수입니다.':
+      'The repeat interval is a whole number from 1 to {0}.',
+  '반복 업무 — 다음 회차 {0}를 만들었습니다.':
+      'Recurring task — created the next occurrence {0}.',
   '반복 업무({0}) — {1}에서 이어졌습니다.': 'Recurring task ({0}) — continued from {1}.',
-  '반복 업무의 다음 회차가 만들어졌습니다{0}: {1}': 'The next occurrence of a recurring task was created{0}: {1}',
+  '반복 업무의 다음 회차가 만들어졌습니다{0}: {1}':
+      'The next occurrence of a recurring task was created{0}: {1}',
   '반복 종료일은 {0}까지 정할 수 있습니다.': 'The repeat end date can be set up to {0}.',
   '반복 횟수는 1~{0} 사이여야 합니다.': 'The repeat count must be between 1 and {0}.',
   '반복은 1~{0}회로 정하세요.': 'Set the repeat count between 1 and {0}.',
   '반복을 \'{0}\'(으)로 설정했습니다.': 'Set repeat to \'{0}\'.',
-  '받는 규칙 "{0}"이(가) 이 폴더로 옮깁니다. 규칙을 먼저 고치거나 지우세요.': 'The incoming rule "{0}" moves mail into this folder. Edit or delete the rule first.',
+  '받는 규칙 "{0}"이(가) 이 폴더로 옮깁니다. 규칙을 먼저 고치거나 지우세요.':
+      'The incoming rule "{0}" moves mail into this folder. Edit or delete the rule first.',
   '받는 규칙은 계정마다 {0}개까지입니다.': 'Up to {0} inbox rules per account.',
   '받는 메일(IMAP) — {0}': 'Incoming mail (IMAP) — {0}',
   '받는 사람은 모두 합쳐 {0}명까지입니다.': 'Up to {0} recipients in total.',
   '받는 사람을 찾을 수 없습니다: {0}': 'Recipient not found: {0}',
   '받는 포트를 열지 못했습니다({0}).': 'Couldn\'t open the receiving port ({0}).',
-  '받은 인증서(만료 {0})가 이 PC 시계로는 벌써 갱신할 때입니다 — 서버 PC의 날짜·시간·시간대를 확인하세요. ': 'The received certificate (expires {0}) is already due for renewal according to this PC\'s clock — check the server PC\'s date, time, and time zone. ',
-  '받은 인증서(만료 {0})가 이 PC 시계로는 이미 만료입니다 — 서버 PC의 날짜·시간·시간대를 확인하세요.': 'The received certificate (expires {0}) has already expired according to this PC\'s clock — check the server PC\'s date, time, and time zone.',
+  '받은 인증서(만료 {0})가 이 PC 시계로는 벌써 갱신할 때입니다 — 서버 PC의 날짜·시간·시간대를 확인하세요. ':
+      'The received certificate (expires {0}) is already due for renewal according to this PC\'s clock — check the server PC\'s date, time, and time zone. ',
+  '받은 인증서(만료 {0})가 이 PC 시계로는 이미 만료입니다 — 서버 PC의 날짜·시간·시간대를 확인하세요.':
+      'The received certificate (expires {0}) has already expired according to this PC\'s clock — check the server PC\'s date, time, and time zone.',
   '받은 인증서를 쓸 수 없습니다: {0}': 'The received certificate can\'t be used: {0}',
-  '방금 알렸습니다. {0} 뒤에 다시 보낼 수 있습니다.': 'A reminder was just sent. You can send another in {0}.',
-  '방금 코드를 보냈습니다. {0} 뒤에 다시 받을 수 있습니다. 메일이 안 보이면 스팸함도 확인하세요.': 'A code was just sent. You can request another in {0}. If you don\'t see the email, check your spam folder.',
+  '방금 알렸습니다. {0} 뒤에 다시 보낼 수 있습니다.':
+      'A reminder was just sent. You can send another in {0}.',
+  '방금 코드를 보냈습니다. {0} 뒤에 다시 받을 수 있습니다. 메일이 안 보이면 스팸함도 확인하세요.':
+      'A code was just sent. You can request another in {0}. If you don\'t see the email, check your spam folder.',
   '백업 설정: {0}': 'Backup settings: {0}',
-  '백업 암호는 {0}자 이상으로 정하세요.': 'The backup password must be at least {0} characters.',
-  '백업 폴더에 {0}이(가) 없습니다 — 복사가 덜 됐을 수 있습니다.': '{0} is missing from the backup folder — the copy may be incomplete.',
+  '백업 암호는 {0}자 이상으로 정하세요.':
+      'The backup password must be at least {0} characters.',
+  '백업 폴더에 {0}이(가) 없습니다 — 복사가 덜 됐을 수 있습니다.':
+      '{0} is missing from the backup folder — the copy may be incomplete.',
   '법인카드 등록 — {0} ({1} {2})': 'Corporate card added — {0} ({1} {2})',
   '법인카드 변경 — {0}': 'Corporate card changed — {0}',
   '법인카드 사용 건 제외 — {0} {1}원: {2}': 'Card transaction excluded — {0} ₩{1}: {2}',
   '법인카드 사용 건 제외 풀기 — {0}': 'Card transaction restored — {0}',
   '법인카드 삭제 — {0} ({1} {2})': 'Corporate card deleted — {0} ({1} {2})',
-  '법인카드 이용내역 가져오기 — {0}: {1}건({2}~{3})': 'Card statement imported — {0}: {1} transactions ({2}–{3})',
+  '법인카드 이용내역 가져오기 — {0}: {1}건({2}~{3})':
+      'Card statement imported — {0}: {1} transactions ({2}–{3})',
   '법인카드-{0}.xlsx': 'corporate-cards-{0}.xlsx',
   '보관 개수는 {0}~{1}개 중에서 고르세요.': 'Choose a retention count from {0} to {1}.',
   '보관 기한 지난 영수증 지움 — {0}개': 'Expired receipts deleted — {0}',
@@ -2726,13 +3459,20 @@ const Map<String, String> serverTemplatesEn = {
   '보기는 {0}자 이내로 입력하세요.': 'Options must be {0} characters or fewer.',
   '보내는 메일(SMTP) — {0}': 'Outgoing mail (SMTP) — {0}',
   '보내는 이름은 {0}자 이내로 넣으세요.': 'The sender name must be {0} characters or fewer.',
-  '보내는 이름은 {0}자 이내로, 줄바꿈 없이 넣으세요.': 'The sender name must be {0} characters or fewer, with no line breaks.',
-  '보낸 도메인({0})의 DMARC 정책이 "거절"인데 보낸 쪽 확인에 실패했습니다.': 'The sender domain ({0}) has a DMARC policy of "reject" and the sender checks failed.',
-  '보낸 도메인({0})의 DMARC 정책이 "격리"인데 보낸 쪽 확인에 실패했습니다.': 'The sender domain ({0}) has a DMARC policy of "quarantine" and the sender checks failed.',
-  '보안 연결(TLS)에 실패했습니다. 연결 보안 방식을 바꿔 보세요.{0}': 'The secure connection (TLS) failed. Try a different connection security method.{0}',
-  '보안 질문 답변은 {0}자 이내로 입력하세요.': 'Security answers must be {0} characters or fewer.',
-  '보안 질문은 {0}자 이내로 입력하세요.': 'Security questions must be {0} characters or fewer.',
-  '보안 키·패스키는 {0}개까지 등록할 수 있습니다.': 'You can register up to {0} security keys/passkeys.',
+  '보내는 이름은 {0}자 이내로, 줄바꿈 없이 넣으세요.':
+      'The sender name must be {0} characters or fewer, with no line breaks.',
+  '보낸 도메인({0})의 DMARC 정책이 "거절"인데 보낸 쪽 확인에 실패했습니다.':
+      'The sender domain ({0}) has a DMARC policy of "reject" and the sender checks failed.',
+  '보낸 도메인({0})의 DMARC 정책이 "격리"인데 보낸 쪽 확인에 실패했습니다.':
+      'The sender domain ({0}) has a DMARC policy of "quarantine" and the sender checks failed.',
+  '보안 연결(TLS)에 실패했습니다. 연결 보안 방식을 바꿔 보세요.{0}':
+      'The secure connection (TLS) failed. Try a different connection security method.{0}',
+  '보안 질문 답변은 {0}자 이내로 입력하세요.':
+      'Security answers must be {0} characters or fewer.',
+  '보안 질문은 {0}자 이내로 입력하세요.':
+      'Security questions must be {0} characters or fewer.',
+  '보안 키·패스키는 {0}개까지 등록할 수 있습니다.':
+      'You can register up to {0} security keys/passkeys.',
   '본문은 {0}자 이내로 입력하세요.': 'The body must be {0} characters or fewer.',
   '본문은 {0}자까지 쓸 수 있습니다.': 'The body can be up to {0} characters.',
   '본인 {0}만 {1}할 수 있습니다.': 'You can only {1} your own {0}.',
@@ -2749,24 +3489,34 @@ const Map<String, String> serverTemplatesEn = {
   '부서장 {0}': 'Department head {0}',
   '부서장 아이디가 "{0}"인 사람이 없습니다.': 'No user with the head username "{0}".',
   '북마크 제목은 {0}자 이내로 입력하세요.': 'Bookmark titles must be {0} characters or fewer.',
-  '북마크는 한 종류에 {0}개까지 만들 수 있습니다.': 'You can create up to {0} bookmarks per type.',
+  '북마크는 한 종류에 {0}개까지 만들 수 있습니다.':
+      'You can create up to {0} bookmarks per type.',
   '비밀대화 요청 · {0}': 'Secret chat request · {0}',
-  '비밀번호 5회 오류 — 이 IP에서 이 아이디 {0} 로그인 차단': '5 wrong passwords — sign-in for this username blocked from this IP for {0}',
-  '비밀번호 재설정 확인 3회 실패 — 이 IP에서 {0} 차단': '3 failed password reset verifications — blocked from this IP for {0}',
-  '비밀번호 확인 시도가 너무 많습니다. {0} 후 다시 시도하세요.': 'Too many password attempts. Try again in {0}.',
-  '비밀번호가 {0}자보다 짧다면 사내 와이파이에서 로그인해 비밀번호를 바꾼 뒤 다시 시도하세요.': 'If your password is shorter than {0} characters, sign in on the company Wi-Fi, change your password, and try again.',
+  '비밀번호 5회 오류 — 이 IP에서 이 아이디 {0} 로그인 차단':
+      '5 wrong passwords — sign-in for this username blocked from this IP for {0}',
+  '비밀번호 재설정 확인 3회 실패 — 이 IP에서 {0} 차단':
+      '3 failed password reset verifications — blocked from this IP for {0}',
+  '비밀번호 확인 시도가 너무 많습니다. {0} 후 다시 시도하세요.':
+      'Too many password attempts. Try again in {0}.',
+  '비밀번호가 {0}자보다 짧다면 사내 와이파이에서 로그인해 비밀번호를 바꾼 뒤 다시 시도하세요.':
+      'If your password is shorter than {0} characters, sign in on the company Wi-Fi, change your password, and try again.',
   '비밀번호는 {0}자 이상이어야 합니다.': 'Passwords must be at least {0} characters.',
   '비밀번호는 {0}자 이하여야 합니다.': 'Passwords must be {0} characters or fewer.',
-  '사내망 밖 전체에서 최근 {0} 동안 비밀번호 오류 {1}회': '{1} password errors from outside the company network in the last {0}',
-  '사내망 밖에서 비밀번호 재설정 확인 10회 실패 — 밖에서는 {0} 재설정 불가': '10 failed password reset verifications from outside the company network — reset unavailable from outside for {0}',
-  '사내망 밖에서 이 아이디로 비밀번호 20회 오류 — 밖에서는 {0} 로그인 차단(사내에서는 가능)': '20 wrong passwords for this username from outside the company network — sign-in from outside blocked for {0} (still allowed on the company network)',
-  '사내망 밖에서는 {0}자 이상인 비밀번호로만 로그인할 수 있습니다. ': 'Outside the company network, you can only sign in with a password of at least {0} characters. ',
+  '사내망 밖 전체에서 최근 {0} 동안 비밀번호 오류 {1}회':
+      '{1} password errors from outside the company network in the last {0}',
+  '사내망 밖에서 비밀번호 재설정 확인 10회 실패 — 밖에서는 {0} 재설정 불가':
+      '10 failed password reset verifications from outside the company network — reset unavailable from outside for {0}',
+  '사내망 밖에서 이 아이디로 비밀번호 20회 오류 — 밖에서는 {0} 로그인 차단(사내에서는 가능)':
+      '20 wrong passwords for this username from outside the company network — sign-in from outside blocked for {0} (still allowed on the company network)',
+  '사내망 밖에서는 {0}자 이상인 비밀번호로만 로그인할 수 있습니다. ':
+      'Outside the company network, you can only sign in with a password of at least {0} characters. ',
   '사무실 반경은 {0}~{1}m로 정하세요.': 'Set the office radius between {0} and {1} m.',
   '사무실 위치(반경 {0}m)': 'Office location (radius {0} m)',
   '사번은 {0}자까지입니다.': 'Employee numbers can be up to {0} characters.',
   '사용자를 찾았습니다: {0}{1}': 'User found: {0}{1}',
   '사유는 {0}자까지입니다.': 'The reason can be up to {0} characters.',
-  '상시 5명 이상 사업장은 법정 가산율({0}%)보다 낮게 정할 수 없습니다.': 'Businesses with 5 or more regular employees can\'t set rates below the legal premium rate ({0}%).',
+  '상시 5명 이상 사업장은 법정 가산율({0}%)보다 낮게 정할 수 없습니다.':
+      'Businesses with 5 or more regular employees can\'t set rates below the legal premium rate ({0}%).',
   '상위자 {0}': 'Manager {0}',
   '상위자 수는 0~{0}명으로 정하세요.': 'Set the number of managers between 0 and {0}.',
   '상위자 아이디가 "{0}"인 사람이 없습니다.': 'No user with the manager username "{0}".',
@@ -2776,17 +3526,21 @@ const Map<String, String> serverTemplatesEn = {
   '새 메일 {0}통': '{0} new emails',
   '새 메일 — {0}': 'New mail — {0}',
   '서명은 {0}자 이내로 넣으세요.': 'Signatures can be up to {0} characters.',
-  '서버 오류가 발생했습니다. (참조 번호 {0})': 'A server error occurred. (Reference number {0})',
+  '서버 오류가 발생했습니다. (참조 번호 {0})':
+      'A server error occurred. (Reference number {0})',
   '서비스 계정 키를 확인할 수 없습니다: {0}': 'Can\'t verify the service account key: {0}',
   '선행 업무 {0}을(를) 해제했습니다.': 'Removed predecessor {0}.',
-  '선행 업무 {0}이(가) 끝나 선행 업무가 모두 끝났습니다.': 'Predecessor {0} is done, so all predecessors are complete.',
-  '선행 업무가 모두 끝나 시작할 수 있습니다: {0}': 'All predecessors are done, so you can start: {0}',
+  '선행 업무 {0}이(가) 끝나 선행 업무가 모두 끝났습니다.':
+      'Predecessor {0} is done, so all predecessors are complete.',
+  '선행 업무가 모두 끝나 시작할 수 있습니다: {0}':
+      'All predecessors are done, so you can start: {0}',
   '선행 업무는 {0}개까지 둘 수 있습니다.': 'Up to {0} predecessors are allowed.',
   '선행 업무로 {0}을(를) 지정했습니다.': 'Set {0} as a predecessor.',
   '설명은 {0}자 이내로 넣으세요.': 'Descriptions must be {0} characters or fewer.',
   '설명은 {0}자 이내로 입력하세요.': 'Descriptions must be {0} characters or fewer.',
   '설명은 {0}자까지 쓸 수 있습니다.': 'Descriptions can be up to {0} characters.',
-  '설치하는 일이 되풀이됐는지 확인하세요. {0} 자동으로 다시 시도합니다.': 'check whether it keeps being reinstalled. It will retry automatically {0}.',
+  '설치하는 일이 되풀이됐는지 확인하세요. {0} 자동으로 다시 시도합니다.':
+      'check whether it keeps being reinstalled. It will retry automatically {0}.',
   '소요 시간 {0}을 기록했습니다.': 'Logged {0} of time spent.',
   '수용 인원은 1~{0}명으로 넣으세요.': 'Enter a capacity of 1–{0} people.',
   '스팸 거르기 {0}': 'Spam filtering {0}',
@@ -2797,13 +3551,18 @@ const Map<String, String> serverTemplatesEn = {
   '승인된 결재를 확인하세요: {0} — {1}': 'Please confirm the approved request: {0} — {1}',
   '승인할 사람은 {0}명까지입니다.': 'Up to {0} approvers are allowed.',
   '시간 연차는 1~{0}시간으로 고르세요.': 'Choose 1 to {0} hours for hourly leave.',
-  '시계를 고칠 때까지 갱신은 {0}에 한 번만 시도합니다.': 'Until the clock is fixed, renewal will be attempted only once every {0}.',
-  '쓰지 않은 연차 {0} — {1}까지 쓸 날을 정해 내 주세요(연차 기간 {2} 만료).': 'Unused leave {0} — please submit the days you\'ll use by {1} (leave period ends {2}).',
-  '쓰지 않은 연차 {0}일 — {1}까지 쓸 날을 정해 내 주세요(연차 기간 {2} 만료).': '{0} days of unused annual leave — please submit the dates you\'ll use by {1} (leave period expires {2}).',
+  '시계를 고칠 때까지 갱신은 {0}에 한 번만 시도합니다.':
+      'Until the clock is fixed, renewal will be attempted only once every {0}.',
+  '쓰지 않은 연차 {0} — {1}까지 쓸 날을 정해 내 주세요(연차 기간 {2} 만료).':
+      'Unused leave {0} — please submit the days you\'ll use by {1} (leave period ends {2}).',
+  '쓰지 않은 연차 {0}일 — {1}까지 쓸 날을 정해 내 주세요(연차 기간 {2} 만료).':
+      '{0} days of unused annual leave — please submit the dates you\'ll use by {1} (leave period expires {2}).',
   '쓸 수 없는 돌아갈 주소입니다: {0}': 'Redirect URI not allowed: {0}',
   '아이디가 "{0}"인 사람이 없습니다.': 'No user with the username "{0}".',
-  '아직 울리지 않은 할 일 알림이 너무 많습니다(할 일을 만든 사람마다 최대 {0}개). ': 'Too many pending to-do reminders (up to {0} per to-do creator). ',
-  '아직 응답하지 않은 설문이 있습니다: {0}': 'You have a survey you haven\'t answered yet: {0}',
+  '아직 울리지 않은 할 일 알림이 너무 많습니다(할 일을 만든 사람마다 최대 {0}개). ':
+      'Too many pending to-do reminders (up to {0} per to-do creator). ',
+  '아직 응답하지 않은 설문이 있습니다: {0}':
+      'You have a survey you haven\'t answered yet: {0}',
   '안내 글은 {0}자까지입니다.': 'The note can be up to {0} characters.',
   '알 수 없는 액션: {0}': 'Unknown action: {0}',
   '알 수 없는 일 종류입니다({0}).': 'Unknown event type ({0}).',
@@ -2811,7 +3570,8 @@ const Map<String, String> serverTemplatesEn = {
   '알 수 없는 필드: {0}': 'Unknown field: {0}',
   '알림은 {0}개까지 추가할 수 있습니다.': 'You can add up to {0} notifications.',
   '앞으로의 예약은 {0}건까지 잡아 둘 수 있습니다.': 'You can have up to {0} upcoming bookings.',
-  '앨범 설명은 {0}자 이내로 입력하세요.': 'Album descriptions must be {0} characters or fewer.',
+  '앨범 설명은 {0}자 이내로 입력하세요.':
+      'Album descriptions must be {0} characters or fewer.',
   '앨범 제목은 {0}자 이내로 입력하세요.': 'Album titles must be {0} characters or fewer.',
   '양식 만들기 — {0}': 'Create form — {0}',
   '양식 바꾸기 — {0}': 'Change form — {0}',
@@ -2819,51 +3579,75 @@ const Map<String, String> serverTemplatesEn = {
   '양식 지우기 — {0}': 'Delete form — {0}',
   '양식은 {0}개까지 만들 수 있습니다.': 'You can create up to {0} forms.',
   '양식은 {0}개까지입니다.': 'Up to {0} layouts.',
-  '업무 설명은 {0}자 이내로 입력하세요.': 'Task descriptions must be {0} characters or fewer.',
+  '어림은 {0}년 귀속 세법(자녀세액공제·신용카드 등 한도·소득공제 종합한도 2,500만 원 등)으로 셌습니다.':
+      'The estimate uses the {0} tax-year law (child tax credit, credit card etc. limits, KRW 25 million overall deduction cap, etc.).',
+  '업무 설명은 {0}자 이내로 입력하세요.':
+      'Task descriptions must be {0} characters or fewer.',
   '업무 제목은 {0}자 이내로 입력하세요.': 'Task titles must be {0} characters or fewer.',
-  '엑셀 가져오기 — 부서 {0}개 만듦, 사람 {1}명': 'Excel import — {0} departments created, {1} people',
-  '여러 IP에서 비밀번호를 넣어 보는 공격으로 보여, 밖에서 처음 보는 곳의 로그인은 줄을 세워 {0}에 ': 'This looks like a password-guessing attack from multiple IPs, so sign-ins from unfamiliar outside locations are queued: every {0}, ',
+  '엑셀 가져오기 — 부서 {0}개 만듦, 사람 {1}명':
+      'Excel import — {0} departments created, {1} people',
+  '여러 IP에서 비밀번호를 넣어 보는 공격으로 보여, 밖에서 처음 보는 곳의 로그인은 줄을 세워 {0}에 ':
+      'This looks like a password-guessing attack from multiple IPs, so sign-ins from unfamiliar outside locations are queued: every {0}, ',
   '연결 설정 변경({0}:{1})': 'Connection settings changed ({0}:{1})',
   '연결은 {0}개까지 만들 수 있습니다.': 'You can create up to {0} connections.',
   '연동 앱 만들기 — {0}': 'Create integration app — {0}',
   '연동 앱을 방에 추가 — {0}': 'Add integration app to room — {0}',
   '연동 앱을 방에서 빼기 — {0}': 'Remove integration app from room — {0}',
   '연동 점검 — {0}{1}': 'Connection check — {0}{1}',
-  '연동으로 가져오기 — {0}~{1}: 카드 {2}건, 증빙 {3}건': 'Fetched via integration — {0}~{1}: {2} card, {3} evidence',
-  '연말정산 공제 자료 {0} — {1} ({2}년 귀속)': 'Year-end deduction data {0} — {1} (tax year {2})',
+  '연동으로 가져오기 — {0}~{1}: 카드 {2}건, 증빙 {3}건':
+      'Fetched via integration — {0}~{1}: {2} card, {3} evidence',
+  '연말정산 공제 자료 {0} — {1} ({2}년 귀속)':
+      'Year-end deduction data {0} — {1} (tax year {2})',
   '연말정산 공제 자료 냄 ({0}년 귀속)': 'Submitted year-end deduction data (tax year {0})',
-  '연말정산 공제 자료 지움 — {0} ({1}년 귀속)': 'Deleted year-end deduction data — {0} (tax year {1})',
-  '연말정산 정산분 넣기 — {0} ({1}명, {2}년 귀속)': 'Year-end settlement added — {0} ({1} people, tax year {2})',
-  '연장근무는 앞으로 {0}일 안의 날만 신청할 수 있습니다.': 'Overtime can only be requested for dates within the next {0} days.',
-  '연장근무는 지난 {0}일 안의 날만 신청할 수 있습니다.': 'Overtime can only be requested for dates within the past {0} days.',
+  '연말정산 공제 자료 지움 — {0} ({1}년 귀속)':
+      'Deleted year-end deduction data — {0} (tax year {1})',
+  '연말정산 정산분 넣기 — {0} ({1}명, {2}년 귀속)':
+      'Year-end settlement added — {0} ({1} people, tax year {2})',
+  '연장근무는 앞으로 {0}일 안의 날만 신청할 수 있습니다.':
+      'Overtime can only be requested for dates within the next {0} days.',
+  '연장근무는 지난 {0}일 안의 날만 신청할 수 있습니다.':
+      'Overtime can only be requested for dates within the past {0} days.',
   '연차 {0}{1} — {2}': 'Annual leave {0}{1} — {2}',
   '연차 사용 촉진 1차 — {0}명': 'Annual leave usage promotion, round 1 — {0} people',
-  '연차 사용 촉진 2차 — {0} {1}일 지정': 'Annual leave usage promotion, round 2 — {0}, {1} days assigned',
+  '연차 사용 촉진 2차 — {0} {1}일 지정':
+      'Annual leave usage promotion, round 2 — {0}, {1} days assigned',
   '연차 이월 {0}일까지': 'Leave carry-over up to {0} days',
   '연차 이월 — {0}명': 'Leave carry-over — {0} people',
-  '연차 이월은 0~{0}일로 정하세요(0이면 하지 않음).': 'Set leave carry-over between 0 and {0} days (0 turns it off).',
+  '연차 이월은 0~{0}일로 정하세요(0이면 하지 않음).':
+      'Set leave carry-over between 0 and {0} days (0 turns it off).',
   '열 이름은 {0}자 이내로 넣으세요.': 'Column names must be {0} characters or fewer.',
   '열은 {0}개까지입니다.': 'Up to {0} columns.',
-  '영수증 읽기 서비스가 {0}로 거절했습니다{1}': 'The receipt reading service refused with {0}{1}',
-  '영수증을 너무 많이 읽었습니다. {0} 뒤에 다시 하세요.': 'Too many receipts read. Try again in {0}.',
+  '영수증 읽기 서비스가 {0}로 거절했습니다{1}':
+      'The receipt reading service refused with {0}{1}',
+  '영수증을 너무 많이 읽었습니다. {0} 뒤에 다시 하세요.':
+      'Too many receipts read. Try again in {0}.',
   '예상 시간을 {0}(으)로 정했습니다.': 'Set the estimate to {0}.',
-  '예약 메시지는 최대 {0}건까지 만들 수 있습니다.': 'You can create up to {0} scheduled messages.',
+  '예약 메시지는 최대 {0}건까지 만들 수 있습니다.':
+      'You can create up to {0} scheduled messages.',
   '예약 알림 {0}분 전': 'Booking reminder {0} min before',
-  '예약 알림은 0~{0}분 전으로 정하세요(0이면 끔).': 'Set booking reminders to 0–{0} minutes before (0 turns them off).',
+  '예약 알림은 0~{0}분 전으로 정하세요(0이면 끔).':
+      'Set booking reminders to 0–{0} minutes before (0 turns them off).',
   '예약 취소 — {0} {1} {2}': 'Booking canceled — {0} {1} {2}',
   '예약할 수 있는 사람은 {0}명까지입니다.': 'Up to {0} people can be allowed to book.',
-  '오류가 {0}회 아래로 줄면 저절로 풀립니다.': 'It will lift automatically once errors drop below {0}.',
+  '오류가 {0}회 아래로 줄면 저절로 풀립니다.':
+      'It will lift automatically once errors drop below {0}.',
   '외 {0}개': 'and {0} more',
-  '외부 백업 위치({0})가 폴더가 아닙니다.': 'The external backup location ({0}) isn\'t a folder.',
-  '외부 백업 위치({0})를 찾을 수 없습니다 — 외장 드라이브가 연결돼 있는지, NAS가 켜져 있는지 확인하세요.': 'Can\'t find the external backup location ({0}) — check that the external drive is connected or the NAS is on.',
-  '외부 백업 위치에 쓰지 못했습니다({0}). {1}': 'Couldn\'t write to the external backup location ({0}). {1}',
-  '외부 백업 위치에 폴더를 만들지 못했습니다({0}). {1}': 'Couldn\'t create a folder in the external backup location ({0}). {1}',
+  '외부 백업 위치({0})가 폴더가 아닙니다.':
+      'The external backup location ({0}) isn\'t a folder.',
+  '외부 백업 위치({0})를 찾을 수 없습니다 — 외장 드라이브가 연결돼 있는지, NAS가 켜져 있는지 확인하세요.':
+      'Can\'t find the external backup location ({0}) — check that the external drive is connected or the NAS is on.',
+  '외부 백업 위치에 쓰지 못했습니다({0}). {1}':
+      'Couldn\'t write to the external backup location ({0}). {1}',
+  '외부 백업 위치에 폴더를 만들지 못했습니다({0}). {1}':
+      'Couldn\'t create a folder in the external backup location ({0}). {1}',
   '외부 위치 {0}': 'External location {0}',
-  '외부 캘린더는 {0}개까지 구독할 수 있습니다.': 'You can subscribe to up to {0} external calendars.',
+  '외부 캘린더는 {0}개까지 구독할 수 있습니다.':
+      'You can subscribe to up to {0} external calendars.',
   '요청이 너무 많습니다. {0} 뒤에 다시 보내세요.': 'Too many requests. Send again in {0}.',
   '요청이 너무 많습니다. {0} 뒤에 다시 하세요.': 'Too many requests. Try again in {0}.',
   '용도는 {0}자까지입니다.': 'The purpose can be up to {0} characters.',
-  '우리 회사 도메인({0})을 쓴 메일인데 그 도메인에서 보낸 것으로 확인되지 않았습니다(사칭일 수 있음).': 'The message uses your company domain ({0}) but couldn\'t be verified as sent from it (it may be impersonation).',
+  '우리 회사 도메인({0})을 쓴 메일인데 그 도메인에서 보낸 것으로 확인되지 않았습니다(사칭일 수 있음).':
+      'The message uses your company domain ({0}) but couldn\'t be verified as sent from it (it may be impersonation).',
   '우선순위를 \'{0}\'(으)로 변경했습니다.': 'Changed the priority to \'{0}\'.',
   '웹 앱 전용 포트를 준비하지 못했습니다: {0}': 'Couldn\'t set up the web app port: {0}',
   '웹훅 만들기 — {0}': 'Create webhook — {0}',
@@ -2871,31 +3655,47 @@ const Map<String, String> serverTemplatesEn = {
   '유형을 \'{0}\'(으)로 변경했습니다.': 'Changed the type to \'{0}\'.',
   '의견은 {0}자 이내로 쓰세요.': 'Comments must be {0} characters or fewer.',
   '이 링크는 {0}까지 쓸 수 있습니다.': 'This link is valid until {0}.',
-  '이 메일은 {0} 서버가 자동으로 보냈습니다. 답장해도 읽는 사람이 없습니다.': 'This email was sent automatically by the {0} server. Replies aren\'t read.',
-  '이 백업은 더 새 버전의 서버에서 만든 것입니다(마이그레이션 {0}개, 이 서버 {1}개) — 서버를 먼저 업데이트한 뒤 복원하세요.': 'This backup was made by a newer server version ({0} migrations; this server has {1}) — update the server first, then restore.',
-  '이 서버는 {0}만 팀을 만들 수 있도록 설정되어 있습니다.': 'This server is set so that only {0} can create teams.',
-  '이 연장근무를 더하면 그 주 근로시간이 약 {0}시간으로 {1}시간을 넘습니다. 날을 나누거나 관리자와 상의하세요.': 'Adding this overtime would bring that week to about {0} hours, over {1} hours. Split it across days or talk to your manager.',
-  '이 웹훅으로 너무 많이 보냈습니다. {0} 뒤에 다시 보내세요.': 'Too many messages sent through this webhook. Send again in {0}.',
-  '이 주소로 메일을 너무 많이 보냈습니다. {0} 뒤에 다시 시도하세요.': 'Too many emails sent to this address. Try again in {0}.',
-  '이 토큰에는 \'{0}\' 권한이 없습니다.': 'This token doesn\'t have the \'{0}\' permission.',
-  '이 팀은 {0}만 토픽을 만들 수 있도록 설정되어 있습니다.': 'This team is set so that only {0} can create topics.',
+  '이 메일은 {0} 서버가 자동으로 보냈습니다. 답장해도 읽는 사람이 없습니다.':
+      'This email was sent automatically by the {0} server. Replies aren\'t read.',
+  '이 백업은 더 새 버전의 서버에서 만든 것입니다(마이그레이션 {0}개, 이 서버 {1}개) — 서버를 먼저 업데이트한 뒤 복원하세요.':
+      'This backup was made by a newer server version ({0} migrations; this server has {1}) — update the server first, then restore.',
+  '이 서버는 {0}만 팀을 만들 수 있도록 설정되어 있습니다.':
+      'This server is set so that only {0} can create teams.',
+  '이 연장근무를 더하면 그 주 근로시간이 약 {0}시간으로 {1}시간을 넘습니다. 날을 나누거나 관리자와 상의하세요.':
+      'Adding this overtime would bring that week to about {0} hours, over {1} hours. Split it across days or talk to your manager.',
+  '이 웹훅으로 너무 많이 보냈습니다. {0} 뒤에 다시 보내세요.':
+      'Too many messages sent through this webhook. Send again in {0}.',
+  '이 주소로 메일을 너무 많이 보냈습니다. {0} 뒤에 다시 시도하세요.':
+      'Too many emails sent to this address. Try again in {0}.',
+  '이 토큰에는 \'{0}\' 권한이 없습니다.':
+      'This token doesn\'t have the \'{0}\' permission.',
+  '이 팀은 {0}만 토픽을 만들 수 있도록 설정되어 있습니다.':
+      'This team is set so that only {0} can create topics.',
   '이름 {0} → {1}': 'Name {0} → {1}',
   '이름은 {0}자 이내로 입력하세요.': 'Names must be {0} characters or fewer.',
   '이름은 {0}자 이하로 입력하세요.': 'Names must be {0} characters or fewer.',
   '이메일 형식이 아닙니다: {0}': 'Not a valid email address: {0}',
   '이미 예약된 시간입니다 ({0}~{1} {2})': 'That time is already booked ({0}~{1} {2})',
-  '이미 정산을 올린 결재입니다: {0}': 'A settlement has already been submitted for this request: {0}',
+  '이미 정산을 올린 결재입니다: {0}':
+      'A settlement has already been submitted for this request: {0}',
   '이미 지출 결재에 올린 사용 건입니다: {0}': 'Already submitted in an expense approval: {0}',
-  '이번 주 근로시간이 {0}시간에 이르러 더 일할 수 없습니다. 관리자에게 문의하세요.': 'This week\'s working hours have reached {0} hours, so you can\'t work more. Contact your manager.',
-  '이번 주 근로시간이 {0}시간을 넘었습니다. 오늘 일하려면 연장근무(또는 휴일근무) 결재를 먼저 받으세요.': 'This week\'s working hours are over {0} hours. To work today, get an overtime (or holiday work) request approved first.',
-  '이월 — {0}~{1}에 남은 {2} 중 {3}': 'Carry-over — {3} of {2} remaining from {0}~{1}',
-  '인증서 발급 중 오류가 났습니다: {0}': 'An error occurred while issuing the certificate: {0}',
-  '인증서 폴더({0})에 기록을 남길 수 없어 발급을 미룹니다 — 폴더 권한·디스크를 확인하세요.': 'Can\'t write records to the certificate folder ({0}), so issuance is postponed — check the folder permissions and disk.',
+  '이번 주 근로시간이 {0}시간에 이르러 더 일할 수 없습니다. 관리자에게 문의하세요.':
+      'This week\'s working hours have reached {0} hours, so you can\'t work more. Contact your manager.',
+  '이번 주 근로시간이 {0}시간을 넘었습니다. 오늘 일하려면 연장근무(또는 휴일근무) 결재를 먼저 받으세요.':
+      'This week\'s working hours are over {0} hours. To work today, get an overtime (or holiday work) request approved first.',
+  '이월 — {0}~{1}에 남은 {2} 중 {3}':
+      'Carry-over — {3} of {2} remaining from {0}~{1}',
+  '인증서 발급 중 오류가 났습니다: {0}':
+      'An error occurred while issuing the certificate: {0}',
+  '인증서 폴더({0})에 기록을 남길 수 없어 발급을 미룹니다 — 폴더 권한·디스크를 확인하세요.':
+      'Can\'t write records to the certificate folder ({0}), so issuance is postponed — check the folder permissions and disk.',
   '인증서가 {0}용이 아닙니다': 'The certificate isn\'t for {0}',
-  '인증서를 받았지만 {0}에 저장하지 못했습니다 — 폴더 권한을 확인하세요(서버를 재시작하면 다시 받아야 합니다).': 'The certificate was obtained but couldn\'t be saved to {0} — check the folder permissions (it will have to be obtained again after a server restart).',
+  '인증서를 받았지만 {0}에 저장하지 못했습니다 — 폴더 권한을 확인하세요(서버를 재시작하면 다시 받아야 합니다).':
+      'The certificate was obtained but couldn\'t be saved to {0} — check the folder permissions (it will have to be obtained again after a server restart).',
   '인증서를 읽지 못했습니다({0})': 'Couldn\'t read the certificate ({0})',
   '일시: {0} ({1})': 'Date: {0} ({1})',
-  '일정 하나에 회의실·자원은 {0}개까지 붙일 수 있습니다.': 'Up to {0} rooms/resources can be attached to one event.',
+  '일정 하나에 회의실·자원은 {0}개까지 붙일 수 있습니다.':
+      'Up to {0} rooms/resources can be attached to one event.',
   '읽지 않은 멘션 {0}개': '{0} unread mentions',
   '입사일 {0}': 'Hire date {0}',
   '자동 백업 {0}': 'Automatic backup {0}',
@@ -2911,7 +3711,8 @@ const Map<String, String> serverTemplatesEn = {
   '자원은 {0}개까지 둘 수 있습니다.': 'You can have up to {0} resources.',
   '자체 메일 서버: {0}': 'Self-hosted mail server: {0}',
   '작성 후 {0}이 지나 {1}할 수 없습니다.': 'You can\'t {1} it more than {0} after posting.',
-  '재직 {0} ~ {1} ({2}일), 평균임금 산정 {3} ~ {4} ({5}일)': 'Employed {0} ~ {1} ({2} days), average wage period {3} ~ {4} ({5} days)',
+  '재직 {0} ~ {1} ({2}일), 평균임금 산정 {3} ~ {4} ({5}일)':
+      'Employed {0} ~ {1} ({2} days), average wage period {3} ~ {4} ({5} days)',
   '전결 규정은 {0}개까지입니다.': 'Up to {0} final approval rules are allowed.',
   '제목은 {0}자 이내로 넣으세요.': 'Titles must be {0} characters or fewer.',
   '제목은 {0}자 이내로 쓰세요.': 'Titles must be {0} characters or fewer.',
@@ -2925,16 +3726,22 @@ const Map<String, String> serverTemplatesEn = {
   '조직도-{0}-{1}.xlsx': 'OrgChart-{0}-{1}.xlsx',
   '증빙 내려받기 — {0}': 'Evidence downloaded — {0}',
   '증빙-{0}.xlsx': 'Evidence-{0}.xlsx',
-  '지금 사내망 밖에서 로그인 시도가 몰려 차례대로 받고 있습니다. {0} 후 다시 시도하세요. ': 'Too many sign-in attempts from outside the company network right now, so they\'re being handled in order. Try again in {0}. ',
+  '지금 사내망 밖에서 로그인 시도가 몰려 차례대로 받고 있습니다. {0} 후 다시 시도하세요. ':
+      'Too many sign-in attempts from outside the company network right now, so they\'re being handled in order. Try again in {0}. ',
   '지급·공제 항목은 각각 {0}개까지입니다.': 'Up to {0} earning items and {0} deduction items.',
-  '지난 {0}일 안의 기록만 고칠 수 있습니다.': 'You can only correct records from the past {0} days.',
-  '지원하지 않는 백업 파일 형식입니다(판 {0}).': 'Unsupported backup file format (version {0}).',
+  '지난 {0}일 안의 기록만 고칠 수 있습니다.':
+      'You can only correct records from the past {0} days.',
+  '지원하지 않는 백업 파일 형식입니다(판 {0}).':
+      'Unsupported backup file format (version {0}).',
   '지출 결재 — {0} {1}원': 'Expense approval — {0} ₩{1}',
-  '지출 결재 하나로 {0}건까지 청구할 수 있습니다.': 'Up to {0} transactions per expense approval.',
+  '지출 결재 하나로 {0}건까지 청구할 수 있습니다.':
+      'Up to {0} transactions per expense approval.',
   '지출 관리 설정 — {0}': 'Expense settings — {0}',
   '지출 분류는 {0}개까지입니다.': 'Up to {0} expense categories.',
-  '지출 분류는 {0}자 이내로 넣으세요.': 'Expense categories must be {0} characters or fewer.',
-  '직접 산 도메인(예: chat.회사도메인.com)을 CNAME 레코드로 {0}에 연결하고 .env의 WEB_DOMAIN을 그 도메인으로 바꾼 뒤 서버를 다시 시작하세요.': 'Point a domain you own (e.g. chat.yourcompany.com) to {0} with a CNAME record, change WEB_DOMAIN in .env to that domain, and restart the server.',
+  '지출 분류는 {0}자 이내로 넣으세요.':
+      'Expense categories must be {0} characters or fewer.',
+  '직접 산 도메인(예: chat.회사도메인.com)을 CNAME 레코드로 {0}에 연결하고 .env의 WEB_DOMAIN을 그 도메인으로 바꾼 뒤 서버를 다시 시작하세요.':
+      'Point a domain you own (e.g. chat.yourcompany.com) to {0} with a CNAME record, change WEB_DOMAIN in .env to that domain, and restart the server.',
   '직책 목록에 "{0}" 추가': 'Added "{0}" to the position list',
   '직책 목록에 없는 직책입니다: {0}': 'Position not in the position list: {0}',
   '직책 목록에서 "{0}" 삭제': 'Deleted "{0}" from the position list',
@@ -2945,60 +3752,75 @@ const Map<String, String> serverTemplatesEn = {
   '참석자: {0}': 'Attendees: {0}',
   '참조자는 {0}명까지 고를 수 있습니다.': 'You can choose up to {0} CC recipients.',
   '참조자는 {0}명까지입니다.': 'Up to {0} CC recipients are allowed.',
-  '채팅방 알림이 너무 많아 이번에는 보내지 않았습니다(10분에 규칙마다 {0}번, 채팅방마다 {1}번까지).': 'Too many chat notifications, so this one wasn\'t sent (up to {0} per rule and {1} per chat every 10 minutes).',
+  '채팅방 알림이 너무 많아 이번에는 보내지 않았습니다(10분에 규칙마다 {0}번, 채팅방마다 {1}번까지).':
+      'Too many chat notifications, so this one wasn\'t sent (up to {0} per rule and {1} per chat every 10 minutes).',
   '첨부 파일은 {0}개까지 올릴 수 있습니다.': 'You can upload up to {0} attachments.',
   '첨부 파일이 서버에 없습니다: {0}': 'Attachment not found on the server: {0}',
   '첨부{0}': 'Attachment{0}',
   '첨부는 {0}개까지입니다.': 'Up to {0} attachments.',
-  '첨부파일 {0}개가 한꺼번에 사라져 외부 백업에서는 지우지 않았습니다 — 첨부파일 저장소를 확인하세요.': '{0} attachments disappeared at once, so they weren\'t deleted from the external backup — check the attachment storage.',
+  '첨부파일 {0}개가 한꺼번에 사라져 외부 백업에서는 지우지 않았습니다 — 첨부파일 저장소를 확인하세요.':
+      '{0} attachments disappeared at once, so they weren\'t deleted from the external backup — check the attachment storage.',
   '첨부파일 폴더({0})를 찾을 수 없습니다.': 'Can\'t find the attachment folder ({0}).',
-  '첫 발급이 막힙니다(한 번 받은 뒤의 같은 이름 갱신은 이 한도에 걸리지 않습니다). {0} 자동으로 다시 시도합니다. 계속 막히면 ': 'first-time issuance gets blocked (renewals of the same name after the first certificate don\'t count toward this limit). It will retry automatically {0}. If it stays blocked, ',
-  '청구하지 않은 법인카드 사용 건이 {0}건 있습니다. 그룹웨어 → 지출에서 영수증을 붙여 청구하세요.': 'You have {0} unclaimed corporate card transactions. Attach receipts and claim them in Groupware → Expense.',
+  '첫 발급이 막힙니다(한 번 받은 뒤의 같은 이름 갱신은 이 한도에 걸리지 않습니다). {0} 자동으로 다시 시도합니다. 계속 막히면 ':
+      'first-time issuance gets blocked (renewals of the same name after the first certificate don\'t count toward this limit). It will retry automatically {0}. If it stays blocked, ',
+  '청구하지 않은 법인카드 사용 건이 {0}건 있습니다. 그룹웨어 → 지출에서 영수증을 붙여 청구하세요.':
+      'You have {0} unclaimed corporate card transactions. Attach receipts and claim them in Groupware → Expense.',
   '초대 링크 발급({0}일, {1}명)': 'Invite link created ({0} days, {1} people)',
   '초대 메일 {0}통 보냄': 'Sent {0} invitation emails',
-  '초대 메일을 너무 많이 보냈습니다. {0} 뒤에 다시 보내세요.': 'Too many invitation emails sent. Send again in {0}.',
+  '초대 메일을 너무 많이 보냈습니다. {0} 뒤에 다시 보내세요.':
+      'Too many invitation emails sent. Send again in {0}.',
   '최근 {0}개 보관': 'Keep the latest {0}',
   '출근 알림 {0}분 뒤': 'Clock-in reminder {0} min after',
-  '출근 알림은 근무 시작 0~{0}분 뒤로 정하세요.': 'Set the clock-in reminder to 0–{0} min after the start of work.',
+  '출근 알림은 근무 시작 0~{0}분 뒤로 정하세요.':
+      'Set the clock-in reminder to 0–{0} min after the start of work.',
   '출장 신청 — {0} ({1})': 'Business trip request — {0} ({1})',
   '카드 이름은 {0}자까지입니다.': 'The card name can be up to {0} characters.',
   '카드는 {0}장까지 등록할 수 있습니다.': 'Up to {0} cards can be registered.',
   '칸 이름은 {0}자 이내로 넣으세요.': 'Field names must be {0} characters or fewer.',
   '칸은 {0}개까지 만들 수 있습니다.': 'You can create up to {0} fields.',
   '캘린더 서버가 오류를 돌려줬습니다({0}).': 'The calendar server returned an error ({0}).',
-  '코드를 너무 많이 넣었습니다. {0} 뒤에 다시 하세요.': 'Too many code attempts. Try again in {0}.',
-  '코드를 너무 많이 틀렸습니다. {0} 뒤에 다시 시도하세요.': 'Too many incorrect codes. Try again in {0}.',
+  '코드를 너무 많이 넣었습니다. {0} 뒤에 다시 하세요.':
+      'Too many code attempts. Try again in {0}.',
+  '코드를 너무 많이 틀렸습니다. {0} 뒤에 다시 시도하세요.':
+      'Too many incorrect codes. Try again in {0}.',
   '키 이름은 {0}자까지입니다.': 'Key names can be up to {0} characters.',
   '타이머로 소요 시간 {0}을 기록했습니다.': 'Logged {0} of time spent with the timer.',
   '태블릿 화면 끔 — {0}': 'Tablet display off — {0}',
   '탱고톡 · {0}': 'TangoTalk · {0}',
   '토픽 삭제(멤버 {0}명)': 'Topic deleted ({0} members)',
-  '토픽 설명은 {0}자 이내로 입력하세요.': 'Topic descriptions must be {0} characters or fewer.',
+  '토픽 설명은 {0}자 이내로 입력하세요.':
+      'Topic descriptions must be {0} characters or fewer.',
   '토픽 이름은 {0}자 이내로 입력하세요.': 'Topic names must be {0} characters or fewer.',
   '퇴직금 — {0}': 'Severance — {0}',
   '퇴직금 명세서 만들기 — {0}': 'Severance payslip created — {0}',
-  '투표 설명은 {0}자 이내로 입력하세요.': 'Poll descriptions must be {0} characters or fewer.',
+  '투표 설명은 {0}자 이내로 입력하세요.':
+      'Poll descriptions must be {0} characters or fewer.',
   '투표 제목은 {0}자 이내로 입력하세요.': 'Poll titles must be {0} characters or fewer.',
   '팀 삭제(멤버 {0}명)': 'Team deleted ({0} members)',
   '팀 생성 권한: {0}': 'Team creation permission: {0}',
   '팀 초대 링크 발급({0} 등급': 'Team invite link created (grants {0} level',
   '팀 초대 링크 생성 권한: {0}': 'Team invite link creation permission: {0}',
-  '팀 초대 링크는 {0}만 만들 수 있도록 설정되어 있습니다.': 'Team invite links can only be created by {0} on this server.',
+  '팀 초대 링크는 {0}만 만들 수 있도록 설정되어 있습니다.':
+      'Team invite links can only be created by {0} on this server.',
   '팀 초대 메일 {0}통 보냄': 'Sent {0} team invitation emails',
   '팀·직책 관리: {0}': 'Team & position management: {0}',
   '팀에 추가({0})': 'Added to team ({0})',
   '팀에서 제외({0}, 대화방 {1}개에서도 나감)': 'Removed from team ({0}, also left {1} chats)',
-  '팀에서 제외({0}에서 빠짐, 대화방 {1}개에서도 나감)': 'Removed from team (left {0}, also left {1} rooms)',
+  '팀에서 제외({0}에서 빠짐, 대화방 {1}개에서도 나감)':
+      'Removed from team (left {0}, also left {1} rooms)',
   '파일 하나는 {0}MB까지입니다.': 'Each file can be up to {0} MB.',
   '파일은 {0}개까지 올릴 수 있습니다.': 'You can upload up to {0} files.',
   '파일은 한 번에 {0}개까지입니다.': 'Up to {0} files at a time.',
   '판 {0}로 되돌림': 'Reverted to version {0}',
   '패스키 로그인 {0}': 'Passkey sign-in {0}',
   '페이지는 {0}단계까지 둘 수 있습니다.': 'Pages can be nested up to {0} levels.',
-  '포트 {0}({1})를 열 권한이 없습니다 — Windows가 예약해 둔 포트 범위일 수 있습니다(netsh interface ipv4 show ': 'No permission to open port {0} ({1}) — it may be in a port range reserved by Windows (netsh interface ipv4 show ',
+  '포트 {0}({1})를 열 권한이 없습니다 — Windows가 예약해 둔 포트 범위일 수 있습니다(netsh interface ipv4 show ':
+      'No permission to open port {0} ({1}) — it may be in a port range reserved by Windows (netsh interface ipv4 show ',
   '포트 {0}({1})를 열지 못했습니다({2}). {3}': 'Couldn\'t open port {0} ({1}) ({2}). {3}',
-  '포트 {0}({1})를 이미 다른 프로그램이 쓰고 있어 열지 못했습니다 — IIS("World Wide Web Publishing Service")·다른 웹 서버·': 'Couldn\'t open port {0} ({1}) because another program is already using it — check IIS ("World Wide Web Publishing Service"), other web servers, ',
-  '폴더 이름에 쓸 수 없는 글자가 있습니다({0} 등).': 'The folder name has characters you can\'t use ({0}, etc.).',
+  '포트 {0}({1})를 이미 다른 프로그램이 쓰고 있어 열지 못했습니다 — IIS("World Wide Web Publishing Service")·다른 웹 서버·':
+      'Couldn\'t open port {0} ({1}) because another program is already using it — check IIS ("World Wide Web Publishing Service"), other web servers, ',
+  '폴더 이름에 쓸 수 없는 글자가 있습니다({0} 등).':
+      'The folder name has characters you can\'t use ({0}, etc.).',
   '폴더 이름은 {0}자 이내로 넣으세요.': 'Keep the folder name to {0} characters or fewer.',
   '폴더 이름은 {0}자 이내로 입력하세요.': 'Folder names must be {0} characters or fewer.',
   '폴더는 {0}개까지 만들 수 있습니다.': 'You can create up to {0} folders.',
@@ -3008,8 +3830,10 @@ const Map<String, String> serverTemplatesEn = {
   '품목은 {0}줄까지 넣을 수 있습니다.': 'You can add up to {0} item lines.',
   '프로젝트 생성 권한: {0}': 'Project creation permission: {0}',
   '필드 이름 "{0}"이(가) 겹칩니다.': 'Field name "{0}" is a duplicate.',
-  '하나씩만 비밀번호를 확인합니다(차례가 {0} 넘게 밀리면 잠시 뒤 다시 하라고 안내). ': 'only one password is checked (if the wait exceeds {0}, users are told to try again shortly). ',
-  '한 IP에서 여러 아이디로 비밀번호 20회 오류 — 이 IP {0} 로그인 차단': '20 wrong passwords for multiple usernames from one IP — sign-in from this IP blocked for {0}',
+  '하나씩만 비밀번호를 확인합니다(차례가 {0} 넘게 밀리면 잠시 뒤 다시 하라고 안내). ':
+      'only one password is checked (if the wait exceeds {0}, users are told to try again shortly). ',
+  '한 IP에서 여러 아이디로 비밀번호 20회 오류 — 이 IP {0} 로그인 차단':
+      '20 wrong passwords for multiple usernames from one IP — sign-in from this IP blocked for {0}',
   '한 대장에 {0}명까지 넣을 수 있습니다.': 'Up to {0} people per payroll.',
   '한 방에 나가는 웹훅은 {0}개까지입니다.': 'A room can have up to {0} outgoing webhooks.',
   '한 방에 웹훅은 {0}개까지입니다.': 'Up to {0} webhooks per chat.',
@@ -3019,11 +3843,13 @@ const Map<String, String> serverTemplatesEn = {
   '한 번에 {0}개까지 올릴 수 있습니다.': 'You can upload up to {0} at a time.',
   '한 번에 {0}개까지 지울 수 있습니다.': 'You can delete up to {0} at a time.',
   '한 번에 {0}건까지 가져올 수 있습니다.': 'Up to {0} transactions per import.',
-  '한 번에 {0}건까지 가져올 수 있습니다. 기간을 나눠 올리세요.': 'Up to {0} transactions per import. Split the period and upload in parts.',
+  '한 번에 {0}건까지 가져올 수 있습니다. 기간을 나눠 올리세요.':
+      'Up to {0} transactions per import. Split the period and upload in parts.',
   '한 번에 {0}명까지 보낼 수 있습니다.': 'You can send to up to {0} people at a time.',
   '한 번에 {0}명까지 초대할 수 있습니다.': 'You can invite up to {0} people at a time.',
   '한 번에 {0}줄까지 가져올 수 있습니다.': 'Up to {0} rows can be imported at once.',
-  '한 사람 메일함 크기는 {0}~{1}MB로 넣으세요.': 'Enter a mailbox size per person of {0}–{1}MB.',
+  '한 사람 메일함 크기는 {0}~{1}MB로 넣으세요.':
+      'Enter a mailbox size per person of {0}–{1}MB.',
   '한 카드의 사용자는 {0}명까지입니다.': 'Up to {0} users per card.',
   '한 통 크기는 1~{0}MB로 넣으세요.': 'Enter a message size of 1–{0}MB.',
   '한 팀에 슬래시 명령은 {0}개까지입니다.': 'Up to {0} slash commands per team.',
@@ -3034,23 +3860,32 @@ const Map<String, String> serverTemplatesEn = {
   '화상회의 {0} {1}.{2}': 'Meeting {0} {1}.{2}',
   '화상회의 {0}{1}': 'Meeting {0}{1}',
   '화상회의 · {0} · {1} 참여': 'Video meeting · {0} · {1} joined',
-  '화상회의 시도가 너무 많습니다. {0} 후 다시 시도하세요.': 'Too many video meeting attempts. Try again in {0}.',
-  '화상회의 참여 시도가 너무 많습니다. {0} 후 다시 시도하세요.': 'Too many attempts to join video meetings. Try again in {0}.',
-  '확인 시도가 너무 많습니다. {0} 후 다시 시도하세요.': 'Too many verification attempts. Try again in {0}.',
-  '확인 코드가 맞지 않습니다. ({0}번 더 시도할 수 있습니다)': 'Incorrect verification code. ({0} attempts left)',
+  '화상회의 시도가 너무 많습니다. {0} 후 다시 시도하세요.':
+      'Too many video meeting attempts. Try again in {0}.',
+  '화상회의 참여 시도가 너무 많습니다. {0} 후 다시 시도하세요.':
+      'Too many attempts to join video meetings. Try again in {0}.',
+  '확인 시도가 너무 많습니다. {0} 후 다시 시도하세요.':
+      'Too many verification attempts. Try again in {0}.',
+  '확인 코드가 맞지 않습니다. ({0}번 더 시도할 수 있습니다)':
+      'Incorrect verification code. ({0} attempts left)',
   '회계 전표 내려받기 — {0} ({1})': 'Journal vouchers downloaded — {0} ({1})',
   '회계연도 {0}월 시작': 'Fiscal year starts in month {0}',
   '회계전표-{0}.xlsx': 'JournalVouchers-{0}.xlsx',
-  '회사 계정 다시 확인 주기는 {0}~{1}일이어야 합니다.': 'The company account re-verification interval must be {0}–{1} days.',
+  '회사 계정 다시 확인 주기는 {0}~{1}일이어야 합니다.':
+      'The company account re-verification interval must be {0}–{1} days.',
   '회사 계정 로그아웃 연동 {0}': 'Company account logout integration {0}',
   '회사 계정 확인에 실패했습니다({0}).': 'Company account verification failed ({0}).',
-  '회사 계정(SAML) 확인에 실패했습니다{0}. 시간이 지났으면 처음부터 다시 하세요.': 'Company account (SAML) verification failed{0}. If it timed out, start again.',
-  '회사가 연차 쓸 날을 정했습니다: {0}': 'Your company has set dates for using your annual leave: {0}',
+  '회사 계정(SAML) 확인에 실패했습니다{0}. 시간이 지났으면 처음부터 다시 하세요.':
+      'Company account (SAML) verification failed{0}. If it timed out, start again.',
+  '회사가 연차 쓸 날을 정했습니다: {0}':
+      'Your company has set dates for using your annual leave: {0}',
   '회의: {0}': 'Meeting: {0}',
   '회의실·자원 — {0}': 'Rooms & resources — {0}',
-  '휴가 종류 이름은 {0}자 이내로 넣으세요.': 'Leave type names must be {0} characters or fewer.',
+  '휴가 종류 이름은 {0}자 이내로 넣으세요.':
+      'Leave type names must be {0} characters or fewer.',
   '휴가 종류는 {0}개까지 더할 수 있습니다.': 'You can add up to {0} leave types.',
-  '휴가는 한 번에 {0}일까지 신청할 수 있습니다. 나눠서 신청하세요.': 'You can request up to {0} days of leave at a time. Split it into multiple requests.',
+  '휴가는 한 번에 {0}일까지 신청할 수 있습니다. 나눠서 신청하세요.':
+      'You can request up to {0} days of leave at a time. Split it into multiple requests.',
   '휴게는 하루 {0}번까지 누를 수 있습니다.': 'Breaks can be recorded up to {0} times a day.',
   '🔒 {0} [비밀대화 요청]{1}': '🔒 {0} [Secret chat request]{1}',
 };

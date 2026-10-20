@@ -17,7 +17,7 @@
  *  - 지방소득세(개인지방소득세 특별징수) = 소득세 × 10%, 10원 미만 버림.
  * 이 계산은 별표의 647구간 × 11명(7,117칸) 모두와 맞는다(시험에서 확인). 금액은 원 단위 정수.
  */
-import { claimAllowances } from './yearEndClaimRules.js';
+import { claimAllowances, INCOME_DEDUCTION_LIMIT, taxLaw } from './yearEndClaimRules.js';
 
 /** 가족 수 입력 상한(본인 포함). */
 export const TAX_FAMILY_MAX = 20;
@@ -195,11 +195,15 @@ export function earnedIncomeTaxCredit(tax, g) {
   return Math.floor(Math.min(credit, limit));
 }
 
-/** 자녀세액공제(소득세법 제59조의2 — 2025년 귀속부터) — 8세 이상 자녀 [k]명: 1명 25만, 2명 55만, 3명 이상 55만 + 1명마다 40만 원. */
-export function childTaxCredit(k) {
+/**
+ * 자녀세액공제(소득세법 제59조의2) — 8세 이상 자녀 [k]명, 귀속 [year]. 2025년 귀속부터 1명 25만, 2명 55만, 3명 이상 55만 + 1명마다 40만 원
+ * (2024년 귀속은 15만·35만·30만 — yearEndClaimRules.js TAX_LAW).
+ */
+export function childTaxCredit(k, year = 2025) {
   const kids = Math.max(0, Math.floor(k ?? 0));
   if (!kids) return 0;
-  return kids === 1 ? 250_000 : 550_000 + (kids - 2) * 400_000;
+  const [one, two, more] = taxLaw(year).childCredit;
+  return kids === 1 ? one : two + (kids - 2) * more;
 }
 
 
@@ -208,12 +212,14 @@ export function childTaxCredit(k) {
  * 낸 것), insurance(건강·장기요양·고용보험 낸 것), withheldIncomeTax, withheldLocalTax }`, [profile]은 원천징수 정보(가족·자녀), [claim]은
  * 연말정산 공제 자료(yearEndClaimRules.js — 간소화 자료의 합계, 없으면 null), [taxYear]는 귀속 연도.
  * 근로소득공제 → 기본공제(150만 원 × 가족)·추가공제 → 연금보험료공제 → 특별소득공제(보험료·주택자금) → 그 밖의 소득공제(신용카드·주택청약·직접)
- * → 기본세율 → 근로소득세액공제·자녀세액공제 → 공제 자료의 세액공제(연금계좌·보험·의료·교육·기부·월세·결혼·출산·직접). 특별소득공제·특별세액공제·
- * 월세 대신 표준세액공제(13만 원)를 고르는 쪽과 견줘 세금이 적은 쪽을 쓴다.
+ * → 소득공제 종합한도(2,500만 원 — 주택자금·청약·신용카드·그 밖의 소득공제(한도 안)의 합계에서 넘는 금액을 뺌) → 기본세율 → 근로소득세액공제·
+ * 자녀세액공제 → 공제 자료의 세액공제(연금계좌·보험·의료·교육·기부·월세·결혼·출산·직접). 특별소득공제·특별세액공제·월세 대신 표준세액공제
+ * (13만 원)를 고르는 쪽과 견줘 세금이 적은 쪽을 쓴다. 귀속 연도마다 다른 법 값은 yearEndClaimRules.js taxLaw(연도를 모르면 2025년).
  * `{ grossIncome, earnedDeduction, earnedIncome, personal, pension, insurance, useStandard, taxBase, computedTax, earnedCredit, childCredit,
- *    standardCredit, claimCredit, decidedTax, decidedLocalTax, withheldIncomeTax, withheldLocalTax, diffIncomeTax, diffLocalTax, claim? }` —
- * diff가 양수면 더 낼 세금(추징), 음수면 돌려받을 세금(환급). claim은 공제 자료가 있을 때 공제마다의 금액(`{ deductions, credits }` — 고른 쪽에서
- * 쓰지 못한 것은 0). 10원 미만은 버린다.
+ *    standardCredit, claimCredit, limitExcess, decidedTax, decidedLocalTax, withheldIncomeTax, withheldLocalTax, diffIncomeTax, diffLocalTax,
+ *    law: { year, assumed }, claim? }` — diff가 양수면 더 낼 세금(추징), 음수면 돌려받을 세금(환급). limitExcess는 종합한도를 넘어 빼낸 소득공제,
+ * law는 계산에 쓴 법의 해(assumed면 그해 법이 아직 없어 가까운 해의 값을 씀). claim은 공제 자료가 있을 때 공제마다의 금액(`{ deductions,
+ * credits }` — 고른 쪽에서 쓰지 못한 것은 0, 종합한도는 빼기 전). 10원 미만은 버린다.
  */
 export function yearEndEstimate(year, profile = null, { claim = null, taxYear = null } = {}) {
   const g = Math.max(0, Math.floor(year?.taxable ?? 0));
@@ -223,10 +229,15 @@ export function yearEndEstimate(year, profile = null, { claim = null, taxYear = 
   const earnedIncome = Math.max(0, g - earnedDeduction);
   const pension = Math.max(0, Math.floor(year?.pension ?? 0));
   const insurance = Math.max(0, Math.floor(year?.insurance ?? 0));
+  const law = taxLaw(taxYear ?? 2025);
   const allow = claim ? claimAllowances(g, earnedIncome, claim, taxYear ?? 2025) : null;
   const personal = 1_500_000 * dependents + (allow?.deductions.extraPersonal ?? 0);
   const decide = (itemized) => {
-    const deductions = personal + pension + (allow ? allow.commonDeductions - allow.deductions.extraPersonal : 0) + (itemized ? insurance + (allow?.itemizedDeductions ?? 0) : 0);
+    // 종합한도 — 표준세액공제를 고르면 주택임차·저당 이자가 빠지므로 고른 쪽마다 따로 센다.
+    const capped = allow ? allow.cappedCommon + (itemized ? allow.cappedItemized : 0) : 0;
+    const limitExcess = Math.max(0, capped - INCOME_DEDUCTION_LIMIT);
+    const deductions =
+      personal + pension + (allow ? allow.commonDeductions - allow.deductions.extraPersonal : 0) + (itemized ? insurance + (allow?.itemizedDeductions ?? 0) : 0) - limitExcess;
     const taxBase = Math.max(0, earnedIncome - deductions);
     const computedTax = Math.floor(basicTax(taxBase));
     let left = computedTax;
@@ -236,11 +247,11 @@ export function yearEndEstimate(year, profile = null, { claim = null, taxYear = 
       return t;
     };
     const earnedCredit = take(earnedIncomeTaxCredit(computedTax, g));
-    const childCredit = take(childTaxCredit(children));
+    const childCredit = take(childTaxCredit(children, taxYear ?? 2025));
     const claimCredit = take((allow?.commonCredits ?? 0) + (itemized ? (allow?.itemizedCredits ?? 0) : 0));
     const standardCredit = itemized ? 0 : take(130_000);
     const decidedTax = floor10(left);
-    return { taxBase, computedTax, earnedCredit, childCredit, claimCredit, standardCredit, decidedTax };
+    return { taxBase, computedTax, earnedCredit, childCredit, claimCredit, standardCredit, limitExcess, decidedTax };
   };
   const withItems = decide(true);
   const standard = decide(false);
@@ -270,6 +281,7 @@ export function yearEndEstimate(year, profile = null, { claim = null, taxYear = 
     withheldLocalTax,
     diffIncomeTax: trunc10(best.decidedTax - withheldIncomeTax),
     diffLocalTax: trunc10(decidedLocalTax - withheldLocalTax),
+    law: { year: law.year, assumed: law.assumed },
     ...(used && { claim: used }),
   };
 }

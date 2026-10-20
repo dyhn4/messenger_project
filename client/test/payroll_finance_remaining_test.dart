@@ -348,6 +348,82 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
     });
 
+    testWidgets('귀속 연도마다 다른 칸 — 2026년은 카드 한도 자녀 수, 2024년은 지난해 사용액', (
+      tester,
+    ) async {
+      _bigView(tester);
+      Map<String, dynamic>? saved;
+      Future<void> open(int year) => _pumpButton(
+        tester,
+        (context) => openYearEndClaimForm(
+          context,
+          title: '공제 자료',
+          year: year,
+          onSave: (c) async => saved = c,
+        ),
+      );
+      await open(2026);
+      expect(find.byKey(const ValueKey('claim-cardChildren')), findsOneWidget);
+      expect(find.byKey(const ValueKey('claim-cardPrevious')), findsNothing);
+      await tester.enterText(
+        find.byKey(const ValueKey('claim-cardChildren')),
+        '30',
+      );
+      await tester.tap(find.byKey(const ValueKey('claim-save')));
+      await tester.pumpAndSettle();
+      expect(saved, isNull);
+      expect(find.textContaining('0~20명'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('claim-cardChildren')),
+        '2',
+      );
+      // 그 밖의 공제는 목록 아래 — 스크롤해서 그린다.
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('claim-otherDeductionExempt')),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('claim-otherDeductionExempt')),
+        '1,000,000',
+      );
+      await tester.tap(find.byKey(const ValueKey('claim-save')));
+      await tester.pumpAndSettle();
+      expect(saved!['cardChildren'], 2);
+      expect(saved!['otherDeductionExempt'], 1000000);
+      expect(saved!['cardPrevious'], 0);
+
+      await open(2024);
+      expect(find.byKey(const ValueKey('claim-cardChildren')), findsNothing);
+      expect(find.text('2023년 신용카드 등 사용액 합계'), findsOneWidget);
+    });
+
+    testWidgets('어림 — 종합한도로 뺀 금액과, 그해 법이 없어 빌린 해를 보인다', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: YearEndEstimateView(
+              estimate: YearEndEstimate.fromJson({
+                'earnedIncome': 85250000,
+                'limitExcess': 2500000,
+                'law': {'year': 2026, 'assumed': true},
+                'claim': {
+                  'deductions': {'card': 2500000, 'mortgage': 20000000},
+                  'credits': {},
+                },
+              }),
+              totals: const PayrollYearTotals(taxable: 100000000),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('  소득공제 종합한도(2,500만 원) 넘는 금액'), findsOneWidget);
+      expect(
+        find.text('이 해의 세법이 아직 들어가 있지 않아 2026년 귀속 세법으로 셌습니다.'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('근로자 — 담당자가 확인했으면 보기만', (tester) async {
       _bigView(tester);
       final h = _Harness();

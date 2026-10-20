@@ -42,7 +42,7 @@ import {
 } from './payrollReportRules.js';
 import { canManagePayroll, parseItems, payslipTotals, setItem } from './payrollRules.js';
 import { calculateSeverance, severancePayslipData } from './severanceRules.js';
-import { parseYearEndClaim } from './yearEndClaimRules.js';
+import { parseYearEndClaim, taxLaw } from './yearEndClaimRules.js';
 
 const ms = (v) => (v ? new Date(v).getTime() : null);
 const todayKey = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
@@ -317,6 +317,11 @@ export function createPayrollReportsRouter(io) {
         [`${year}년 지급일의 보낸 급여명세서를 모은 표입니다(근로소득 원천징수부·연말정산 자료로 씁니다).`],
         ['결정세액·차감세액은 근로소득공제·기본공제(가족 수)·국민연금·보험료(또는 표준세액공제)·근로소득세액공제·자녀세액공제와 연말정산 공제 자료로 계산한 어림입니다.'],
         ['공제 자료(신용카드·의료비·교육비·기부금·주택자금·연금계좌·월세 등)는 근로자나 담당자가 홈택스 간소화 자료의 합계를 넣은 값입니다. 실제 정산은 세무 프로그램·홈택스로 하세요.'],
+        [
+          taxLaw(year).assumed
+            ? `${year}년 귀속 세법이 아직 들어가 있지 않아 어림은 ${taxLaw(year).year}년 귀속 세법으로 셌습니다.`
+            : `어림은 ${year}년 귀속 세법(자녀세액공제·신용카드 등 한도·소득공제 종합한도 2,500만 원 등)으로 셌습니다.`,
+        ],
       ])
         info.addRow(line);
       info.getColumn(1).width = 110;

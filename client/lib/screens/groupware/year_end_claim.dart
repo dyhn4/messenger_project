@@ -76,7 +76,8 @@ String claimAllowanceLabel(String key, {required bool credit}) => credit
         'extraPersonal' => tr('추가공제(경로우대·장애인·부녀자·한부모)'),
         'card' => tr('신용카드 등 소득공제'),
         'subscription' => tr('주택청약종합저축 소득공제'),
-        'other' => tr('그 밖의 소득공제'),
+        'other' => tr('그 밖의 소득공제(종합한도 안)'),
+        'otherExempt' => tr('그 밖의 소득공제(종합한도 밖)'),
         'rentLoan' => tr('주택임차차입금 소득공제'),
         'mortgage' => tr('장기주택저당차입금 이자 소득공제'),
         _ => key,
@@ -121,6 +122,7 @@ class YearEndEstimateView extends StatelessWidget {
     );
     final deductions = e.claimDeductions.entries.where((x) => x.value != 0);
     final credits = e.claimCredits.entries.where((x) => x.value != 0);
+    final excessLabel = tr('소득공제 종합한도(2,500만 원) 넘는 금액');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -128,6 +130,7 @@ class YearEndEstimateView extends StatelessWidget {
         line(tr('근로소득금액'), e.earnedIncome),
         for (final d in deductions)
           line('  ${claimAllowanceLabel(d.key, credit: false)}', d.value),
+        if (e.limitExcess > 0) line('  $excessLabel', -e.limitExcess),
         line(tr('과세표준'), e.taxBase),
         line(tr('산출세액'), e.computedTax),
         line(tr('근로소득세액공제'), e.earnedCredit),
@@ -158,6 +161,19 @@ class YearEndEstimateView extends StatelessWidget {
         if (e.useStandard)
           Text(
             tr('특별소득공제·특별세액공제·월세보다 표준세액공제(13만 원)가 유리해 표준세액공제로 셌습니다.'),
+            style: TextStyle(fontSize: 12, color: hint),
+          ),
+        if (e.limitExcess > 0)
+          Text(
+            tr(
+              '주택자금·주택청약·신용카드 등·그 밖의 소득공제(종합한도 안)를 합해 2,500만 원을 넘는 금액은 공제하지 않습니다.',
+            ),
+            style: TextStyle(fontSize: 12, color: hint),
+          ),
+        if (e.lawAssumed && e.lawYear != null)
+          Text(
+            tr('이 해의 세법이 아직 들어가 있지 않아 {y}년 귀속 세법으로 셌습니다.', {'y': e.lawYear}),
+            key: const ValueKey('year-end-law-assumed'),
             style: TextStyle(fontSize: 12, color: hint),
           ),
       ],
@@ -217,9 +233,16 @@ class YearEndClaimForm extends StatefulWidget {
 class _YearEndClaimFormState extends State<YearEndClaimForm> {
   late final YearEndClaim _initial = widget.claim ?? const YearEndClaim();
 
-  /// 'group.field' 또는 맨 위 칸(monthlyRent·otherDeduction·otherCredit) → 입력칸.
+  /// 'group.field' 또는 맨 위 칸(monthlyRent·cardPrevious·otherDeduction·otherDeductionExempt·otherCredit) → 입력칸.
   final Map<String, TextEditingController> _fields = {};
   late final _memo = TextEditingController(text: _initial.memo);
+
+  /// 신용카드 등 기본한도를 늘리는 자녀등 수(2026년 귀속부터).
+  late final _cardChildren = TextEditingController(
+    text: _initial.top('cardChildren') == 0
+        ? ''
+        : '${_initial.top('cardChildren')}',
+  );
   late bool _marriage = _initial.marriage;
   late bool _woman = _initial.woman;
   late bool _singleParent = _initial.singleParent;
@@ -231,7 +254,13 @@ class _YearEndClaimFormState extends State<YearEndClaimForm> {
   bool _busy = false;
   String? _error;
 
-  static const _topFields = ['monthlyRent', 'otherDeduction', 'otherCredit'];
+  static const _topFields = [
+    'monthlyRent',
+    'cardPrevious',
+    'otherDeduction',
+    'otherDeductionExempt',
+    'otherCredit',
+  ];
 
   @override
   void initState() {
@@ -258,6 +287,7 @@ class _YearEndClaimFormState extends State<YearEndClaimForm> {
       c.dispose();
     }
     _memo.dispose();
+    _cardChildren.dispose();
     super.dispose();
   }
 
@@ -308,6 +338,13 @@ class _YearEndClaimFormState extends State<YearEndClaimForm> {
       if (v > 0) education.add({'kind': kind, 'amount': v});
     }
     out['education'] = education;
+    final kids = _cardChildren.text.trim();
+    final kidCount = kids.isEmpty ? 0 : int.tryParse(kids);
+    if (kidCount == null || kidCount < 0 || kidCount > 20) {
+      setState(() => _error = tr('사람 수는 0~20명으로 넣으세요.'));
+      return null;
+    }
+    out['cardChildren'] = kidCount;
     out['marriage'] = _marriage;
     out['memo'] = _memo.text.trim();
     return out;
@@ -500,7 +537,37 @@ class _YearEndClaimFormState extends State<YearEndClaimForm> {
           ], note: tr('기본공제(150만 원 × 가족 수)는 급여 설정의 공제대상가족 수로 셉니다.')),
           _section(
             tr('신용카드 등 사용액'),
-            [_group('card')],
+            [
+              _group('card'),
+              if (YearEndClaim.cardChildrenApplies(widget.year))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: TextField(
+                    key: const ValueKey('claim-cardChildren'),
+                    controller: _cardChildren,
+                    enabled: !widget.readOnly,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      labelText: tr('카드 공제 한도를 늘리는 자녀 수'),
+                      helperText: tr(
+                        '20세 이하 자녀·손자녀 등(장애인은 나이 상관없음) — 1명마다 50만 원(총급여 7,000만 원 넘으면 25만 원), 2명까지',
+                      ),
+                      helperMaxLines: 2,
+                      suffixText: tr('명'),
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              if (YearEndClaim.spendingGrowthApplies(widget.year))
+                _money(
+                  'cardPrevious',
+                  label: tr('{y}년 신용카드 등 사용액 합계', {'y': widget.year - 1}),
+                  helper: tr(
+                    '소비 증가분 공제 — 지난해의 105%를 넘게 쓴 금액의 10%(100만 원까지). 비우면 셈하지 않습니다.',
+                  ),
+                ),
+            ],
             note: tr(
               '총급여 25%를 넘게 쓴 금액에서 공제합니다. 총급여 7,000만 원이 넘으면 도서·공연·체육시설 사용분은 신용카드 사용분으로 셉니다.',
             ),
@@ -628,9 +695,13 @@ class _YearEndClaimFormState extends State<YearEndClaimForm> {
           _section(
             tr('기부금'),
             [_group('donation')],
-            note: tr(
-              '정치자금·고향사랑 기부금은 10만 원까지 100/110을 돌려받습니다(고향사랑은 2,000만 원까지).',
-            ),
+            note: widget.year >= 2026
+                ? tr(
+                    '정치자금·고향사랑 기부금은 10만 원까지 100/110을 돌려받습니다(고향사랑은 20만 원까지 40%, 2,000만 원까지).',
+                  )
+                : tr(
+                    '정치자금·고향사랑 기부금은 10만 원까지 100/110을 돌려받습니다(고향사랑은 2,000만 원까지).',
+                  ),
           ),
           _section(tr('월세·결혼·출산'), [
             _money('monthlyRent', label: tr('월세 지급액(총급여 8,000만 원 이하 무주택 세대주)')),
@@ -651,11 +722,20 @@ class _YearEndClaimFormState extends State<YearEndClaimForm> {
           _section(
             tr('그 밖의 공제(직접)'),
             [
-              _money('otherDeduction', label: tr('그 밖의 소득공제')),
+              _money(
+                'otherDeduction',
+                label: tr('그 밖의 소득공제(종합한도 안)'),
+                helper: tr('우리사주 출연금·투자조합 출자 등'),
+              ),
+              _money(
+                'otherDeductionExempt',
+                label: tr('그 밖의 소득공제(종합한도 밖)'),
+                helper: tr('벤처기업 직접 투자 등 소득공제 종합한도(2,500만 원)에 들지 않는 것'),
+              ),
               _money('otherCredit', label: tr('그 밖의 세액공제')),
             ],
             note: tr(
-              '우리사주·벤처투자·소비 증가분·주택자금 이자 세액공제 등 여기서 계산하지 않는 공제는 세무 프로그램에서 센 금액을 넣으세요.',
+              '우리사주·벤처투자·주택자금 이자 세액공제 등 여기서 계산하지 않는 공제는 세무 프로그램에서 센 금액을 넣으세요. 주택자금·주택청약·신용카드 등과 종합한도 안의 소득공제는 합쳐 2,500만 원까지입니다.',
             ),
           ),
           _section(tr('메모'), [

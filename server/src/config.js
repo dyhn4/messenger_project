@@ -150,3 +150,16 @@ export const RECEIPT_OCR_ENGINE = ['claude', 'openai', 'clova'].includes(String(
 export const RECEIPT_OCR_URL = (process.env.RECEIPT_OCR_URL || '').replace(/\/+$/, '') || null;
 export const RECEIPT_OCR_API_KEY = process.env.RECEIPT_OCR_API_KEY || null;
 export const RECEIPT_OCR_MODEL = process.env.RECEIPT_OCR_MODEL || null;
+
+/**
+ * 카드사·홈택스 직접 연동(CODEF — codef.js, README "급여·법인카드 후속"). CODEF(코드에프)와 계약해 받은 클라이언트 아이디·시크릿·RSA 공개 키를 넣으면
+ * 켜진다. CODEF_ENV는 'production'(정식 — api.codef.io, 기본) | 'development'(데모 — development.codef.io) | 'sandbox'(샌드박스 — 고정 예시 응답).
+ * 상품 주소는 계약한 상품의 개발 가이드대로 바꿀 수 있다 — 카드 승인내역은 기본값이 있고, 홈택스 현금영수증·전자세금계산서는 주소를 넣어야 켜진다.
+ */
+export const CODEF_CLIENT_ID = process.env.CODEF_CLIENT_ID || null;
+export const CODEF_CLIENT_SECRET = process.env.CODEF_CLIENT_SECRET || null;
+export const CODEF_PUBLIC_KEY = (process.env.CODEF_PUBLIC_KEY || '').replace(/\\n/g, '').replace(/\s+/g, '') || null;
+export const CODEF_ENV = ['production', 'development', 'sandbox'].includes(String(process.env.CODEF_ENV ?? '').trim()) ? String(process.env.CODEF_ENV).trim() : 'production';
+export const CODEF_CARD_APPROVAL_PATH = process.env.CODEF_CARD_APPROVAL_PATH || '/v1/kr/card/b/account/approval-list';
+export const CODEF_CASH_RECEIPT_PATH = process.env.CODEF_CASH_RECEIPT_PATH || null;
+export const CODEF_TAX_INVOICE_PATH = process.env.CODEF_TAX_INVOICE_PATH || null;

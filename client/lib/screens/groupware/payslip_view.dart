@@ -5,6 +5,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../../models/groupware_finance.dart';
+import '../../services/api_client.dart' show ApiException;
 import '../../services/download_storage.dart';
 import '../../services/groupware_api.dart';
 import '../../services/time_format.dart';
@@ -12,6 +13,96 @@ import '../../widgets/app_toast.dart';
 import 'groupware_screen.dart';
 import 'leave_notice_pdf.dart' show koreanPdfFont, pdfDownloadFolder;
 import '../../l10n/tr.dart';
+
+/// 명세서를 열기 전 비밀번호 다시 확인(급여 설정에서 켠 범위) — 맞으면 10분 동안 이 기기에서 다시 묻지 않는다(GroupwareApi가 기억).
+/// 맞으면 true, 취소하면 false. 틀리면 창에 서버 문구를 보이고 다시 묻는다.
+Future<bool> askPayrollPassword(
+  BuildContext context, {
+  required GroupwareApi api,
+}) async =>
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => _PayrollPasswordDialog(api: api),
+    ) ==
+    true;
+
+class _PayrollPasswordDialog extends StatefulWidget {
+  final GroupwareApi api;
+  const _PayrollPasswordDialog({required this.api});
+
+  @override
+  State<_PayrollPasswordDialog> createState() => _PayrollPasswordDialogState();
+}
+
+class _PayrollPasswordDialogState extends State<_PayrollPasswordDialog> {
+  final _controller = TextEditingController();
+  String? _error;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_controller.text.isEmpty || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.api.unlockPayroll(_controller.text);
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = e.toString();
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(tr('비밀번호 확인')),
+    content: SizedBox(
+      width: 380,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(tr('급여명세서를 보려면 로그인 비밀번호를 다시 넣으세요(10분 동안 다시 묻지 않습니다).')),
+          const SizedBox(height: 12),
+          TextField(
+            key: const ValueKey('payroll-password'),
+            controller: _controller,
+            autofocus: true,
+            obscureText: true,
+            onSubmitted: (_) => _submit(),
+            decoration: InputDecoration(
+              labelText: tr('비밀번호'),
+              errorText: _error,
+              border: const OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context, false),
+        child: Text(tr('취소')),
+      ),
+      FilledButton(
+        key: const ValueKey('payroll-password-ok'),
+        onPressed: _busy ? null : _submit,
+        child: Text(tr('확인')),
+      ),
+    ],
+  );
+}
 
 /// 급여명세서 한 장 — 받는 사람(그룹웨어 → 급여 → 내 명세서)과 급여 담당자(대장의 미리 보기)가 같이 본다. 근로기준법 제48조 제2항의 임금명세서
 /// 칸(성명·사번 등, 지급일, 총액, 항목별 금액, 계산 방법과 연장·야간·휴일 시간, 공제 항목별 금액과 총액)을 그대로 보이고, 인쇄·PDF로 저장한다.
@@ -48,6 +139,16 @@ class _PayslipScreenState extends State<PayslipScreen> {
     try {
       final slip = await widget.api.payslip(widget.payslipId);
       if (mounted) setState(() => _slip = slip);
+    } on ApiException catch (e) {
+      // 비밀번호를 다시 확인해야 한다(급여 설정 — 423) — 묻고 다시 연다. 취소하면 닫는다.
+      if (e.statusCode == 423 && mounted) {
+        if (await askPayrollPassword(context, api: widget.api)) {
+          return _load();
+        }
+        if (mounted) Navigator.pop(context);
+        return;
+      }
+      if (mounted) setState(() => _error = e.toString());
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }

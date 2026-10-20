@@ -69,6 +69,12 @@ export function parseCardInput(body, { partial = false, isCandidate = () => true
     out.memo = memo || null;
   }
   if (body?.enabled !== undefined) out.enabled = body.enabled !== false;
+  // CODEF 기관 코드(카드사·홈택스 연동 — 비우면 카드사 이름으로 정한다, taxDocRules.js CODEF_CARD_ORGS).
+  if (body?.codefOrganization !== undefined) {
+    const org = typeof body.codefOrganization === 'string' ? body.codefOrganization.trim() : '';
+    if (org && !/^\d{4}$/.test(org)) return { error: '연동 기관 코드는 숫자 4자리입니다(비우면 카드사로 정함).' };
+    out.codefOrganization = org || null;
+  }
   return { card: out };
 }
 

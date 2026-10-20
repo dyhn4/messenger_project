@@ -3809,8 +3809,41 @@ export const payrollSettings = pgTable('payroll_settings', {
   employeeNos: jsonb('employee_nos').notNull().default({}),
   // 명세서 머리에 적을 회사 이름(비우면 팀 이름).
   companyName: text('company_name'),
+  // 원천징수 정보 { userId: { dependents(공제대상가족 — 본인 포함), children(8~20세 자녀), ratio(80|100|120), auto? } } — 소득세(간이세액표) 계산.
+  taxProfiles: jsonb('tax_profiles').notNull().default({}),
+  // 급여 계좌 — 암호화한 JSON { userId: { bankCode, number, holder? } }(급여 이체 파일).
+  bankAccounts: text('bank_accounts'),
+  // 받는 사람이 명세서를 열 때 비밀번호를 다시 묻는지(payroll.js /payroll/unlock).
+  requireReauth: boolean('require_reauth').notNull().default(false),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * 4대보험 취득·상실 신고(payrollReports.js) — 신고할 사람과 날짜, 신고했는지. [data]는 암호화한 JSON { monthlyPay(보수월액), weeklyHours, jobName,
+ * memo } — 보수는 급여 정보라 명세서처럼 암호화한다. 신고 자체는 4대사회보험 정보연계센터(EDI)에서 하고, 여기서는 자료(엑셀)와 기한을 챙긴다.
+ */
+export const payrollInsuranceReports = pgTable(
+  'payroll_insurance_reports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    userName: text('user_name').notNull(),
+    // 'acquire'(취득 — 입사) | 'lose'(상실 — 퇴사)
+    kind: text('kind').notNull(),
+    // 취득일(입사일) | 상실일(퇴직일 — 마지막 근무일 다음 날).
+    eventDate: date('event_date', { mode: 'string' }).notNull(),
+    // 상실 사유 코드(payrollReportRules.js LOSS_REASONS).
+    reasonCode: text('reason_code'),
+    data: text('data'),
+    filedAt: timestamp('filed_at', { withTimezone: true }),
+    filedByName: text('filed_by_name'),
+    createdByName: text('created_by_name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('payroll_insurance_reports_scope_idx').on(t.scopeKey, t.eventDate)],
+);
 
 /**
  * 급여 대장 하나(한 달 정기 급여·상여 등) — 'draft'(작성 중 — 받는 사람에게 안 보임) → 'published'(보냄 — 받는 사람마다 푸시). 보낸 뒤 고치면
@@ -3887,6 +3920,8 @@ export const corporateCards = pgTable(
     monthlyLimit: bigint('monthly_limit', { mode: 'number' }),
     memo: text('memo'),
     enabled: boolean('enabled').notNull().default(true),
+    // CODEF 기관 코드(카드사 — 비우면 카드사 이름으로 — taxDocRules.js CODEF_CARD_ORGS).
+    codefOrganization: text('codef_organization'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -3913,7 +3948,7 @@ export const cardTransactions = pgTable(
     merchantBizNo: text('merchant_biz_no'),
     amount: integer('amount').notNull(),
     approvalNo: text('approval_no'),
-    // 'excel' | 'api' | 'manual'
+    // 'excel' | 'api' | 'manual' | 'codef'
     source: text('source').notNull(),
     dedupeKey: text('dedupe_key').notNull(),
     userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
@@ -3956,4 +3991,74 @@ export const receiptScans = pgTable('receipt_scans', {
   engine: text('engine').notNull(),
   result: jsonb('result').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * 지출 관리 설정(financeTools.js) — 그룹웨어 범위마다. 회계 전표 계정(accountingRules.js — 기본과 다른 것만)·엑셀 모양, 영수증 원본 보관 기간·
+ * 지울지, CODEF 연동(카드사·홈택스 connectedId — 암호화)과 자동 가져오기.
+ */
+export const financeSettings = pgTable('finance_settings', {
+  scopeKey: text('scope_key').primaryKey(),
+  teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+  accountMap: jsonb('account_map'),
+  // 'generic' | 'douzone'
+  voucherFormat: text('voucher_format').notNull().default('generic'),
+  // 0이면 기한 없이 둔다.
+  receiptRetentionYears: integer('receipt_retention_years').notNull().default(5),
+  // 'corporate'(다음 해 3월 31일) | 'individual'(5월 31일) — 보관 기한을 셀 법정신고기한.
+  receiptFiling: text('receipt_filing').notNull().default('corporate'),
+  // 보관 기한이 지난 영수증 파일을 지울지(기본은 지우지 않고 기한만 보인다).
+  receiptPurge: boolean('receipt_purge').notNull().default(false),
+  codefCardConnectedId: text('codef_card_connected_id'),
+  codefHometaxConnectedId: text('codef_hometax_connected_id'),
+  codefAutoSync: boolean('codef_auto_sync').notNull().default(false),
+  codefLastSyncAt: timestamp('codef_last_sync_at', { withTimezone: true }),
+  // { at, cards: { inserted, duplicates, errors }, hometax: {...}, error? }
+  codefLastResult: jsonb('codef_last_result'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * 현금영수증·전자세금계산서(financeTools.js) — 홈택스 목록 엑셀 가져오기·CODEF 연동으로 들어온 매입(·매출) 증빙. [dedupeKey](taxDocRules.js)로
+ * 같은 증빙은 한 번만.
+ */
+export const taxDocuments = pgTable(
+  'tax_documents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    // 'cash_receipt' | 'tax_invoice'
+    kind: text('kind').notNull(),
+    // 'purchase'(매입) | 'sale'(매출)
+    direction: text('direction').notNull().default('purchase'),
+    issuedOn: date('issued_on', { mode: 'string' }).notNull(),
+    approvalNo: text('approval_no'),
+    supplierName: text('supplier_name'),
+    supplierBizNo: text('supplier_biz_no'),
+    buyerName: text('buyer_name'),
+    buyerBizNo: text('buyer_biz_no'),
+    supplyAmount: bigint('supply_amount', { mode: 'number' }),
+    taxAmount: bigint('tax_amount', { mode: 'number' }),
+    totalAmount: bigint('total_amount', { mode: 'number' }).notNull(),
+    itemName: text('item_name'),
+    // 분류(전표 계정 — 지출 분류 이름).
+    category: text('category'),
+    memo: text('memo'),
+    // 'excel' | 'codef'
+    source: text('source').notNull(),
+    dedupeKey: text('dedupe_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('tax_documents_scope_dedupe_uq').on(t.scopeKey, t.dedupeKey), index('tax_documents_scope_issued_idx').on(t.scopeKey, t.issuedOn)],
+);
+
+/** 보관 기한이 지나 지운 영수증 파일(financeTools.js) — 올린 파일 이름마다. 결재 문서의 첨부 목록은 전자서명 지문이라 그대로 두고 여기에 남긴다. */
+export const receiptPurges = pgTable('receipt_purges', {
+  fileName: text('file_name').primaryKey(),
+  scopeKey: text('scope_key').notNull(),
+  // 보관 기한을 센 날(쓴 날).
+  usedOn: date('used_on', { mode: 'string' }),
+  keepUntil: date('keep_until', { mode: 'string' }),
+  purgedAt: timestamp('purged_at', { withTimezone: true }).notNull().defaultNow(),
 });

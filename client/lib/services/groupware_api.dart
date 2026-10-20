@@ -1,5 +1,6 @@
 import '../models/groupware.dart';
 import '../models/groupware_finance.dart';
+import '../models/groupware_finance_tools.dart';
 import '../models/groupware_forms.dart';
 import '../models/groupware_resources.dart';
 import '../models/groupware_work.dart';
@@ -1110,22 +1111,63 @@ class GroupwareApi {
   ]) async => ((await _api.requestJson(method, path, body: _body(body))) as Map)
       .cast<String, dynamic>();
 
-  /// 내 명세서들(보낸 대장의 것 — 합계만)과 내가 급여를 다루는지.
-  Future<({List<Payslip> items, bool canManage})> myPayslips() async {
-    final map = await _getMap('/api/groupware/payroll/mine${_query()}');
+  /// 명세서를 열 때 비밀번호를 다시 확인한 표(서버 POST /payroll/unlock — 10분, 이 기기에서만). 앱을 켜 둔 동안만 기억한다.
+  static String? _payrollUnlock;
+  static DateTime? _payrollUnlockUntil;
+
+  /// 지금 쓸 수 있는 확인 표(1분 넘게 남았을 때).
+  static String? get payrollUnlockToken {
+    final until = _payrollUnlockUntil;
+    if (_payrollUnlock == null || until == null) return null;
+    return until.isAfter(DateTime.now().add(const Duration(minutes: 1)))
+        ? _payrollUnlock
+        : null;
+  }
+
+  /// 확인 표를 버린다(로그아웃·시험).
+  static void clearPayrollUnlock() {
+    _payrollUnlock = null;
+    _payrollUnlockUntil = null;
+  }
+
+  /// 내 명세서들(보낸 대장의 것 — 합계만)과 내가 급여를 다루는지. [locked]면 금액이 빠져 온다(비밀번호를 다시 확인해야 함).
+  Future<
+    ({List<Payslip> items, bool canManage, bool locked, bool reauthRequired})
+  >
+  myPayslips() async {
+    final map = await _getMap(
+      '/api/groupware/payroll/mine${_query({'unlock': payrollUnlockToken})}',
+    );
     return (
       items: [
         for (final m in (map['items'] as List? ?? const []))
           Payslip.fromJson((m as Map).cast<String, dynamic>()),
       ],
       canManage: map['canManage'] == true,
+      locked: map['locked'] == true,
+      reauthRequired: map['reauthRequired'] == true,
     );
   }
 
-  /// 명세서 하나(받는 사람이 처음 열면 서버가 "확인"을 남긴다).
+  /// 명세서 하나(받는 사람이 처음 열면 서버가 "확인"을 남긴다). 비밀번호를 다시 확인해야 하면 423(ApiException.statusCode).
   Future<Payslip> payslip(String id) async => Payslip.fromJson(
-    await _getMap('/api/groupware/payroll/payslips/$id${_query()}'),
+    await _getMap(
+      '/api/groupware/payroll/payslips/$id${_query({'unlock': payrollUnlockToken})}',
+    ),
   );
+
+  /// 비밀번호 다시 확인 — 맞으면 확인 표를 기억한다(다시 묻지 않는 범위·계정이면 표 없이 끝난다). 틀리면 ApiException.
+  Future<void> unlockPayroll(String password) async {
+    final map = await _send('POST', '/api/groupware/payroll/unlock', {
+      'password': password,
+    });
+    final token = map['token'] as String?;
+    final until = (map['expiresAt'] as num?)?.toInt();
+    _payrollUnlock = token;
+    _payrollUnlockUntil = token == null || until == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(until);
+  }
 
   Future<PayrollSettings> payrollSettings() async => PayrollSettings.fromJson(
     await _getMap('/api/groupware/payroll/settings${_query()}'),
@@ -1139,8 +1181,27 @@ class GroupwareApi {
     List<PayrollItem>? templateDeductions,
     Map<String, Object?>? insurance,
     Map<String, String>? employeeNos,
+    Map<String, TaxProfile?>? taxProfiles,
+    Map<String, ({String bank, String number, String holder})?>? bankAccounts,
+    bool? requireReauth,
   }) async => PayrollSettings.fromJson(
     await _send('PUT', '/api/groupware/payroll/settings', {
+      if (taxProfiles != null)
+        'taxProfiles': {
+          for (final e in taxProfiles.entries) e.key: e.value?.toJson(),
+        },
+      if (bankAccounts != null)
+        'bankAccounts': {
+          for (final e in bankAccounts.entries)
+            e.key: e.value == null
+                ? null
+                : {
+                    'bank': e.value!.bank,
+                    'number': e.value!.number,
+                    'holder': e.value!.holder,
+                  },
+        },
+      'requireReauth': ?requireReauth,
       'staffIds': ?staffIds,
       'companyName': ?companyName,
       if (templateEarnings != null || templateDeductions != null)
@@ -1256,11 +1317,15 @@ class GroupwareApi {
     );
   }
 
-  /// 4대보험 공제 어림(참고용) — 바꾼 명세서 수.
-  Future<int> calcPayrollDeductions(String runId) async =>
+  /// 공제 계산 — 4대보험(요율 어림)과, [incomeTax]면 소득세(간이세액표)·지방소득세. 바꾼 명세서 수.
+  Future<int> calcPayrollDeductions(
+    String runId, {
+    bool incomeTax = true,
+  }) async =>
       ((await _send(
                 'POST',
                 '/api/groupware/payroll/runs/$runId/calc-deductions',
+                {'incomeTax': incomeTax},
               ))['updated']
               as num?)
           ?.toInt() ??
@@ -1269,6 +1334,163 @@ class GroupwareApi {
   /// 급여대장 엑셀 경로(Session.downloadAuthedFile).
   String payrollExportPath(String runId) =>
       '/api/groupware/payroll/runs/$runId/export${_query()}';
+
+  /// 급여 이체 파일(은행 대량 이체 엑셀) 경로.
+  String payrollTransferPath(String runId) =>
+      '/api/groupware/payroll/runs/$runId/transfer${_query()}';
+
+  /// 급여 대장의 회계 전표 경로.
+  String payrollVouchersPath(String runId) =>
+      '/api/groupware/payroll/runs/$runId/vouchers${_query()}';
+
+  // ── 급여 부가 기능(server/src/payrollReports.js) ──
+
+  /// 한 해 급여 집계와 연말정산 어림.
+  Future<PayrollYearSummary> payrollYearSummary(int year) async =>
+      PayrollYearSummary.fromJson(
+        await _getMap(
+          '/api/groupware/payroll/year-summary${_query({'year': '$year'})}',
+        ),
+      );
+
+  String payrollYearSummaryExportPath(int year) =>
+      '/api/groupware/payroll/year-summary/export${_query({'year': '$year'})}';
+
+  /// 연말정산 정산분을 작성 중인 대장에 넣는다 — 넣은 명세서 수.
+  Future<int> applyYearEnd(
+    String runId, {
+    required int year,
+    required List<({String userId, int incomeTax, int localTax})> rows,
+  }) async =>
+      ((await _send('POST', '/api/groupware/payroll/runs/$runId/year-end', {
+                'year': year,
+                'rows': [
+                  for (final r in rows)
+                    {
+                      'userId': r.userId,
+                      'incomeTax': r.incomeTax,
+                      'localTax': r.localTax,
+                    },
+                ],
+              }))['updated']
+              as num?)
+          ?.toInt() ??
+      0;
+
+  Map<String, dynamic> _severanceBody({
+    required String userId,
+    required String lastDay,
+    String? hireDate,
+    int? wages,
+    int? annualBonus,
+    int? leavePay,
+    int? hourlyWage,
+  }) => {
+    'userId': userId,
+    'lastDay': lastDay,
+    'hireDate': ?hireDate,
+    'wages': ?wages,
+    'annualBonus': ?annualBonus,
+    'leavePay': ?leavePay,
+    'hourlyWage': ?hourlyWage,
+  };
+
+  /// 퇴직금 계산(참고용) — 비운 값은 서버가 관리 탭의 입사일·통상시급, 보낸 명세서로 채운다.
+  Future<SeveranceResult> calculateSeverance({
+    required String userId,
+    required String lastDay,
+    String? hireDate,
+    int? wages,
+    int? annualBonus,
+    int? leavePay,
+    int? hourlyWage,
+  }) async => SeveranceResult.fromJson(
+    await _send(
+      'POST',
+      '/api/groupware/payroll/severance',
+      _severanceBody(
+        userId: userId,
+        lastDay: lastDay,
+        hireDate: hireDate,
+        wages: wages,
+        annualBonus: annualBonus,
+        leavePay: leavePay,
+        hourlyWage: hourlyWage,
+      ),
+    ),
+  );
+
+  /// 퇴직금 명세서 만들기(작성 중인 대장 하나) — 새 대장 id.
+  Future<String> createSeveranceRun({
+    required String userId,
+    required String lastDay,
+    required String payDate,
+    String? hireDate,
+    int? wages,
+    int? annualBonus,
+    int? leavePay,
+    int? hourlyWage,
+  }) async =>
+      (await _send('POST', '/api/groupware/payroll/severance/run', {
+            ..._severanceBody(
+              userId: userId,
+              lastDay: lastDay,
+              hireDate: hireDate,
+              wages: wages,
+              annualBonus: annualBonus,
+              leavePay: leavePay,
+              hourlyWage: hourlyWage,
+            ),
+            'payDate': payDate,
+          }))['runId']
+          as String;
+
+  Future<InsuranceReportList> insuranceReports() async =>
+      InsuranceReportList.fromJson(
+        await _getMap('/api/groupware/payroll/insurance-reports${_query()}'),
+      );
+
+  /// 4대보험 신고 더하기·고치기 — [id]가 없으면 새로([kind]·[userId] 꼭).
+  Future<InsuranceReport> saveInsuranceReport({
+    String? id,
+    String? kind,
+    String? userId,
+    String? eventDate,
+    String? reasonCode,
+    int? monthlyPay,
+    num? weeklyHours,
+    String? memo,
+    bool? filed,
+  }) async => InsuranceReport.fromJson(
+    await _send(
+      id == null ? 'POST' : 'PATCH',
+      id == null
+          ? '/api/groupware/payroll/insurance-reports'
+          : '/api/groupware/payroll/insurance-reports/$id',
+      {
+        'kind': ?kind,
+        'userId': ?userId,
+        'eventDate': ?eventDate,
+        'reasonCode': ?reasonCode,
+        'monthlyPay': ?monthlyPay,
+        'weeklyHours': ?weeklyHours,
+        'memo': ?memo,
+        'filed': ?filed,
+      },
+    ),
+  );
+
+  Future<void> deleteInsuranceReport(String id) => _api.requestJson(
+    'DELETE',
+    '/api/groupware/payroll/insurance-reports/$id${_query()}',
+  );
+
+  /// 신고 자료 엑셀 — [ids]가 비면 아직 신고하지 않은 그 종류 모두.
+  String insuranceReportExportPath(
+    String kind, {
+    List<String> ids = const [],
+  }) =>
+      '/api/groupware/payroll/insurance-reports/export${_query({'kind': kind, 'ids': ids.isEmpty ? null : ids.join(',')})}';
 
   /// 급여대장 엑셀·CSV 가져오기 — [dryRun]이면 미리 보기만. 줄마다의 오류가 있어도 결과로 돌려준다.
   Future<PayrollImportResult> importPayroll(
@@ -1308,6 +1530,7 @@ class GroupwareApi {
     int? monthlyLimit,
     String? memo,
     bool enabled = true,
+    String? codefOrganization,
   }) async => CorporateCard.fromJson(
     await _send(
       id == null ? 'POST' : 'PATCH',
@@ -1320,6 +1543,7 @@ class GroupwareApi {
         'monthlyLimit': monthlyLimit,
         'memo': memo ?? '',
         'enabled': enabled,
+        'codefOrganization': ?codefOrganization,
       },
     ),
   );
@@ -1453,4 +1677,124 @@ class GroupwareApi {
       'receiptIndex': ?receiptIndex,
     }),
   );
+
+  // ── 지출 관리 도구(server/src/financeTools.js — 관리자) ──
+
+  Future<FinanceSettings> financeSettings() async => FinanceSettings.fromJson(
+    await _getMap('/api/groupware/finance/settings${_query()}'),
+  );
+
+  /// 지출 관리 설정 — 보낸 칸만 바꾼다.
+  Future<FinanceSettings> saveFinanceSettings({
+    LedgerAccounts? accounts,
+    String? voucherFormat,
+    int? receiptRetentionYears,
+    String? receiptFiling,
+    bool? receiptPurge,
+    bool? codefAutoSync,
+  }) async => FinanceSettings.fromJson(
+    await _send('PUT', '/api/groupware/finance/settings', {
+      if (accounts != null) 'accounts': accounts.toJson(),
+      'voucherFormat': ?voucherFormat,
+      'receiptRetentionYears': ?receiptRetentionYears,
+      'receiptFiling': ?receiptFiling,
+      'receiptPurge': ?receiptPurge,
+      'codefAutoSync': ?codefAutoSync,
+    }),
+  );
+
+  /// 회계 전표 엑셀 경로 — [sources]는 cards·expenses·taxdocs.
+  String financeVouchersPath(String month, Set<String> sources) =>
+      '/api/groupware/finance/vouchers${_query({'month': month, 'sources': sources.join(',')})}';
+
+  Future<TaxDocumentPage> taxDocuments({
+    required String month,
+    String? kind,
+  }) async => TaxDocumentPage.fromJson(
+    await _getMap(
+      '/api/groupware/tax-documents${_query({'month': month, 'kind': kind})}',
+    ),
+  );
+
+  /// 홈택스 목록 엑셀 가져오기 — [kind]를 비우면 서버가 짐작한다.
+  Future<TaxDocImportResult> importTaxDocuments(
+    List<int> bytes, {
+    String? kind,
+    String direction = 'purchase',
+    required bool dryRun,
+    String contentType = 'application/octet-stream',
+  }) async => TaxDocImportResult.fromJson(
+    await _api.postBytes(
+      '/api/groupware/tax-documents/import${_query({'kind': kind, 'direction': direction, 'dryRun': dryRun ? '1' : null})}',
+      bytes,
+      contentType: contentType,
+    ),
+  );
+
+  Future<TaxDocument> updateTaxDocument(
+    String id, {
+    String? category,
+    String? memo,
+  }) async => TaxDocument.fromJson(
+    await _send('PATCH', '/api/groupware/tax-documents/$id', {
+      'category': ?category,
+      'memo': ?memo,
+    }),
+  );
+
+  Future<void> deleteTaxDocument(String id) =>
+      _api.requestJson('DELETE', '/api/groupware/tax-documents/$id${_query()}');
+
+  String taxDocumentsExportPath(String month) =>
+      '/api/groupware/tax-documents/export${_query({'month': month})}';
+
+  /// CODEF 계정 연결 — 카드사 아이디·비밀번호(서버를 거쳐 CODEF로만 — 남기지 않음) 또는 따로 만든 connectedId.
+  Future<FinanceSettings> codefConnect({
+    required String target,
+    String? organization,
+    String? loginId,
+    String? password,
+    String? connectedId,
+  }) async => FinanceSettings.fromJson(
+    await _send('POST', '/api/groupware/codef/connect', {
+      'target': target,
+      'organization': ?organization,
+      'loginId': ?loginId,
+      'password': ?password,
+      'connectedId': ?connectedId,
+    }),
+  );
+
+  Future<FinanceSettings> codefDisconnect(String target) async =>
+      FinanceSettings.fromJson(
+        ((await _api.requestJson(
+                  'DELETE',
+                  '/api/groupware/codef/connect${_query({'target': target})}',
+                ))
+                as Map)
+            .cast<String, dynamic>(),
+      );
+
+  /// 지금 가져오기 — 결과(`cards`·`hometax` — inserted·duplicates·errors).
+  Future<Map<String, dynamic>> codefSync({
+    String? from,
+    String? to,
+    String target = 'all',
+  }) => _send('POST', '/api/groupware/codef/sync', {
+    'from': ?from,
+    'to': ?to,
+    'target': target,
+  });
+
+  Future<ReceiptRetentionSummary> receiptRetention() async =>
+      ReceiptRetentionSummary.fromJson(
+        await _getMap('/api/groupware/finance/receipts${_query()}'),
+      );
+
+  /// 보관 기한이 지난 영수증을 지금 지운다 — 지운 수.
+  Future<int> purgeExpiredReceipts() async =>
+      ((await _send('POST', '/api/groupware/finance/receipts/purge'))['purged']
+              as num?)
+          ?.toInt() ??
+      0;
 }

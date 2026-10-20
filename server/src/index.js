@@ -110,6 +110,8 @@ import { createGroupwareSurveysRouter } from './groupwareSurveys.js';
 import { createGroupwareReportsRouter } from './groupwareReports.js';
 import { createPayrollRouter } from './payroll.js';
 import { createCardFeedRouter, createCorporateCardsRouter } from './corporateCards.js';
+import { createFinanceToolsRouter, startFinanceJobs } from './financeTools.js';
+import { createPayrollReportsRouter } from './payrollReports.js';
 import { createDriveRouter } from './drive.js';
 import { createWikiRouter, wikiDocs } from './wiki.js';
 import { createWebmailRouter, startMailCheckJob } from './webmail.js';
@@ -213,6 +215,8 @@ app.use('/api', requireAuth, createGroupwareReportsRouter(io));
 // 급여명세서(payroll.js)·법인카드와 영수증 읽기(corporateCards.js).
 app.use('/api', requireAuth, createPayrollRouter(io));
 app.use('/api', requireAuth, createCorporateCardsRouter(io));
+app.use('/api', requireAuth, createPayrollReportsRouter(io));
+app.use('/api', requireAuth, createFinanceToolsRouter(io));
 // 팀 공유 드라이브 — 폴더·파일 판·휴지통(drive.js).
 app.use('/api', requireAuth, createDriveRouter(io));
 // 팀 위키 — 페이지 나무·판·휴지통(wiki.js). 동시 편집은 소켓(wiki:* — socket.js가 registerWikiSocket을 붙인다).
@@ -372,6 +376,8 @@ app.use((err, req, res, next) => {
 registerSocket(io);
 watchForVersionChanges(io);
 startRetentionJob();
+// 법인카드·홈택스 자동 가져오기(CODEF)와 보관 기한 지난 영수증 지우기(financeTools.js) — 켠 범위만, 하루에 한 번.
+startFinanceJobs(io);
 // 오래 접속하지 않은 사람에게 안 읽은 멘션 요약 메일 — 메일이 켜져 있을 때만 실제로 보낸다(mentionDigest.js).
 startMentionDigestJob();
 // 출근·퇴근 알림 — 알림을 켠 그룹웨어 범위에서 5분마다(groupwareWork.js).

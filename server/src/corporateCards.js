@@ -51,6 +51,7 @@ import { notifyGroupwarePush } from './push.js';
 import { readReceipt, ReceiptOcrError, receiptOcrEnabled } from './receiptOcr.js';
 import { guessExpenseCategory, isEmptyReceipt, matchReceiptToTransactions, receiptMismatches } from './receiptOcrRules.js';
 import { readSheetRows } from './sheetRows.js';
+import { codefOrgOf } from './taxDocRules.js';
 import { knownUploadPath, signFileUrl } from './upload.js';
 
 const ms = (v) => (v ? new Date(v).getTime() : null);
@@ -126,6 +127,9 @@ export function createCorporateCardsRouter(io) {
     monthlyLimit: card.monthlyLimit ?? null,
     memo: card.memo ?? null,
     enabled: card.enabled,
+    codefOrganization: card.codefOrganization ?? null,
+    // 연동(CODEF)에 쓰는 기관 코드 — 직접 넣은 것, 없으면 카드사 이름으로.
+    codefOrg: codefOrgOf(card),
     ...(usage && { used: usage.used }),
   });
 
@@ -156,10 +160,12 @@ export function createCorporateCardsRouter(io) {
       memo: tx.memo ?? null,
       category: tx.category ?? null,
       receipts: (Array.isArray(tx.receipts) ? tx.receipts : []).map((a) => ({
-        fileUrl: signFileUrl(a.fileUrl, a.fileName ?? undefined) ?? null,
+        // 보관 기한이 지나 지운 영수증(financeTools.js purgeExpiredReceipts)은 링크 없이 이름과 지운 때만.
+        fileUrl: a.purgedAt ? null : (signFileUrl(a.fileUrl, a.fileName ?? undefined) ?? null),
         fileName: a.fileName ?? null,
         fileSize: a.fileSize ?? null,
         mimeType: a.mimeType ?? null,
+        ...(a.purgedAt && { purgedAt: a.purgedAt }),
       })),
       receiptScan: tx.receiptScan ?? null,
       // 읽은 영수증과 어긋나는 점('amount' | 'date' | 'card').
@@ -453,7 +459,9 @@ export function createCorporateCardsRouter(io) {
           const incoming = [];
           const current = Array.isArray(tx.receipts) ? tx.receipts : [];
           for (const r of Array.isArray(body.receipts) ? body.receipts : []) {
-            const same = current.find((c) => knownUploadPath(r?.fileUrl) === c.fileUrl);
+            const same = current.find(
+              (c) => knownUploadPath(r?.fileUrl) === c.fileUrl || (c.purgedAt && !r?.fileUrl && r?.fileName === c.fileName),
+            );
             if (same) kept.push(same);
             else incoming.push(r);
           }

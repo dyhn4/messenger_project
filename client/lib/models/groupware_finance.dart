@@ -353,6 +353,18 @@ class PayrollSettings {
   /// 담당자를 바꿀 수 있는지(그룹웨어 관리자만).
   final bool canEditStaff;
   final List<({String id, String name, String username})> people;
+
+  /// 사람마다의 원천징수 정보(없는 사람은 본인 1명·100%).
+  final Map<String, TaxProfile> taxProfiles;
+
+  /// 사람마다의 급여 계좌(급여 이체 파일).
+  final Map<String, BankAccount> bankAccounts;
+
+  /// 고를 수 있는 은행(금융결제원 코드).
+  final List<({String code, String name})> banks;
+
+  /// 받는 사람이 명세서를 열 때 비밀번호를 다시 묻는지.
+  final bool requireReauth;
   const PayrollSettings({
     this.staffIds = const [],
     this.companyName,
@@ -362,6 +374,10 @@ class PayrollSettings {
     this.employeeNos = const {},
     this.canEditStaff = false,
     this.people = const [],
+    this.taxProfiles = const {},
+    this.bankAccounts = const {},
+    this.banks = const [],
+    this.requireReauth = false,
   });
 
   factory PayrollSettings.fromJson(Map<String, dynamic> json) {
@@ -395,8 +411,82 @@ class PayrollSettings {
             username: m['username'] as String? ?? '',
           ),
       ],
+      taxProfiles: {
+        for (final e
+            in ((json['taxProfiles'] as Map?)?.cast<String, dynamic>() ??
+                    const {})
+                .entries)
+          if (e.value is Map)
+            e.key: TaxProfile.fromJson(
+              (e.value as Map).cast<String, dynamic>(),
+            ),
+      },
+      bankAccounts: {
+        for (final e
+            in ((json['bankAccounts'] as Map?)?.cast<String, dynamic>() ??
+                    const {})
+                .entries)
+          if (e.value is Map)
+            e.key: BankAccount.fromJson(
+              (e.value as Map).cast<String, dynamic>(),
+            ),
+      },
+      banks: [
+        for (final m in _maps(json['banks']))
+          (code: m['code'] as String? ?? '', name: m['name'] as String? ?? ''),
+      ],
+      requireReauth: json['requireReauth'] == true,
     );
   }
+}
+
+/// 원천징수 정보 — 공제대상가족(본인 포함)·그중 8~20세 자녀·원천징수 비율(80·100·120%), [auto]가 false면 소득세를 직접 넣는다.
+class TaxProfile {
+  final int dependents;
+  final int children;
+  final int ratio;
+  final bool auto;
+  const TaxProfile({
+    this.dependents = 1,
+    this.children = 0,
+    this.ratio = 100,
+    this.auto = true,
+  });
+
+  factory TaxProfile.fromJson(Map<String, dynamic> json) => TaxProfile(
+    dependents: _intOrNull(json['dependents']) ?? 1,
+    children: _int(json['children']),
+    ratio: _intOrNull(json['ratio']) ?? 100,
+    auto: json['auto'] != false,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'dependents': dependents,
+    'children': children,
+    'ratio': ratio,
+    if (!auto) 'auto': false,
+  };
+
+  bool get isDefault =>
+      dependents == 1 && children == 0 && ratio == 100 && auto;
+}
+
+/// 급여 계좌(은행 코드·계좌번호·예금주).
+class BankAccount {
+  final String bankCode;
+  final String number;
+  final String? holder;
+  const BankAccount({
+    required this.bankCode,
+    required this.number,
+    this.holder,
+  });
+
+  factory BankAccount.fromJson(Map<String, dynamic> json) => BankAccount(
+    bankCode: json['bankCode'] as String? ?? '',
+    number: json['number'] as String? ?? '',
+    holder: json['holder'] as String?,
+  );
 }
 
 /// 급여대장 엑셀 가져오기의 결과(미리 보기·적용).
@@ -470,6 +560,10 @@ class CorporateCard {
 
   /// 고른 달의 사용 합계(관리자 목록).
   final int? used;
+
+  /// 카드사·홈택스 연동(CODEF)의 기관 코드 — 직접 넣은 것([codefOrganization])과 실제로 쓰는 것([codefOrg] — 없으면 카드사 이름으로).
+  final String? codefOrganization;
+  final String? codefOrg;
   const CorporateCard({
     required this.id,
     required this.name,
@@ -480,6 +574,8 @@ class CorporateCard {
     this.memo,
     this.enabled = true,
     this.used,
+    this.codefOrganization,
+    this.codefOrg,
   });
 
   List<String> get holderIds => [for (final h in holders) h.id];
@@ -500,6 +596,8 @@ class CorporateCard {
     memo: json['memo'] as String?,
     enabled: json['enabled'] != false,
     used: _intOrNull(json['used']),
+    codefOrganization: json['codefOrganization'] as String?,
+    codefOrg: json['codefOrg'] as String?,
   );
 }
 
@@ -528,11 +626,15 @@ class ReceiptFile {
   final String? fileName;
   final int? fileSize;
   final String? mimeType;
+
+  /// 보관 기한이 지나 서버가 원본을 지운 때(링크 없음).
+  final DateTime? purgedAt;
   const ReceiptFile({
     this.fileUrl,
     this.fileName,
     this.fileSize,
     this.mimeType,
+    this.purgedAt,
   });
 
   factory ReceiptFile.fromJson(Map<String, dynamic> json) => ReceiptFile(
@@ -540,6 +642,7 @@ class ReceiptFile {
     fileName: json['fileName'] as String?,
     fileSize: _intOrNull(json['fileSize']),
     mimeType: json['mimeType'] as String?,
+    purgedAt: _time(json['purgedAt']),
   );
 
   Map<String, dynamic> toJson() => {

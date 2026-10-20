@@ -66,10 +66,10 @@ test('4대보험 어림 — 2026년 기본 요율, 10원 미만 버림, 국민�
   assert.equal(d.health, 107850); // 3,000,000 × 3.595%
   assert.equal(d.longTermCare, 14170); // 107,850 × 13.14% = 14,171.49 → 14,170
   assert.equal(d.employment, 27000); // 0.9%
-  // 상한 637만 원.
-  assert.equal(insuranceDeductions(10_000_000).pension, Math.floor((6_370_000 * 4.75) / 100 / 10) * 10);
-  // 하한 40만 원.
-  assert.equal(insuranceDeductions(300_000).pension, 19000);
+  // 상한 659만 원(2026.7~2027.6).
+  assert.equal(insuranceDeductions(10_000_000).pension, Math.floor((6_590_000 * 4.75) / 100 / 10) * 10);
+  // 하한 41만 원.
+  assert.equal(insuranceDeductions(300_000).pension, 19470);
   // 천 원 미만 버림 뒤 곱한다.
   assert.equal(insuranceDeductions(3_000_999).pension, 142500);
   assert.deepEqual(insuranceDeductions(0), { pension: 0, health: 0, longTermCare: 0, employment: 0 });

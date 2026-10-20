@@ -193,9 +193,9 @@ class _PayrollRunScreenState extends State<PayrollRunScreen> {
   Future<void> _calcDeductions(PayrollRunDetail d) async {
     final ok = await confirmAction(
       context,
-      title: tr('4대보험 공제 계산'),
+      title: tr('공제 계산'),
       message: tr(
-        '과세 대상 급여(비과세 항목 뺀 지급 총액)로 국민연금·건강보험·장기요양보험·고용보험을 급여 설정의 요율대로 어림해 넣고, 소득세가 있으면 지방소득세를 넣습니다. 소득세(간이세액표)는 계산하지 않습니다. 실제 고지액·나이·감면에 따라 다를 수 있으니 확인하세요.',
+        '과세 대상 급여(비과세 항목 뺀 지급 총액)로 국민연금·건강보험·장기요양보험·고용보험을 급여 설정의 요율대로 어림해 넣고, 소득세는 근로소득 간이세액표(급여 설정의 공제대상가족 수·8~20세 자녀·원천징수 비율, 이 대장의 지급일)로, 지방소득세는 그 10%로 넣습니다. "소득세 직접 넣기"로 둔 사람의 소득세는 그대로 둡니다. 실제 고지액·나이·감면에 따라 다를 수 있으니 확인하세요.',
       ),
       okLabel: tr('계산'),
     );
@@ -219,6 +219,34 @@ class _PayrollRunScreenState extends State<PayrollRunScreen> {
       await openLocalFile(path);
       return null;
     });
+  }
+
+  /// 급여 이체 파일(은행 대량 이체)·회계 전표 내려받기.
+  Future<void> _downloadFile(String path, String name) async {
+    await _run(() async {
+      final local = await widget.session.downloadAuthedFile(
+        path,
+        fileName: name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_'),
+      );
+      await openLocalFile(local);
+      return null;
+    });
+  }
+
+  Future<void> _transfer(PayrollRunDetail d) async {
+    final ok = await confirmAction(
+      context,
+      title: tr('급여 이체 파일'),
+      message: tr(
+        '실수령액을 은행 대량 이체 엑셀(은행코드·계좌번호·예금주·금액)로 받습니다. 계좌는 급여 설정에서 정하고, 계좌가 없는 사람은 "빠진 사람" 시트에 나옵니다. 받은 파일은 감사 로그에 남습니다 — 기업뱅킹의 대량 이체 양식에 맞춰 올리세요.',
+      ),
+      okLabel: tr('받기'),
+    );
+    if (!ok) return;
+    await _downloadFile(
+      widget.api.payrollTransferPath(d.run.id),
+      '급여이체_${d.run.payMonth}_${d.run.title}.xlsx',
+    );
   }
 
   Future<void> _import(PayrollRunDetail d) async {
@@ -401,6 +429,11 @@ class _PayrollRunScreenState extends State<PayrollRunScreen> {
               'attendance' => _fillAttendance(d),
               'deductions' => _calcDeductions(d),
               'export' => _export(d),
+              'transfer' => _transfer(d),
+              'vouchers' => _downloadFile(
+                widget.api.payrollVouchersPath(d.run.id),
+                '급여전표_${d.run.payMonth}_${d.run.title}.xlsx',
+              ),
               'import' => _import(d),
               'add' => _addPeople(d),
               'unpublish' => _unpublish(d),
@@ -413,12 +446,14 @@ class _PayrollRunScreenState extends State<PayrollRunScreen> {
                 PopupMenuItem(value: 'attendance', child: Text(tr('근태에서 채우기'))),
                 PopupMenuItem(
                   value: 'deductions',
-                  child: Text(tr('4대보험 공제 계산')),
+                  child: Text(tr('공제 계산(4대보험·소득세)')),
                 ),
                 PopupMenuItem(value: 'import', child: Text(tr('엑셀 가져오기'))),
                 PopupMenuItem(value: 'add', child: Text(tr('사람 더하기'))),
               ],
               PopupMenuItem(value: 'export', child: Text(tr('엑셀로 내보내기'))),
+              PopupMenuItem(value: 'transfer', child: Text(tr('급여 이체 파일'))),
+              PopupMenuItem(value: 'vouchers', child: Text(tr('회계 전표'))),
               if (!draft)
                 PopupMenuItem(value: 'unpublish', child: Text(tr('보내기 취소'))),
               if (draft)
@@ -519,7 +554,7 @@ class _PayrollRunScreenState extends State<PayrollRunScreen> {
                               Icons.calculate_outlined,
                               size: 18,
                             ),
-                            label: Text(tr('4대보험 공제 계산')),
+                            label: Text(tr('공제 계산(4대보험·소득세)')),
                           ),
                           OutlinedButton.icon(
                             key: const ValueKey('payroll-import'),
@@ -1362,6 +1397,31 @@ class _PayrollSettingsDialogState extends State<_PayrollSettingsDialog> {
     for (final p in widget.settings.people)
       p.id: TextEditingController(text: widget.settings.employeeNos[p.id]),
   };
+
+  /// 사람마다 원천징수 정보(공제대상가족·8~20세 자녀·비율·자동 계산).
+  late final Map<String, TaxProfile> _profiles = {
+    for (final p in widget.settings.people)
+      p.id: widget.settings.taxProfiles[p.id] ?? const TaxProfile(),
+  };
+
+  /// 사람마다 급여 계좌(은행 코드·계좌번호·예금주).
+  late final Map<String, String?> _bankCodes = {
+    for (final p in widget.settings.people)
+      p.id: widget.settings.bankAccounts[p.id]?.bankCode,
+  };
+  late final Map<String, TextEditingController> _accountNos = {
+    for (final p in widget.settings.people)
+      p.id: TextEditingController(
+        text: widget.settings.bankAccounts[p.id]?.number,
+      ),
+  };
+  late final Map<String, TextEditingController> _holders = {
+    for (final p in widget.settings.people)
+      p.id: TextEditingController(
+        text: widget.settings.bankAccounts[p.id]?.holder,
+      ),
+  };
+  late bool _requireReauth = widget.settings.requireReauth;
   bool _saving = false;
   String? _error;
 
@@ -1371,7 +1431,12 @@ class _PayrollSettingsDialogState extends State<_PayrollSettingsDialog> {
     for (final r in [..._earnings, ..._deductions]) {
       r.dispose();
     }
-    for (final c in [..._rates.values, ..._employeeNos.values]) {
+    for (final c in [
+      ..._rates.values,
+      ..._employeeNos.values,
+      ..._accountNos.values,
+      ..._holders.values,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -1408,6 +1473,23 @@ class _PayrollSettingsDialogState extends State<_PayrollSettingsDialog> {
         employeeNos: {
           for (final e in _employeeNos.entries) e.key: e.value.text.trim(),
         },
+        taxProfiles: {
+          for (final e in _profiles.entries)
+            e.key: e.value.isDefault ? null : e.value,
+        },
+        bankAccounts: {
+          for (final p in widget.settings.people)
+            p.id:
+                _bankCodes[p.id] == null ||
+                    _accountNos[p.id]!.text.trim().isEmpty
+                ? null
+                : (
+                    bank: _bankCodes[p.id]!,
+                    number: _accountNos[p.id]!.text.trim(),
+                    holder: _holders[p.id]!.text.trim(),
+                  ),
+        },
+        requireReauth: _requireReauth,
       );
       if (mounted) {
         Navigator.pop(context);
@@ -1599,6 +1681,181 @@ class _PayrollSettingsDialogState extends State<_PayrollSettingsDialog> {
                       ),
                     ),
                 ],
+              ),
+              ExpansionTile(
+                key: const ValueKey('payroll-tax-profiles'),
+                tilePadding: EdgeInsets.zero,
+                title: Text(
+                  tr('원천징수(소득세 — 간이세액표)'),
+                  style: theme.textTheme.titleSmall,
+                ),
+                subtitle: Text(
+                  tr(
+                    '근로소득 원천징수 신고서대로 공제대상가족 수(본인 포함)·그중 8~20세 자녀·원천징수 비율을 넣습니다. 비우면 본인 1명·100%입니다. "직접"은 소득세를 계산하지 않습니다(일용직·외국인 단일세율 등).',
+                  ),
+                  style: TextStyle(fontSize: 12, color: hint),
+                ),
+                children: [
+                  for (final p in widget.settings.people)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        children: [
+                          SizedBox(width: 120, child: Text(p.name)),
+                          DropdownButton<int>(
+                            key: ValueKey('tax-dependents-${p.id}'),
+                            value: _profiles[p.id]!.dependents,
+                            items: [
+                              for (var n = 1; n <= 20; n++)
+                                DropdownMenuItem(
+                                  value: n,
+                                  child: Text(tr('가족 {n}명', {'n': n})),
+                                ),
+                            ],
+                            onChanged: (v) => setState(() {
+                              final cur = _profiles[p.id]!;
+                              final deps = v ?? cur.dependents;
+                              _profiles[p.id] = TaxProfile(
+                                dependents: deps,
+                                children: cur.children.clamp(0, deps - 1),
+                                ratio: cur.ratio,
+                                auto: cur.auto,
+                              );
+                            }),
+                          ),
+                          DropdownButton<int>(
+                            key: ValueKey('tax-children-${p.id}'),
+                            value: _profiles[p.id]!.children,
+                            items: [
+                              for (
+                                var n = 0;
+                                n < _profiles[p.id]!.dependents;
+                                n++
+                              )
+                                DropdownMenuItem(
+                                  value: n,
+                                  child: Text(tr('자녀 {n}명', {'n': n})),
+                                ),
+                            ],
+                            onChanged: (v) => setState(() {
+                              final cur = _profiles[p.id]!;
+                              _profiles[p.id] = TaxProfile(
+                                dependents: cur.dependents,
+                                children: v ?? cur.children,
+                                ratio: cur.ratio,
+                                auto: cur.auto,
+                              );
+                            }),
+                          ),
+                          DropdownButton<int>(
+                            value: _profiles[p.id]!.auto
+                                ? _profiles[p.id]!.ratio
+                                : 0,
+                            items: [
+                              for (final r in const [80, 100, 120])
+                                DropdownMenuItem(value: r, child: Text('$r%')),
+                              DropdownMenuItem(value: 0, child: Text(tr('직접'))),
+                            ],
+                            onChanged: (v) => setState(() {
+                              final cur = _profiles[p.id]!;
+                              _profiles[p.id] = TaxProfile(
+                                dependents: cur.dependents,
+                                children: cur.children,
+                                ratio: v == null || v == 0 ? cur.ratio : v,
+                                auto: v != 0,
+                              );
+                            }),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+              ExpansionTile(
+                key: const ValueKey('payroll-bank-accounts'),
+                tilePadding: EdgeInsets.zero,
+                title: Text(tr('급여 계좌'), style: theme.textTheme.titleSmall),
+                subtitle: Text(
+                  tr('급여 이체 파일(은행 대량 이체)에 들어갑니다. 서버에 암호화해 둡니다.'),
+                  style: TextStyle(fontSize: 12, color: hint),
+                ),
+                children: [
+                  for (final p in widget.settings.people)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 90, child: Text(p.name)),
+                          Expanded(
+                            flex: 3,
+                            child: DropdownButton<String?>(
+                              key: ValueKey('bank-${p.id}'),
+                              isExpanded: true,
+                              value: _bankCodes[p.id],
+                              hint: Text(tr('은행')),
+                              items: [
+                                DropdownMenuItem(
+                                  value: null,
+                                  child: Text(tr('없음')),
+                                ),
+                                for (final b in widget.settings.banks)
+                                  DropdownMenuItem(
+                                    value: b.code,
+                                    child: Text(
+                                      b.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (v) =>
+                                  setState(() => _bankCodes[p.id] = v),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            flex: 4,
+                            child: TextField(
+                              key: ValueKey('account-no-${p.id}'),
+                              controller: _accountNos[p.id],
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                isDense: true,
+                                hintText: tr('계좌번호'),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: _holders[p.id],
+                              maxLength: 30,
+                              decoration: InputDecoration(
+                                isDense: true,
+                                counterText: '',
+                                hintText: tr('예금주'),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+              SwitchListTile(
+                key: const ValueKey('payroll-require-reauth'),
+                contentPadding: EdgeInsets.zero,
+                value: _requireReauth,
+                onChanged: (v) => setState(() => _requireReauth = v),
+                title: Text(tr('명세서 열 때 비밀번호 다시 묻기')),
+                subtitle: Text(
+                  tr(
+                    '받는 사람이 금액을 보거나 명세서를 열 때 로그인 비밀번호를 다시 넣게 합니다(10분 동안 그 기기에서 다시 묻지 않음). 회사 계정(Google·Microsoft)으로만 로그인하는 계정은 묻지 않습니다.',
+                  ),
+                  style: TextStyle(fontSize: 12, color: hint),
+                ),
               ),
               if (_error != null)
                 Padding(

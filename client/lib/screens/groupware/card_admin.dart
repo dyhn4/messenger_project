@@ -9,6 +9,7 @@ import '../../services/session.dart';
 import '../../services/time_format.dart';
 import '../../widgets/app_toast.dart';
 import 'corporate_cards.dart';
+import 'finance_tools.dart';
 import 'finance_widgets.dart';
 import 'groupware_screen.dart';
 import '../../l10n/tr.dart';
@@ -251,6 +252,56 @@ class _CardAdminViewState extends State<CardAdminView> {
           trailing: Wrap(
             spacing: 4,
             children: [
+              // 지출 관리 도구(finance_tools.dart) — 회계 전표·증빙 조회·카드사/홈택스 연동·영수증 보관·계정 설정.
+              PopupMenuButton<String>(
+                key: const ValueKey('finance-tools-menu'),
+                tooltip: tr('지출 관리 도구'),
+                icon: const Icon(Icons.account_balance_outlined),
+                onSelected: (v) => switch (v) {
+                  'vouchers' => showVoucherExportDialog(
+                    context,
+                    api: widget.api,
+                    session: widget.session,
+                    month: _month,
+                  ),
+                  'taxdocs' => openTaxDocumentsScreen(
+                    context,
+                    api: widget.api,
+                    session: widget.session,
+                    ctx: widget.ctx,
+                  ),
+                  'codef' => showCodefDialog(
+                    context,
+                    api: widget.api,
+                    onSynced: () => widget.changes.bump(),
+                  ),
+                  'receipts' => showReceiptRetentionDialog(
+                    context,
+                    api: widget.api,
+                  ),
+                  'settings' => showFinanceSettingsDialog(
+                    context,
+                    api: widget.api,
+                  ),
+                  _ => null,
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'vouchers',
+                    child: Text(tr('회계 전표 내보내기')),
+                  ),
+                  PopupMenuItem(
+                    value: 'taxdocs',
+                    child: Text(tr('현금영수증·전자세금계산서')),
+                  ),
+                  PopupMenuItem(value: 'codef', child: Text(tr('카드사·홈택스 연동'))),
+                  PopupMenuItem(
+                    value: 'receipts',
+                    child: Text(tr('영수증 보관 기간')),
+                  ),
+                  PopupMenuItem(value: 'settings', child: Text(tr('회계 계정 설정'))),
+                ],
+              ),
               IconButton(
                 key: const ValueKey('card-feed-key'),
                 tooltip: tr('연동 키'),
@@ -451,6 +502,9 @@ class _CardEditorDialogState extends State<_CardEditorDialog> {
     text: widget.card?.monthlyLimit?.toString(),
   );
   late final _memo = TextEditingController(text: widget.card?.memo);
+  late final _codefOrg = TextEditingController(
+    text: widget.card?.codefOrganization,
+  );
   late String _issuer = widget.card?.issuer ?? cardIssuers.first;
   late final Set<String> _holders = {...?widget.card?.holderIds};
   late bool _enabled = widget.card?.enabled ?? true;
@@ -477,6 +531,7 @@ class _CardEditorDialogState extends State<_CardEditorDialog> {
     _last4.dispose();
     _limit.dispose();
     _memo.dispose();
+    _codefOrg.dispose();
     super.dispose();
   }
 
@@ -495,6 +550,7 @@ class _CardEditorDialogState extends State<_CardEditorDialog> {
         monthlyLimit: parseWonInput(_limit.text),
         memo: _memo.text.trim(),
         enabled: _enabled,
+        codefOrganization: _codefOrg.text.trim(),
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -629,6 +685,21 @@ class _CardEditorDialogState extends State<_CardEditorDialog> {
                 decoration: InputDecoration(
                   labelText: tr('메모'),
                   border: const OutlineInputBorder(),
+                ),
+              ),
+              // 카드사·홈택스 연동(CODEF)에서 이 카드사를 부르는 코드 — 흔한 카드사는 비워 두면 된다.
+              TextField(
+                key: const ValueKey('card-codef-org'),
+                controller: _codefOrg,
+                maxLength: 4,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: tr('연동 기관 코드(선택)'),
+                  helperText: widget.card?.codefOrg != null
+                      ? tr('지금 쓰는 코드: {code}', {'code': widget.card!.codefOrg!})
+                      : tr('카드사·홈택스 연동(CODEF)을 쓸 때만 — 비우면 카드사로 정합니다.'),
+                  border: const OutlineInputBorder(),
+                  counterText: '',
                 ),
               ),
               if (widget.card != null)

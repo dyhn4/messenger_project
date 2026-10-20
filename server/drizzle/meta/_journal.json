@@ -967,6 +967,13 @@
       "when": 1792415986730,
       "tag": "0137_payroll_corporate_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1792452460873,
+      "tag": "0138_payroll_finance_more",
+      "breakpoints": true
     }
   ]
 }

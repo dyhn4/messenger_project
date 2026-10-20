@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { db } from '../client.js';
-import { payrollRuns, payrollSettings, payslips } from '../schema.js';
+import { payrollInsuranceReports, payrollRuns, payrollSettings, payslips } from '../schema.js';
 
 // ── 급여 설정 ──
 
@@ -155,4 +155,53 @@ export async function updatePayslipsBulk(updates) {
         .where(eq(payslips.id, id));
     }
   });
+}
+
+/**
+ * 보낸 대장의 명세서들 — 지급일이 [from]~[to](YYYY-MM-DD) 안인 것(한 해 집계·퇴직금 평균임금·4대보험 보수총액). [userId]를 주면 그 사람 것만.
+ * `[{ slip, run }]`(지급일 순).
+ */
+export async function listPublishedPayslips(scopeKey, { from, to, userId = null }) {
+  const conds = [eq(payslips.scopeKey, scopeKey), eq(payrollRuns.status, 'published'), gte(payrollRuns.payDate, from), lte(payrollRuns.payDate, to)];
+  if (userId) conds.push(eq(payslips.userId, userId));
+  return db
+    .select({ slip: payslips, run: payrollRuns })
+    .from(payslips)
+    .innerJoin(payrollRuns, eq(payrollRuns.id, payslips.runId))
+    .where(and(...conds))
+    .orderBy(asc(payrollRuns.payDate));
+}
+
+// ── 4대보험 취득·상실 신고 ──
+
+export async function listInsuranceReports(scopeKey, { limit = 300 } = {}) {
+  return db
+    .select()
+    .from(payrollInsuranceReports)
+    .where(eq(payrollInsuranceReports.scopeKey, scopeKey))
+    .orderBy(desc(payrollInsuranceReports.eventDate), desc(payrollInsuranceReports.createdAt))
+    .limit(limit);
+}
+
+export async function findInsuranceReport(id) {
+  const [row] = await db.select().from(payrollInsuranceReports).where(eq(payrollInsuranceReports.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function insertInsuranceReport(values) {
+  const [row] = await db.insert(payrollInsuranceReports).values(values).returning();
+  return row;
+}
+
+export async function updateInsuranceReport(id, patch) {
+  const [row] = await db
+    .update(payrollInsuranceReports)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(payrollInsuranceReports.id, id))
+    .returning();
+  return row ?? null;
+}
+
+export async function deleteInsuranceReport(id) {
+  await db.delete(payrollInsuranceReports).where(eq(payrollInsuranceReports.id, id));
 }

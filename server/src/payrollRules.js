@@ -9,6 +9,7 @@
  *
  * 금액은 원 단위 정수다. 명세서 내용(항목·금액·메모)은 DB에 암호화해 둔다(payroll.js — crypto.js encryptField).
  */
+import { monthlyWithholding } from './incomeTaxRules.js';
 
 export const PAYROLL_ITEMS_MAX = 30;
 export const PAYROLL_ITEM_NAME_MAX = 30;
@@ -57,7 +58,7 @@ export const INSURANCE_ITEMS = Object.freeze({
 /**
  * 4대보험 근로자 부담 요율(%) 기본값 — 2026년. 국민연금 9.5%(근로자 4.75%, 2026년부터 해마다 0.5%p 올라 2033년 13%), 건강보험 7.19%
  * (근로자 3.595%), 장기요양 소득의 0.9448%(= 건강보험료 × 0.9448 / 7.19 ≈ 13.14%), 고용보험 실업급여 1.8%(근로자 0.9%). 국민연금 기준소득월액
- * 상·하한은 해마다 7월에 바뀐다(2025.7~2026.6: 637만 원·40만 원). 요율은 고시로 바뀌므로 관리자가 고친다(급여 설정).
+ * 상·하한은 해마다 7월에 바뀐다(2026.7~2027.6: 659만 원·41만 원 — 그 전 1년은 637만·40만). 요율은 고시로 바뀌므로 관리자가 고친다(급여 설정).
  */
 export const DEFAULT_INSURANCE = Object.freeze({
   pension: 4.75,
@@ -65,8 +66,8 @@ export const DEFAULT_INSURANCE = Object.freeze({
   // 장기요양보험료 = 건강보험료 × 이 비율(%).
   longTermCare: 13.14,
   employment: 0.9,
-  pensionMin: 400_000,
-  pensionMax: 6_370_000,
+  pensionMin: 410_000,
+  pensionMax: 6_590_000,
   // 지방소득세 = 소득세 × 이 비율(%).
   localTax: 10,
 });
@@ -244,7 +245,7 @@ const floor10 = (n) => Math.floor(n / 10) * 10;
 
 /**
  * 4대보험 근로자 부담분 어림(참고용) — 과세 대상 급여([taxable], 원)로. 국민연금은 기준소득월액(천 원 미만 버림, 상·하한)에, 건강·고용보험은
- * 보수월액에 요율을 곱하고 10원 미만은 버린다. 장기요양은 건강보험료 × 비율. 소득세(간이세액표 — 부양가족 수에 따라 다름)는 계산하지 않는다.
+ * 보수월액에 요율을 곱하고 10원 미만은 버린다. 장기요양은 건강보험료 × 비율. 소득세는 applyInsurance의 [withholding]으로(간이세액표 — incomeTaxRules.js).
  * `{ pension, health, longTermCare, employment }`.
  */
 export function insuranceDeductions(taxable, stored) {
@@ -277,8 +278,11 @@ export function setItem(items, name, amount, basis = undefined) {
   return list;
 }
 
-/** 4대보험 공제를 명세서에 채운다(지방소득세는 소득세가 있으면 그 비율로). 새 data. */
-export function applyInsurance(data, stored) {
+/**
+ * 4대보험 공제를 명세서에 채운다(지방소득세는 소득세가 있으면 그 비율로). [withholding]을 주면(`{ profile, payDate }` — 원천징수 정보·지급일)
+ * 소득세도 간이세액표로 계산해 넣는다(계산 방법 칸에 "간이세액표 … · 가족 n명"). profile.auto가 false인 사람은 소득세를 그대로 둔다. 새 data.
+ */
+export function applyInsurance(data, stored, { withholding = null } = {}) {
   const totals = payslipTotals(data);
   const r = insuranceOf(stored);
   const ded = insuranceDeductions(totals.taxable, stored);
@@ -287,6 +291,10 @@ export function applyInsurance(data, stored) {
   deductions = setItem(deductions, INSURANCE_ITEMS.health, ded.health);
   deductions = setItem(deductions, INSURANCE_ITEMS.longTermCare, ded.longTermCare);
   deductions = setItem(deductions, INSURANCE_ITEMS.employment, ded.employment);
+  if (withholding && withholding.profile?.auto !== false) {
+    const w = monthlyWithholding(totals.taxable, withholding.profile, { payDate: withholding.payDate, localRate: r.localTax });
+    deductions = setItem(deductions, INSURANCE_ITEMS.incomeTax, w.incomeTax, w.basis);
+  }
   const incomeTax = deductions.find((i) => i.name === INSURANCE_ITEMS.incomeTax)?.amount ?? 0;
   if (incomeTax > 0 || deductions.some((i) => i.name === INSURANCE_ITEMS.localTax)) {
     deductions = setItem(deductions, INSURANCE_ITEMS.localTax, floor10((Math.max(0, incomeTax) * r.localTax) / 100));

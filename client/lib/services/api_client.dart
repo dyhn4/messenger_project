@@ -1730,8 +1730,10 @@ class ApiClient {
     );
     final body = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
+      // 상태 코드도 싣는다 — 급여명세서는 423(비밀번호를 다시 확인해야 함)으로 비밀번호 창을 띄운다(payslip_view.dart).
       throw ApiException(
         (body is Map ? body['error'] as String? : null) ?? tr('요청이 실패했습니다.'),
+        statusCode: res.statusCode,
       );
     }
     return body;

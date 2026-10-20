@@ -8,6 +8,7 @@ import 'approval_forms.dart' show ApprovalDateField;
 import 'finance_widgets.dart';
 import 'groupware_screen.dart';
 import 'payroll_admin.dart';
+import 'payroll_reports.dart';
 import 'payslip_view.dart';
 import '../../l10n/tr.dart';
 
@@ -38,6 +39,9 @@ class _PayrollTabState extends State<PayrollTab> {
   List<PayrollRun>? _runs;
   bool _canManage = false;
   bool _manage = false;
+
+  /// 금액이 빠져 왔다(비밀번호를 다시 확인해야 함 — 급여 설정).
+  bool _locked = false;
   String? _error;
 
   @override
@@ -62,6 +66,8 @@ class _PayrollTabState extends State<PayrollTab> {
       setState(() {
         _mine = mine.items;
         _canManage = mine.canManage;
+        _locked = mine.locked;
+        if (mine.locked) _revealAmounts = false;
         _runs = runs;
         if (!_canManage) _manage = false;
         _error = null;
@@ -72,8 +78,24 @@ class _PayrollTabState extends State<PayrollTab> {
   }
 
   Future<void> _openSlip(Payslip slip) async {
+    if (_locked && !await askPayrollPassword(context, api: widget.api)) return;
+    if (!mounted) return;
     await openPayslipScreen(context, api: widget.api, payslipId: slip.id);
     await _load();
+  }
+
+  /// 눈 단추 — 잠겨 있으면 비밀번호를 다시 확인하고 금액을 받아 온다.
+  Future<void> _toggleReveal() async {
+    if (_revealAmounts) {
+      setState(() => _revealAmounts = false);
+      return;
+    }
+    if (_locked) {
+      if (!await askPayrollPassword(context, api: widget.api)) return;
+      await _load();
+      if (_locked) return;
+    }
+    if (mounted) setState(() => _revealAmounts = true);
   }
 
   Future<void> _newRun() async {
@@ -156,13 +178,19 @@ class _PayrollTabState extends State<PayrollTab> {
         tr('내 급여명세서'),
         trailing: IconButton(
           key: const ValueKey('payroll-reveal'),
-          tooltip: _revealAmounts ? tr('금액 가리기') : tr('금액 보기'),
+          tooltip: _revealAmounts
+              ? tr('금액 가리기')
+              : _locked
+              ? tr('비밀번호 확인 후 금액 보기')
+              : tr('금액 보기'),
           icon: Icon(
             _revealAmounts
                 ? Icons.visibility_off_outlined
+                : _locked
+                ? Icons.lock_outline
                 : Icons.visibility_outlined,
           ),
-          onPressed: () => setState(() => _revealAmounts = !_revealAmounts),
+          onPressed: _toggleReveal,
         ),
       ),
       if (mine.isEmpty)
@@ -256,6 +284,51 @@ class _PayrollTabState extends State<PayrollTab> {
             '달마다 대장을 만들어 금액을 넣고(직접·엑셀·근태에서 채우기) 보내면 받는 사람마다 알림이 가고 그룹웨어 → 급여에서 자기 명세서만 봅니다. 명세서 내용은 서버에 암호화해 둡니다.',
           ),
           style: TextStyle(fontSize: 12, color: hint),
+        ),
+      ),
+      // 급여 부가 기능(payroll_reports.dart) — 연말정산 자료·퇴직금·4대보험 신고.
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            OutlinedButton.icon(
+              key: const ValueKey('payroll-year-end'),
+              onPressed: () => openYearEndScreen(
+                context,
+                api: widget.api,
+                session: widget.session,
+                ctx: widget.ctx,
+              ),
+              icon: const Icon(Icons.summarize_outlined, size: 18),
+              label: Text(tr('연말정산 자료')),
+            ),
+            OutlinedButton.icon(
+              key: const ValueKey('payroll-severance'),
+              onPressed: () async {
+                await showSeveranceDialog(
+                  context,
+                  api: widget.api,
+                  ctx: widget.ctx,
+                  session: widget.session,
+                );
+                await _load();
+              },
+              icon: const Icon(Icons.work_off_outlined, size: 18),
+              label: Text(tr('퇴직금 계산')),
+            ),
+            OutlinedButton.icon(
+              key: const ValueKey('payroll-insurance'),
+              onPressed: () => openInsuranceReportsScreen(
+                context,
+                api: widget.api,
+                session: widget.session,
+              ),
+              icon: const Icon(Icons.health_and_safety_outlined, size: 18),
+              label: Text(tr('4대보험 신고')),
+            ),
+          ],
         ),
       ),
       if (runs.isEmpty)

@@ -658,11 +658,22 @@ class _CardTxDialogState extends State<_CardTxDialog> {
                   for (final (i, r) in t.receipts.indexed)
                     InputChip(
                       label: Text(
-                        r.fileName ?? tr('영수증'),
+                        r.purgedAt != null
+                            ? tr('{name}(보관 기한이 지나 지움)', {
+                                'name': r.fileName ?? tr('영수증'),
+                              })
+                            : r.fileName ?? tr('영수증'),
                         overflow: TextOverflow.ellipsis,
                       ),
-                      avatar: const Icon(Icons.receipt_long, size: 16),
-                      onPressed: () => _openReceipt(r),
+                      avatar: Icon(
+                        r.purgedAt != null
+                            ? Icons.delete_sweep_outlined
+                            : Icons.receipt_long,
+                        size: 16,
+                      ),
+                      onPressed: r.fileUrl == null
+                          ? null
+                          : () => _openReceipt(r),
                       onDeleted: t.canEdit && !_busy
                           ? () => _do(
                               () => widget.api.updateCardTransaction(
@@ -674,7 +685,8 @@ class _CardTxDialogState extends State<_CardTxDialog> {
                     ),
                   if (widget.ctx.receiptOcr)
                     for (final (i, r) in t.receipts.indexed)
-                      if (r.isImage || (r.mimeType ?? '').contains('pdf'))
+                      if (r.purgedAt == null &&
+                          (r.isImage || (r.mimeType ?? '').contains('pdf')))
                         ActionChip(
                           avatar: const Icon(
                             Icons.document_scanner_outlined,

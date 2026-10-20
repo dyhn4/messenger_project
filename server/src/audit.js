@@ -44,11 +44,20 @@ export const AUDIT = {
   payrollDelete: 'payroll.delete',
   payrollCorrect: 'payroll.correct',
   payrollExport: 'payroll.export',
+  // 급여 부가 기능(payrollReports.js) — 급여 이체 파일·연간 집계·4대보험 신고 자료 내려받기, 퇴직금 명세서 만들기, 연말정산 정산분 넣기.
+  payrollTransfer: 'payroll.transfer',
+  payrollReport: 'payroll.report',
   // 법인카드(corporateCards.js) — 카드 등록·바꾸기·지우기, 이용내역 가져오기, 사용 건 제외, 연동 키 만들기·지우기.
   cardManage: 'card.manage',
   cardImport: 'card.import',
   cardExclude: 'card.exclude',
   cardFeedKey: 'card.feedKey',
+  // 지출 관리(financeTools.js) — 설정(계정·영수증 보관), 회계 전표·증빙 내려받기, 증빙 가져오기, CODEF 계정 연결·가져오기, 보관 기한 지난 영수증 지우기.
+  financeSettings: 'finance.settings',
+  financeExport: 'finance.export',
+  financeImport: 'finance.import',
+  financeCodef: 'finance.codef',
+  financePurge: 'finance.purge',
   // 토픽 삭제(rooms.js DELETE /rooms/:id) — 메시지·파일이 전부 사라지는 되돌릴 수 없는 일이라 남긴다.
   topicDelete: 'topic.delete',
   // 그룹채팅 → 토픽 전환(rooms.js POST /rooms/:id/convert-to-topic) — 되돌릴 수 없는 일이라 남긴다.

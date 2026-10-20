@@ -1,6 +1,8 @@
 import ExcelJS from 'exceljs';
 import express, { Router } from 'express';
+import jwt from 'jsonwebtoken';
 import { AUDIT, recordAudit } from './audit.js';
+import { JWT_SECRET } from './config.js';
 import { decryptField, encryptField } from './crypto.js';
 import {
   countPayslipsByRun,
@@ -24,6 +26,7 @@ import {
 import { listGroupwareMembers } from './db/queries/groupware.js';
 import { isUuid } from './favoritesRules.js';
 import { approverCandidates, fail, groupwareContext, monthSummaries } from './groupware.js';
+import { parseTaxProfiles, WITHHOLDING_RATIOS } from './incomeTaxRules.js';
 import { loadOrgTree } from './orgTree.js';
 import { orgScopeKey } from './orgTreeRules.js';
 import {
@@ -52,12 +55,14 @@ import {
   payslipTotals,
   planPayrollImport,
 } from './payrollRules.js';
+import { BANKS, parseBankAccounts } from './payrollReportRules.js';
 import { notifyGroupwarePush } from './push.js';
 import { readSheetRows } from './sheetRows.js';
+import { checkCurrentPassword } from './users.js';
 import { payRatesOf } from './workPolicy.js';
 
 const ms = (v) => (v ? new Date(v).getTime() : null);
-const readData = (stored) => {
+export const readData = (stored) => {
   try {
     return JSON.parse(decryptField(stored));
   } catch {
@@ -65,7 +70,34 @@ const readData = (stored) => {
     return { earnings: [], deductions: [], work: null, memo: null, unreadable: true };
   }
 };
-const sealData = (data) => encryptField(JSON.stringify({ earnings: data.earnings, deductions: data.deductions, work: data.work ?? null, memo: data.memo ?? null }));
+export const sealData = (data) =>
+  encryptField(JSON.stringify({ earnings: data.earnings, deductions: data.deductions, work: data.work ?? null, memo: data.memo ?? null }));
+
+/** 급여 계좌(급여 설정 — 암호화) → `{ userId: { bankCode, number, holder? } }`. */
+export function readBankAccounts(settings) {
+  if (!settings?.bankAccounts) return {};
+  try {
+    const v = JSON.parse(decryptField(settings.bankAccounts));
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+/** 받는 사람이 비밀번호를 다시 확인한 뒤 명세서를 여는 표 — 10분, 그 기기에서만(did). */
+const UNLOCK_TTL_SEC = 10 * 60;
+const UNLOCK_TYPE = 'payroll-unlock';
+const unlockOk = (req) => {
+  const raw = typeof req.query.unlock === 'string' ? req.query.unlock : null;
+  if (!raw) return false;
+  try {
+    const p = jwt.verify(raw, JWT_SECRET);
+    return p.type === UNLOCK_TYPE && p.sub === req.user.sub && (p.did ?? null) === (req.user.did ?? null);
+  } catch {
+    return false;
+  }
+};
+
 const readHistory = (stored) => {
   if (!stored) return [];
   try {
@@ -217,17 +249,43 @@ export function createPayrollRouter(io) {
 
   const companyOf = (ctx) => ctx.payrollSettings?.companyName || ctx.team?.name || null;
 
+  /** 비밀번호로 다시 확인할 수 있는 계정인지 — 회사 계정(Google·Microsoft) 전용 계정은 비밀번호가 없어 묻지 않는다. */
+  const reauthApplies = (ctx) => ctx.payrollSettings?.requireReauth === true && ctx.user.authSource !== 'sso';
+  /** 받는 사람이 지금 비밀번호를 다시 확인해야 하는지(설정을 켰고, 지난 10분 안의 확인 표 ?unlock=이 없으면). */
+  const needsUnlock = (req, ctx) => reauthApplies(ctx) && !unlockOk(req);
+
   // ── 받는 사람 ──
 
-  /** 내 명세서들(보낸 대장의 것만) — 합계만. 담당자인지(canManage)도 함께. */
+  /**
+   * 내 명세서들(보낸 대장의 것만) — 합계만. 담당자인지(canManage)도 함께. 비밀번호를 다시 물어야 하면 금액을 빼고 `locked: true`(앱이
+   * 비밀번호를 받아 POST /payroll/unlock 뒤 ?unlock=으로 다시 부른다).
+   */
   router.get(
     '/groupware/payroll/mine',
     withPayroll(async (req, res, ctx) => {
       const rows = await listMyPayslips(ctx.scopeKey, ctx.user.id);
+      const locked = needsUnlock(req, ctx);
+      const hide = (d) => (locked ? { ...d, gross: null, taxable: null, taxFree: null, deductionTotal: null, net: null } : d);
       res.json({
         canManage: ctx.canManagePayroll,
-        items: rows.map(({ slip, run }) => ({ ...slipDto(slip, { full: false }), run: runDto(run) })),
+        reauthRequired: reauthApplies(ctx),
+        locked,
+        items: rows.map(({ slip, run }) => ({ ...hide(slipDto(slip, { full: false })), run: runDto(run) })),
       });
+    }),
+  );
+
+  /**
+   * 비밀번호 다시 확인 `{ password }` → `{ token, expiresAt }`(10분 — 이 기기에서만). 틀리면 403, 여러 번 틀리면 잠깐 막는다(users.js
+   * checkCurrentPassword — 화면 잠금 해제와 같은 횟수 제한). 다시 묻지 않는 범위·계정이면 `{ token: null }`.
+   */
+  router.post(
+    '/groupware/payroll/unlock',
+    withPayroll(async (req, res, ctx) => {
+      if (!reauthApplies(ctx)) return res.json({ token: null, expiresAt: null });
+      if (!(await checkCurrentPassword(res, ctx.user, req.body?.password, '비밀번호가 올바르지 않습니다.'))) return;
+      const token = jwt.sign({ sub: ctx.user.id, ...(req.user.did && { did: req.user.did }), type: UNLOCK_TYPE }, JWT_SECRET, { expiresIn: UNLOCK_TTL_SEC });
+      res.json({ token, expiresAt: Date.now() + UNLOCK_TTL_SEC * 1000 });
     }),
   );
 
@@ -240,6 +298,8 @@ export function createPayrollRouter(io) {
       if (!found || found.run.scopeKey !== ctx.scopeKey || (!own && !ctx.canManagePayroll)) {
         return fail(res, { error: '급여명세서를 찾을 수 없습니다.', status: 404 });
       }
+      // 내 명세서를 여는데 비밀번호를 다시 물어야 하면 423(앱이 비밀번호를 받아 다시 연다). 담당자가 남의 명세서를 보는 것은 묻지 않는다.
+      if (own && needsUnlock(req, ctx)) return res.status(423).json({ error: '명세서를 보려면 비밀번호를 다시 확인하세요.', code: 'payroll_locked' });
       let slip = found.slip;
       if (own && !slip.viewedAt && (await markPayslipViewed(slip.id))) {
         slip = { ...slip, viewedAt: new Date() };
@@ -257,6 +317,12 @@ export function createPayrollRouter(io) {
     template: s?.itemTemplate ?? { earnings: DEFAULT_EARNING_ITEMS, deductions: DEFAULT_DEDUCTION_ITEMS },
     insurance: insuranceOf(s?.insurance),
     employeeNos: s?.employeeNos ?? {},
+    // 원천징수 정보(가족 수·8~20세 자녀·비율 — 없는 사람은 본인 1명·100%)와 급여 계좌(급여 이체 파일).
+    taxProfiles: s?.taxProfiles ?? {},
+    withholdingRatios: WITHHOLDING_RATIOS,
+    bankAccounts: readBankAccounts(s),
+    banks: BANKS.map(({ code, name }) => ({ code, name })),
+    requireReauth: s?.requireReauth === true,
     // 담당자는 관리자가 정한다 — 담당자 스스로는 바꾸지 못한다.
     canEditStaff: ctx.isManager,
     people: people.map((p) => ({ id: p.id, name: p.name, username: p.username })),
@@ -303,9 +369,29 @@ export function createPayrollRouter(io) {
         const nos = parseEmployeeNos(body.employeeNos, ctx.payrollSettings?.employeeNos ?? {});
         if (nos.error) return fail(res, nos);
         if (nos.employeeNos !== undefined) patch.employeeNos = nos.employeeNos;
+        const profiles = parseTaxProfiles(body.taxProfiles, ctx.payrollSettings?.taxProfiles ?? {});
+        if (profiles.error) return fail(res, profiles);
+        if (profiles.taxProfiles !== undefined) patch.taxProfiles = profiles.taxProfiles;
+        const accounts = parseBankAccounts(body.bankAccounts, readBankAccounts(ctx.payrollSettings));
+        if (accounts.error) return fail(res, accounts);
+        // 앱은 늘 전부 보낸다 — 바뀐 것이 있을 때만 다시 쓴다(감사 로그에 "급여 계좌"가 남지 않게).
+        if (accounts.bankAccounts !== undefined && JSON.stringify(accounts.bankAccounts) !== JSON.stringify(readBankAccounts(ctx.payrollSettings))) {
+          patch.bankAccounts = encryptField(JSON.stringify(accounts.bankAccounts));
+        }
+        if (body.requireReauth !== undefined) patch.requireReauth = body.requireReauth === true;
         const row = await upsertPayrollSettings(ctx.scopeKey, patch);
+        const labels = {
+          staffIds: '급여 담당자',
+          companyName: '회사 이름',
+          itemTemplate: '항목 틀',
+          insurance: '4대보험 요율',
+          employeeNos: '사번',
+          taxProfiles: '원천징수 정보',
+          bankAccounts: '급여 계좌',
+          requireReauth: '명세서 비밀번호 확인',
+        };
         const changed = Object.keys(patch)
-          .map((k) => ({ staffIds: '급여 담당자', companyName: '회사 이름', itemTemplate: '항목 틀', insurance: '4대보험 요율', employeeNos: '사번' })[k])
+          .map((k) => labels[k])
           .filter(Boolean);
         if (changed.length) audit(ctx, AUDIT.payrollSettings, { detail: `급여 설정 — ${changed.join('·')}` });
         emitToStaff({ ...ctx, payrollSettings: row }, ctx.payrollSettings?.staffIds ?? []);
@@ -617,7 +703,10 @@ export function createPayrollRouter(io) {
     ),
   );
 
-  /** 4대보험 공제 어림(참고용) — 명세서마다 과세 대상 급여로 국민연금·건강·장기요양·고용보험을, 소득세가 있으면 지방소득세를 채운다. */
+  /**
+   * 공제 계산 `{ userIds?, incomeTax? }` — 명세서마다 과세 대상 급여로 국민연금·건강·장기요양·고용보험(요율 어림)을, incomeTax가 false가 아니면
+   * 소득세(간이세액표 — 급여 설정의 가족 수·8~20세 자녀·비율, 대장의 지급일)와 지방소득세를 채운다.
+   */
   router.post(
     '/groupware/payroll/runs/:id/calc-deductions',
     withPayroll(
@@ -626,10 +715,12 @@ export function createPayrollRouter(io) {
         if (!run) return;
         const only = Array.isArray(req.body?.userIds) ? new Set(req.body.userIds) : null;
         const insurance = ctx.payrollSettings?.insurance ?? null;
+        const profiles = ctx.payrollSettings?.taxProfiles ?? {};
+        const withTax = req.body?.incomeTax !== false;
         const changed = await transformRun(run, (data, slip) => {
           if (only && !only.has(slip.userId)) return null;
           if (payslipTotals(data).taxable <= 0) return null;
-          const next = applyInsurance(data, insurance);
+          const next = applyInsurance(data, insurance, withTax ? { withholding: { profile: profiles[slip.userId] ?? null, payDate: run.payDate } } : {});
           return parseItems(next.deductions, { label: '공제' }).error ? null : next;
         });
         emitToStaff(ctx, [run.createdBy]);

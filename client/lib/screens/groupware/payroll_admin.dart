@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../../models/groupware.dart';
 import '../../models/groupware_finance.dart';
+import '../../models/groupware_finance_tools.dart' show TransferPreview;
 import '../../services/download_storage.dart';
 import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../services/time_format.dart';
 import '../../widgets/app_toast.dart';
 import 'approval_forms.dart' show ApprovalDateField;
+import 'export_templates.dart' show pickExportTemplate;
 import 'finance_widgets.dart';
 import 'groupware_screen.dart';
 import 'payslip_view.dart';
@@ -233,19 +235,59 @@ class _PayrollRunScreenState extends State<PayrollRunScreen> {
     });
   }
 
+  /// 급여 이체 파일 — 이체할 사람 수·합계·빠진 사람을 보이고 은행 양식(내보내기 양식)을 골라 받는다.
   Future<void> _transfer(PayrollRunDetail d) async {
-    final ok = await confirmAction(
+    TransferPreview preview;
+    try {
+      preview = await widget.api.payrollTransferPreview(d.run.id);
+    } catch (e) {
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
+      return;
+    }
+    if (!mounted) return;
+    final hint = Theme.of(context).hintColor;
+    final template = await pickExportTemplate(
       context,
+      api: widget.api,
+      kind: 'transfer',
       title: tr('급여 이체 파일'),
-      message: tr(
-        '실수령액을 은행 대량 이체 엑셀(은행코드·계좌번호·예금주·금액)로 받습니다. 계좌는 급여 설정에서 정하고, 계좌가 없는 사람은 "빠진 사람" 시트에 나옵니다. 받은 파일은 감사 로그에 남습니다 — 기업뱅킹의 대량 이체 양식에 맞춰 올리세요.',
+      intro: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr('{n}명 · 합계 {won}', {
+              'n': preview.count,
+              'won': signedWonText(preview.total),
+            }),
+            key: const ValueKey('transfer-preview'),
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          for (final m in preview.missing)
+            Text(
+              tr('빠짐: {name} — {reason}', {
+                'name': m.userName,
+                'reason': m.reason,
+              }),
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          Text(
+            tr('계좌는 급여 설정에서 정합니다. 받은 파일은 감사 로그에 남습니다.'),
+            style: TextStyle(fontSize: 12, color: hint),
+          ),
+        ],
       ),
-      okLabel: tr('받기'),
     );
-    if (!ok) return;
+    if (template == null || !mounted) return;
+    final ext = template.fileType == 'csv' ? 'csv' : 'xlsx';
     await _downloadFile(
-      widget.api.payrollTransferPath(d.run.id),
-      '급여이체_${d.run.payMonth}_${d.run.title}.xlsx',
+      widget.api.payrollTransferPath(
+        d.run.id,
+        template: template.builtin ? null : template.id,
+      ),
+      '급여이체_${d.run.payMonth}_${d.run.title}.$ext',
     );
   }
 

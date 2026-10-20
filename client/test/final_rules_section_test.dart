@@ -54,7 +54,11 @@ class _DownloadSession extends Session {
   Completer<String> download = Completer<String>();
 
   @override
-  Future<String> downloadAuthedFile(String path, {required String fileName}) {
+  Future<String> downloadAuthedFile(
+    String path, {
+    required String fileName,
+    Map<String, dynamic>? body,
+  }) {
     downloads.add((path: path, fileName: fileName));
     return download.future;
   }

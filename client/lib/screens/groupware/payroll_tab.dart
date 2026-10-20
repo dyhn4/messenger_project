@@ -10,6 +10,7 @@ import 'groupware_screen.dart';
 import 'payroll_admin.dart';
 import 'payroll_reports.dart';
 import 'payslip_view.dart';
+import 'year_end_claim.dart' show openMyYearEndScreen;
 import '../../l10n/tr.dart';
 
 /// 급여 탭 — 내 급여명세서(보낸 대장의 내 것만, 해마다 합계)와, 급여 담당자(그룹웨어 관리자 + 급여 설정의 담당자)에게는 급여 대장 관리
@@ -191,6 +192,20 @@ class _PayrollTabState extends State<PayrollTab> {
                 : Icons.visibility_outlined,
           ),
           onPressed: _toggleReveal,
+        ),
+      ),
+      // 연말정산 공제 자료(year_end_claim.dart) — 홈택스 간소화 자료의 합계를 내면 담당자가 연말정산 어림에 쓴다.
+      ListTile(
+        key: const ValueKey('my-year-end'),
+        dense: true,
+        leading: const Icon(Icons.calculate_outlined),
+        title: Text(tr('연말정산 공제 자료')),
+        subtitle: Text(tr('신용카드·의료비·교육비·기부금 등 간소화 자료의 합계를 냅니다.')),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => openMyYearEndScreen(
+          context,
+          api: widget.api,
+          today: widget.ctx.today,
         ),
       ),
       if (mine.isEmpty)

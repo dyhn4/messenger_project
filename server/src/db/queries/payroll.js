@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { db } from '../client.js';
-import { payrollInsuranceReports, payrollRuns, payrollSettings, payslips } from '../schema.js';
+import { payrollInsuranceReports, payrollRuns, payrollSettings, payrollYearEndClaims, payslips } from '../schema.js';
 
 // ── 급여 설정 ──
 
@@ -204,4 +204,67 @@ export async function updateInsuranceReport(id, patch) {
 
 export async function deleteInsuranceReport(id) {
   await db.delete(payrollInsuranceReports).where(eq(payrollInsuranceReports.id, id));
+}
+
+// ── 연말정산 공제 자료 ──
+
+/** 범위·귀속 연도의 공제 자료들(담당자 — 한 해 집계). */
+export async function listYearEndClaims(scopeKey, year) {
+  return db
+    .select()
+    .from(payrollYearEndClaims)
+    .where(and(eq(payrollYearEndClaims.scopeKey, scopeKey), eq(payrollYearEndClaims.year, year)));
+}
+
+export async function findYearEndClaim(scopeKey, userId, year) {
+  const [row] = await db
+    .select()
+    .from(payrollYearEndClaims)
+    .where(and(eq(payrollYearEndClaims.scopeKey, scopeKey), eq(payrollYearEndClaims.userId, userId), eq(payrollYearEndClaims.year, year)))
+    .limit(1);
+  return row ?? null;
+}
+
+/** 공제 자료를 넣거나 바꾼다(사람·연도마다 하나). */
+export async function upsertYearEndClaim(values) {
+  const { scopeKey, userId, year, ...patch } = values;
+  const [row] = await db
+    .insert(payrollYearEndClaims)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [payrollYearEndClaims.scopeKey, payrollYearEndClaims.userId, payrollYearEndClaims.year],
+      set: { ...patch, updatedAt: new Date() },
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * 근로자가 내는 공제 자료 — 담당자가 확인하지 않았을 때만 바꾼다(확인과 동시에 내도 확인이 이긴다). 바뀐 행 | null(이미 확인됨).
+ */
+export async function submitYearEndClaim(values) {
+  const { scopeKey, userId, year, ...patch } = values;
+  const [row] = await db
+    .insert(payrollYearEndClaims)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [payrollYearEndClaims.scopeKey, payrollYearEndClaims.userId, payrollYearEndClaims.year],
+      set: { ...patch, updatedAt: new Date() },
+      setWhere: sql`${payrollYearEndClaims.confirmedAt} is null`,
+    })
+    .returning();
+  return row ?? null;
+}
+
+export async function updateYearEndClaim(id, patch) {
+  const [row] = await db
+    .update(payrollYearEndClaims)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(payrollYearEndClaims.id, id))
+    .returning();
+  return row ?? null;
+}
+
+export async function deleteYearEndClaim(id) {
+  await db.delete(payrollYearEndClaims).where(eq(payrollYearEndClaims.id, id));
 }

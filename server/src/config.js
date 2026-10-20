@@ -163,3 +163,21 @@ export const CODEF_ENV = ['production', 'development', 'sandbox'].includes(Strin
 export const CODEF_CARD_APPROVAL_PATH = process.env.CODEF_CARD_APPROVAL_PATH || '/v1/kr/card/b/account/approval-list';
 export const CODEF_CASH_RECEIPT_PATH = process.env.CODEF_CASH_RECEIPT_PATH || null;
 export const CODEF_TAX_INVOICE_PATH = process.env.CODEF_TAX_INVOICE_PATH || null;
+
+/**
+ * CODEF 응답 칸 이름 바꾸기(taxDocRules.js codefFields) — 계약한 상품의 칸 이름이 기본으로 보는 이름과 다를 때 JSON으로 앞에 더한다.
+ * 예: `{"card":{"amount":"resApprovalAmt","merchant":["resStoreNm"]},"taxDoc":{"total":"resSumAmount"}}`. 칸 이름(card: usedDate·usedTime·
+ * amount·cancel·cancelAmount·cardNo·merchant·merchantBizNo·approvalNo / taxDoc: date·time·supply·tax·total·status·approvalNo·supplierName·
+ * supplierBizNo·buyerName·buyerBizNo·itemName)은 지출 관리 도구의 연동 점검이 보여 준다. JSON이 아니면 무시하고 서버 로그에 남긴다.
+ */
+export const CODEF_FIELD_MAP = (() => {
+  const raw = String(process.env.CODEF_FIELD_MAP ?? '').trim();
+  if (!raw) return {};
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch {
+    console.warn('[codef] CODEF_FIELD_MAP이 JSON이 아니라 무시합니다.');
+    return {};
+  }
+})();

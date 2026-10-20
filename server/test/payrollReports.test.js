@@ -3,15 +3,16 @@ import test from 'node:test';
 import {
   bankOf,
   deductionBucket,
-  insuranceReportSheet,
+  insuranceRecords,
   parseBankAccount,
   parseBankAccounts,
   parseInsuranceReport,
   reportDeadline,
   suggestInsuranceReports,
-  transferRows,
+  transferRecords,
   yearTotals,
 } from '../src/payrollReportRules.js';
+import { findTemplate, renderTemplate } from '../src/exportTemplateRules.js';
 import {
   addMonths,
   averageWagePeriod,
@@ -124,7 +125,7 @@ test('급여 계좌 — 은행 이름·코드, 계좌번호 숫자 8~16자리', 
 });
 
 test('급여 이체 줄 — 계좌 없는 사람·실수령 0원 이하는 빠진 사람으로', () => {
-  const r = transferRows(
+  const r = transferRecords(
     [
       { userId: 'a', userName: '가', employeeNo: 'E1', net: 3_000_000 },
       { userId: 'b', userName: '나', net: 2_500_000 },
@@ -134,7 +135,7 @@ test('급여 이체 줄 — 계좌 없는 사람·실수령 0원 이하는 빠�
     { senderText: '탱고상사주식회사입니다', myText: '급여' },
   );
   assert.equal(r.total, 3_000_000);
-  assert.deepEqual(r.rows[0], ['088', '신한은행', '110123456789', '가', 3_000_000, '탱고상사주식회사입니', '급여 가', '가', 'E1']);
+  assert.deepEqual(renderTemplate(findTemplate('transfer', null), r.records).rows[0], ['088', '신한은행', '110123456789', '가', 3_000_000, '탱고상사주식회사입니', '급여 가', '가', 'E1']);
   assert.deepEqual(
     r.missing.map((m) => [m.userName, m.reason]),
     [
@@ -152,11 +153,12 @@ test('4대보험 신고 — 기한(다음 달 15일)·검사·자료 열·입사
   assert.match(parseInsuranceReport({ kind: 'x', eventDate: '2026-11-01' }).error, /취득·상실/);
   assert.match(parseInsuranceReport({ kind: 'lose', eventDate: '2026-11-01', reasonCode: '99' }).error, /사유/);
   assert.match(parseInsuranceReport({ kind: 'acquire', eventDate: '2026-11-01', weeklyHours: 80 }).error, /소정근로시간/);
-  const acquire = insuranceReportSheet('acquire', [{ name: '가', employeeNo: 'E1', eventDate: '2026-10-05', data: { monthlyPay: 3_000_000, weeklyHours: 40 } }]);
+  const acquire = renderTemplate(findTemplate('acquire', null), insuranceRecords('acquire', [{ name: '가', employeeNo: 'E1', eventDate: '2026-10-05', data: { monthlyPay: 3_000_000, weeklyHours: 40 } }]));
   assert.equal(acquire.header[0], '성명');
   assert.deepEqual(acquire.rows[0].slice(0, 6), ['가', 'E1', '', '2026-10-05', 3_000_000, 40]);
-  assert.equal(acquire.rows[0][11], '2026-11-15');
-  const lose = insuranceReportSheet('lose', [{ name: '나', eventDate: '2026-11-01', reasonCode: '31', yearPay: 30_000_000, yearMonths: 10, data: {} }]);
+  assert.equal(acquire.rows[0][14], '2026-11-15');
+  assert.deepEqual(acquire.rows[0].slice(7, 11), ['Y', 'Y', 'Y', 'Y']);
+  const lose = renderTemplate(findTemplate('lose', null), insuranceRecords('lose', [{ name: '나', eventDate: '2026-11-01', reasonCode: '31', yearPay: 30_000_000, yearMonths: 10, data: {} }]));
   assert.deepEqual(lose.rows[0].slice(3, 8), ['2026-11-01', '31', '정년', 30_000_000, 10]);
   const s = suggestInsuranceReports(
     [

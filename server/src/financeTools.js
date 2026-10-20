@@ -17,7 +17,7 @@ import {
 } from './accountingRules.js';
 import { AUDIT, recordAudit } from './audit.js';
 import { pairCancellations, seoulDateKey, txDedupeKey, txStatus } from './cardRules.js';
-import { CodefError, codefStatus, connectCodefAccount, fetchCardApprovals, fetchHometaxDocs } from './codef.js';
+import { codefCardFields, CodefError, codefStatus, codefTaxDocFields, connectCodefAccount, fetchCardApprovals, fetchHometaxDocs } from './codef.js';
 import { decryptField, encryptField } from './crypto.js';
 import { excludeTransactions, insertTransactions, listCards, listTransactions } from './db/queries/corporateCards.js';
 import {
@@ -43,7 +43,17 @@ import { findReferencedUploadPaths } from './db/queries/uploads.js';
 import { isUuid } from './favoritesRules.js';
 import { fail, groupwareContext } from './groupware.js';
 import { readSheetRows } from './sheetRows.js';
-import { codefCardRow, codefOrgOf, codefTaxDocRow, CODEF_CARD_ORGS, parseTaxDocRows, TAX_DOC_DIRECTIONS, TAX_DOC_KINDS, taxDocDedupeKey } from './taxDocRules.js';
+import {
+  codefCardRow,
+  codefFieldReport,
+  codefOrgOf,
+  codefTaxDocRow,
+  CODEF_CARD_ORGS,
+  parseTaxDocRows,
+  TAX_DOC_DIRECTIONS,
+  TAX_DOC_KINDS,
+  taxDocDedupeKey,
+} from './taxDocRules.js';
 import { uploadFileNameOf, uploadsDir } from './upload.js';
 
 const ms = (v) => (v ? new Date(v).getTime() : null);
@@ -106,6 +116,7 @@ export async function syncCodefCards({ scopeKey, connectedId, from, to }) {
   const errors = [];
   const values = [];
   let read = 0;
+  const fields = codefCardFields();
   for (const [organization, orgCards] of byOrg) {
     let rows;
     try {
@@ -115,7 +126,7 @@ export async function syncCodefCards({ scopeKey, connectedId, from, to }) {
       continue;
     }
     for (const raw of rows) {
-      const parsed = codefCardRow(raw);
+      const parsed = codefCardRow(raw, fields);
       if (parsed.error) {
         if (!parsed.skip) errors.push({ organization, error: parsed.error });
         continue;
@@ -159,6 +170,7 @@ export async function syncCodefCards({ scopeKey, connectedId, from, to }) {
 export async function syncCodefHometax({ scopeKey, connectedId, from, to, kinds }) {
   const errors = [];
   const values = [];
+  const fields = codefTaxDocFields();
   for (const kind of kinds) {
     let rows;
     try {
@@ -168,7 +180,7 @@ export async function syncCodefHometax({ scopeKey, connectedId, from, to, kinds 
       continue;
     }
     for (const raw of rows) {
-      const parsed = codefTaxDocRow(raw, { kind });
+      const parsed = codefTaxDocRow(raw, { kind, fields });
       if (parsed.error) {
         errors.push({ kind, error: parsed.error });
         continue;
@@ -588,6 +600,68 @@ export function createFinanceToolsRouter(io) {
       const row = await upsertFinanceSettings(ctx.scopeKey, { codefLastSyncAt: new Date(), codefLastResult: result }, ctx.teamId);
       audit(ctx, AUDIT.financeCodef, `연동으로 가져오기 — ${from}~${to}: 카드 ${result.cards?.inserted ?? 0}건, 증빙 ${result.hometax?.inserted ?? 0}건`);
       res.json({ ...result, settings: settingsDto(ctx, row) });
+    }),
+  );
+
+  /**
+   * 연동 점검 `{ target: 'card' | 'cash_receipt' | 'tax_invoice', organization?, from?, to? }`(기본 지난 7일) — 계약한 상품 주소로 한 번 불러
+   * 응답 코드·줄 수·응답 칸 이름(값 없이)과 칸마다 어느 이름으로 읽었는지, 읽어 넣을 수 있는 줄 수를 돌려준다. 아무것도 넣지 않는다. 실제 계약
+   * 계정으로 상품 주소·응답 칸을 맞춰 보는 데 쓴다(칸 이름이 다르면 .env의 CODEF_FIELD_MAP). 카드는 [organization](비우면 켜진 카드의 첫 카드사).
+   */
+  router.post(
+    '/groupware/codef/probe',
+    withManager(async (req, res, ctx) => {
+      const status = codefStatus();
+      if (!status.enabled) return fail(res, { error: '카드사·홈택스 연동이 꺼져 있습니다(server/.env의 CODEF_*).', status: 503 });
+      const target = ['card', 'cash_receipt', 'tax_invoice'].includes(req.body?.target) ? req.body.target : 'card';
+      const to = isDateKey(req.body?.to) ? req.body.to : todayKey();
+      const from = isDateKey(req.body?.from) ? req.body.from : shiftDays(to, -7);
+      if (from > to || Date.parse(to) - Date.parse(from) > 93 * 86_400_000) return fail(res, { error: '기간은 93일까지입니다.' });
+      const isCard = target === 'card';
+      const connectedId = readSecret(isCard ? ctx.finance?.codefCardConnectedId : ctx.finance?.codefHometaxConnectedId);
+      if (!connectedId) return fail(res, { error: isCard ? '카드사 계정을 먼저 연결하세요.' : '홈택스 connectedId를 먼저 넣으세요.' });
+      let organization = null;
+      if (isCard) {
+        organization = typeof req.body?.organization === 'string' && /^\d{4}$/.test(req.body.organization) ? req.body.organization : null;
+        if (!organization) organization = (await listCards(ctx.scopeKey)).filter((c) => c.enabled).map(codefOrgOf).find(Boolean) ?? null;
+        if (!organization) return fail(res, { error: '기관 코드가 있는 켜진 카드가 없습니다. 기관 코드를 넣으세요.' });
+      }
+      const path = isCard ? status.paths.card : target === 'cash_receipt' ? status.paths.cashReceipt : status.paths.taxInvoice;
+      const base = { target, organization, path: path ?? null, from, to, at: Date.now() };
+      audit(ctx, AUDIT.financeCodef, `연동 점검 — ${target}${organization ? ` (${organization})` : ''}`);
+      if (!path) return res.json({ ...base, ok: false, code: null, message: '이 종류의 상품 주소가 server/.env에 없습니다.' });
+      let rows;
+      try {
+        rows = isCard ? await fetchCardApprovals({ connectedId, organization, from, to }) : await fetchHometaxDocs({ connectedId, kind: target, from, to });
+      } catch (err) {
+        if (!(err instanceof CodefError)) console.error('[codef] 연동 점검 실패:', err?.message ?? err);
+        return res.json({
+          ...base,
+          ok: false,
+          code: err instanceof CodefError ? err.code : null,
+          message: err instanceof CodefError ? err.message : '부르지 못했습니다.',
+        });
+      }
+      const fields = isCard ? codefCardFields() : codefTaxDocFields();
+      let parsed = 0;
+      let skipped = 0;
+      const errors = new Map();
+      for (const raw of rows) {
+        const r = isCard ? codefCardRow(raw, fields) : codefTaxDocRow(raw, { kind: target, fields });
+        if (!r.error) parsed += 1;
+        else if (r.skip) skipped += 1;
+        else errors.set(r.error, (errors.get(r.error) ?? 0) + 1);
+      }
+      res.json({
+        ...base,
+        ok: true,
+        code: 'CF-00000',
+        count: rows.length,
+        parsed,
+        skipped,
+        errors: [...errors.entries()].map(([error, count]) => ({ error, count })),
+        ...codefFieldReport(rows, isCard ? 'card' : 'taxDoc', fields),
+      });
     }),
   );
 

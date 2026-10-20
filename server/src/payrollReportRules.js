@@ -82,16 +82,14 @@ export function parseBankAccounts(input, current = {}) {
   return { bankAccounts: out };
 }
 
-/** 이체 파일 열(기업뱅킹 대량 이체 엑셀 — 은행마다 열 이름이 조금씩 다르나 이 열들로 맞춰 올린다). */
-export const TRANSFER_HEADERS = Object.freeze(['은행코드', '은행명', '계좌번호', '예금주', '이체금액', '받는 분 통장 표시', '내 통장 표시', '이름', '사번']);
-
 /**
  * 급여 이체 줄 — [slips]는 `[{ userId, userName, employeeNo, net }]`, [accounts]는 `{ userId: account }`. 실수령액이 0원 이하인 사람·계좌가 없는
  * 사람은 [missing]으로. [senderText]는 받는 분 통장에 보일 글(회사 이름 — 7자 안팎이 흔한 한도라 10자에서 자른다).
- * `{ rows: [[...TRANSFER_HEADERS]], total, missing: [{ userName, reason }] }`.
+ * `{ records: [{ bankCode, bankName, account, holder, amount, receiverText, senderText, name, employeeNo }], total, missing: [{ userName, reason }] }`
+ * — 줄 모양(열 순서)은 내보내기 양식(exportTemplateRules.js renderTemplate)이 정한다.
  */
-export function transferRows(slips, accounts, { senderText = '급여', myText = '급여' } = {}) {
-  const rows = [];
+export function transferRecords(slips, accounts, { senderText = '급여', myText = '급여' } = {}) {
+  const records = [];
   const missing = [];
   let total = 0;
   for (const s of slips) {
@@ -106,19 +104,19 @@ export function transferRows(slips, accounts, { senderText = '급여', myText = 
     }
     const bank = BANKS.find((b) => b.code === account.bankCode);
     total += s.net;
-    rows.push([
-      account.bankCode,
-      bank?.name ?? '',
-      account.number,
-      account.holder || s.userName,
-      s.net,
-      senderText.slice(0, 10),
-      `${myText} ${s.userName}`.slice(0, 10),
-      s.userName,
-      s.employeeNo ?? '',
-    ]);
+    records.push({
+      bankCode: account.bankCode,
+      bankName: bank?.name ?? '',
+      account: account.number,
+      holder: account.holder || s.userName,
+      amount: s.net,
+      receiverText: senderText.slice(0, 10),
+      senderText: `${myText} ${s.userName}`.slice(0, 10),
+      name: s.userName,
+      employeeNo: s.employeeNo ?? '',
+    });
   }
-  return { rows, total, missing };
+  return { records, total, missing };
 }
 
 // ── 4대보험 취득·상실 신고 ──
@@ -155,9 +153,13 @@ const amount = (v) => {
   return Number.isFinite(n) && n >= 0 && n <= 1_000_000_000 ? Math.round(n) : undefined;
 };
 
+/** 신고서의 부호 칸(직종 부호·국민연금/건강보험 취득·상실 부호) — 영문·숫자 10자까지. */
+const REPORT_CODE_FIELDS = Object.freeze(['jobCode', 'pensionCode', 'healthCode']);
+
 /**
- * 신고 하나 `{ kind, userId, eventDate, reasonCode?, monthlyPay?, weeklyHours?, jobName?, memo? }` → `{ report }` | `{ error }`. [partial]이면 보낸 칸만.
- * 취득일은 입사일, 상실일은 퇴직일(마지막 근무일의 다음 날)이다.
+ * 신고 하나 `{ kind, userId, eventDate, reasonCode?, monthlyPay?, weeklyHours?, jobName?, jobCode?, pensionCode?, healthCode?, memo? }` →
+ * `{ report }` | `{ error }`. [partial]이면 보낸 칸만. 취득일은 입사일, 상실일은 퇴직일(마지막 근무일의 다음 날)이다. 부호 칸은 EDI 일괄 신고
+ * 양식에 그대로 옮긴다(부호표는 신고서 뒤쪽·정보연계센터 안내를 본다 — 여기서 뜻을 따지지 않는다).
  */
 export function parseInsuranceReport(body, { partial = false } = {}) {
   const out = {};
@@ -185,6 +187,12 @@ export function parseInsuranceReport(body, { partial = false } = {}) {
     data.weeklyHours = h;
   }
   if (body?.jobName !== undefined) data.jobName = cleanText(body.jobName ?? '', 40) || null;
+  for (const key of REPORT_CODE_FIELDS) {
+    if (body?.[key] === undefined) continue;
+    const code = String(body[key] ?? '').trim();
+    if (code && !/^[0-9A-Za-z]{1,10}$/.test(code)) return { error: '부호는 영문·숫자 10자까지입니다.' };
+    data[key] = code || null;
+  }
   if (body?.memo !== undefined) {
     const memo = cleanText(body.memo ?? '', 301);
     if ([...memo].length > 300) return { error: '메모는 300자까지입니다.' };
@@ -193,58 +201,31 @@ export function parseInsuranceReport(body, { partial = false } = {}) {
   return { report: out, data };
 }
 
-/** 신고 자료 엑셀의 열 — 취득·상실이 다르다. [rows]는 `{ name, employeeNo, eventDate, data, yearPay, yearMonths, prevYearPay, prevYearMonths }`. */
-export function insuranceReportSheet(kind, rows) {
-  if (kind === 'acquire') {
-    return {
-      header: ['성명', '사번', '주민등록번호', '취득일', '월 소득액(보수월액)', '주 소정근로시간', '직종', '국민연금', '건강보험', '고용보험', '산재보험', '신고 기한', '메모'],
-      rows: rows.map((r) => [
-        r.name,
-        r.employeeNo ?? '',
-        '',
-        r.eventDate,
-        r.data?.monthlyPay ?? '',
-        r.data?.weeklyHours ?? '',
-        r.data?.jobName ?? '',
-        'Y',
-        'Y',
-        'Y',
-        'Y',
-        reportDeadline(r.eventDate),
-        r.data?.memo ?? '',
-      ]),
-    };
-  }
-  return {
-    header: [
-      '성명',
-      '사번',
-      '주민등록번호',
-      '상실일',
-      '상실 사유 코드',
-      '상실 사유',
-      '해당 연도 보수총액',
-      '해당 연도 근무 개월 수',
-      '전년도 보수총액',
-      '전년도 근무 개월 수',
-      '신고 기한',
-      '메모',
-    ],
-    rows: rows.map((r) => [
-      r.name,
-      r.employeeNo ?? '',
-      '',
-      r.eventDate,
-      r.reasonCode ?? '',
-      LOSS_REASONS.find((x) => x.code === r.reasonCode)?.label ?? '',
-      r.yearPay ?? 0,
-      r.yearMonths ?? 0,
-      r.prevYearPay ?? 0,
-      r.prevYearMonths ?? 0,
-      reportDeadline(r.eventDate),
-      r.data?.memo ?? '',
-    ]),
-  };
+/**
+ * 신고 자료의 줄(내보내기 양식의 칸 이름 — exportTemplateRules.js FIELDS.acquire·lose). [rows]는 `{ name, employeeNo, rrn?, eventDate, reasonCode,
+ * data, yearPay, yearMonths, prevYearPay, prevYearMonths }`(rrn은 내보낼 때만 받은 주민등록번호 — 서버에 두지 않는다).
+ */
+export function insuranceRecords(kind, rows) {
+  return rows.map((r) => ({
+    name: r.name,
+    rrn: r.rrn ?? null,
+    employeeNo: r.employeeNo ?? '',
+    eventDate: r.eventDate,
+    deadline: reportDeadline(r.eventDate),
+    memo: r.data?.memo ?? '',
+    pensionCode: r.data?.pensionCode ?? '',
+    healthCode: r.data?.healthCode ?? '',
+    ...(kind === 'acquire'
+      ? { monthlyPay: r.data?.monthlyPay ?? null, weeklyHours: r.data?.weeklyHours ?? null, jobName: r.data?.jobName ?? '', jobCode: r.data?.jobCode ?? '' }
+      : {
+          reasonCode: r.reasonCode ?? '',
+          reasonLabel: LOSS_REASONS.find((x) => x.code === r.reasonCode)?.label ?? '',
+          yearPay: r.yearPay ?? 0,
+          yearMonths: r.yearMonths ?? 0,
+          prevYearPay: r.prevYearPay ?? 0,
+          prevYearMonths: r.prevYearMonths ?? 0,
+        }),
+  }));
 }
 
 /**

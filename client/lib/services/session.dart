@@ -5245,13 +5245,14 @@ class Session extends ChangeNotifier {
   }
 
   /// 인증이 필요한 파일(그룹웨어 근태 엑셀 등)을 받아 기기에 저장하고 그 경로를 돌려준다 — 저장 위치 규칙은 [exportRoomChat]과
-  /// 같다(다운로드 폴더를 정했으면 거기, 아니면 이 앱의 임시 폴더, 웹은 브라우저 다운로드).
+  /// 같다(다운로드 폴더를 정했으면 거기, 아니면 이 앱의 임시 폴더, 웹은 브라우저 다운로드). [body]를 주면 POST로 받는다.
   Future<String> downloadAuthedFile(
     String path, {
     required String fileName,
+    Map<String, dynamic>? body,
   }) async {
     if (api == null) throw ApiException(tr('연결되어 있지 않습니다.'));
-    final response = await api!.downloadAuthed(path);
+    final response = await api!.downloadAuthed(path, body: body);
     if (response.statusCode != 200) {
       final body = await response.stream.bytesToString();
       var message = tr('내려받기에 실패했습니다.');

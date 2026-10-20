@@ -1335,9 +1335,32 @@ class GroupwareApi {
   String payrollExportPath(String runId) =>
       '/api/groupware/payroll/runs/$runId/export${_query()}';
 
-  /// 급여 이체 파일(은행 대량 이체 엑셀) 경로.
-  String payrollTransferPath(String runId) =>
-      '/api/groupware/payroll/runs/$runId/transfer${_query()}';
+  /// 급여 이체 파일(은행 대량 이체) 경로 — [template]은 내보내기 양식(비우면 기본 양식).
+  String payrollTransferPath(String runId, {String? template}) =>
+      '/api/groupware/payroll/runs/$runId/transfer${_query({'template': template})}';
+
+  /// 급여 이체 미리 보기 — 이체할 사람 수·합계와 빠진 사람.
+  Future<TransferPreview> payrollTransferPreview(String runId) async =>
+      TransferPreview.fromJson(
+        await _getMap(
+          '/api/groupware/payroll/runs/$runId/transfer/preview${_query()}',
+        ),
+      );
+
+  /// 내보내기 양식(급여 이체·4대보험 신고 파일).
+  Future<ExportTemplateSet> exportTemplates() async =>
+      ExportTemplateSet.fromJson(
+        await _getMap('/api/groupware/payroll/export-templates${_query()}'),
+      );
+
+  /// 내보내기 양식 저장 — [templates]가 전부(빠진 양식은 지운다).
+  Future<ExportTemplateSet> saveExportTemplates(
+    List<ExportTemplate> templates,
+  ) async => ExportTemplateSet.fromJson(
+    await _send('PUT', '/api/groupware/payroll/export-templates', {
+      'templates': [for (final t in templates) t.toJson()],
+    }),
+  );
 
   /// 급여 대장의 회계 전표 경로.
   String payrollVouchersPath(String runId) =>
@@ -1376,6 +1399,46 @@ class GroupwareApi {
               as num?)
           ?.toInt() ??
       0;
+
+  /// 한 사람의 연말정산 공제 자료(담당자).
+  Future<YearEndClaimDetail> yearEndClaim(
+    String userId,
+    int year,
+  ) async => YearEndClaimDetail.fromJson(
+    await _getMap(
+      '/api/groupware/payroll/year-end/claims/$userId${_query({'year': '$year'})}',
+    ),
+  );
+
+  /// 공제 자료 넣기·고치기(담당자) — [claim]을 주면 그 내용으로, [clear]면 지운다. [confirmed]가 true면 확인(근로자가 더 못 고침),
+  /// false면 확인을 푼다.
+  Future<YearEndClaimDetail> saveYearEndClaim(
+    String userId, {
+    required int year,
+    Map<String, dynamic>? claim,
+    bool clear = false,
+    bool? confirmed,
+  }) async => YearEndClaimDetail.fromJson(
+    await _send('PUT', '/api/groupware/payroll/year-end/claims/$userId', {
+      'year': year,
+      if (clear) 'claim': null else 'claim': ?claim,
+      'confirmed': ?confirmed,
+    }),
+  );
+
+  /// 내 연말정산 공제 자료와 어림. 비밀번호를 다시 확인해야 하면 423(ApiException.statusCode — 명세서와 같은 확인 표).
+  Future<MyYearEnd> myYearEnd(int year) async => MyYearEnd.fromJson(
+    await _getMap(
+      '/api/groupware/payroll/year-end/mine${_query({'year': '$year', 'unlock': payrollUnlockToken})}',
+    ),
+  );
+
+  /// 내 공제 자료 내기 — [claim]이 null이면 지운다. 담당자가 확인한 뒤면 409.
+  Future<void> submitMyYearEnd(int year, Map<String, dynamic>? claim) => _send(
+    'PUT',
+    '/api/groupware/payroll/year-end/mine${_query({'unlock': payrollUnlockToken})}',
+    {'year': year, 'claim': claim},
+  );
 
   Map<String, dynamic> _severanceBody({
     required String userId,
@@ -1459,6 +1522,9 @@ class GroupwareApi {
     String? reasonCode,
     int? monthlyPay,
     num? weeklyHours,
+    String? jobCode,
+    String? pensionCode,
+    String? healthCode,
     String? memo,
     bool? filed,
   }) async => InsuranceReport.fromJson(
@@ -1474,6 +1540,9 @@ class GroupwareApi {
         'reasonCode': ?reasonCode,
         'monthlyPay': ?monthlyPay,
         'weeklyHours': ?weeklyHours,
+        'jobCode': ?jobCode,
+        'pensionCode': ?pensionCode,
+        'healthCode': ?healthCode,
         'memo': ?memo,
         'filed': ?filed,
       },
@@ -1485,12 +1554,31 @@ class GroupwareApi {
     '/api/groupware/payroll/insurance-reports/$id${_query()}',
   );
 
-  /// 신고 자료 엑셀 — [ids]가 비면 아직 신고하지 않은 그 종류 모두.
+  /// 신고 자료 파일 — [ids]가 비면 아직 신고하지 않은 그 종류 모두, [template]은 내보내기 양식(비우면 기본 양식).
   String insuranceReportExportPath(
     String kind, {
     List<String> ids = const [],
+    String? template,
   }) =>
-      '/api/groupware/payroll/insurance-reports/export${_query({'kind': kind, 'ids': ids.isEmpty ? null : ids.join(',')})}';
+      '/api/groupware/payroll/insurance-reports/export${_query({'kind': kind, 'ids': ids.isEmpty ? null : ids.join(','), 'template': template})}';
+
+  /// 주민등록번호와 함께 받는 신고 자료 파일 — [insuranceReportExportPath]를 POST로(본문에 [rrns] `{ 신고 id: 번호 }` — 서버는 파일에만
+  /// 쓰고 남기지 않는다). Session.downloadAuthedFile의 body로 넘긴다.
+  Map<String, dynamic> insuranceReportExportBody(
+    String kind, {
+    List<String> ids = const [],
+    String? template,
+    Map<String, String> rrns = const {},
+  }) => _body({
+    'kind': kind,
+    if (ids.isNotEmpty) 'ids': ids,
+    'template': ?template,
+    'rrns': rrns,
+  });
+
+  /// POST 신고 자료 파일의 주소(쿼리 없이 — 값은 본문에).
+  String get insuranceReportExportPostPath =>
+      '/api/groupware/payroll/insurance-reports/export';
 
   /// 급여대장 엑셀·CSV 가져오기 — [dryRun]이면 미리 보기만. 줄마다의 오류가 있어도 결과로 돌려준다.
   Future<PayrollImportResult> importPayroll(
@@ -1785,6 +1873,18 @@ class GroupwareApi {
     'to': ?to,
     'target': target,
   });
+
+  /// 연동 점검 — 계약한 상품 주소로 한 번 불러 응답 코드·줄 수·응답 칸 이름(값 없이)을 본다. 아무것도 넣지 않는다.
+  /// [target]은 'card' | 'cash_receipt' | 'tax_invoice', [organization]은 카드사 기관 코드(비우면 켜진 카드의 첫 카드사).
+  Future<CodefProbeResult> codefProbe({
+    required String target,
+    String? organization,
+  }) async => CodefProbeResult.fromJson(
+    await _send('POST', '/api/groupware/codef/probe', {
+      'target': target,
+      'organization': ?organization,
+    }),
+  );
 
   Future<ReceiptRetentionSummary> receiptRetention() async =>
       ReceiptRetentionSummary.fromJson(

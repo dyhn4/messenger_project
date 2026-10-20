@@ -3815,8 +3815,35 @@ export const payrollSettings = pgTable('payroll_settings', {
   bankAccounts: text('bank_accounts'),
   // 받는 사람이 명세서를 열 때 비밀번호를 다시 묻는지(payroll.js /payroll/unlock).
   requireReauth: boolean('require_reauth').notNull().default(false),
+  // 내보내기 양식(급여 이체 파일·4대보험 취득/상실 신고 파일 — exportTemplateRules.js) [{ id, kind, name, header, dateFormat, rrnDash, fileType, columns }].
+  exportTemplates: jsonb('export_templates').notNull().default([]),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * 연말정산 공제 자료(payrollReports.js — 소득·세액공제 신고서의 금액, yearEndClaimRules.js) — 사람·귀속 연도마다 하나. 근로자가 홈택스 간소화 자료의
+ * 합계를 넣거나(내 급여 → 연말정산 공제 자료) 담당자가 넣고, 담당자가 **확인**하면 근로자는 더 고치지 못한다. [data]는 암호화한 JSON(의료비·기부금 등
+ * 민감한 정보라 명세서처럼 암호화한다).
+ */
+export const payrollYearEndClaims = pgTable(
+  'payroll_year_end_claims',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    year: integer('year').notNull(),
+    data: text('data').notNull(),
+    // 근로자가 마지막으로 낸 시각(담당자가 넣은 것만 있으면 null).
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    confirmedByName: text('confirmed_by_name'),
+    updatedByName: text('updated_by_name').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('payroll_year_end_claims_user_year_uq').on(t.scopeKey, t.userId, t.year)],
+);
 
 /**
  * 4대보험 취득·상실 신고(payrollReports.js) — 신고할 사람과 날짜, 신고했는지. [data]는 암호화한 JSON { monthlyPay(보수월액), weeklyHours, jobName,

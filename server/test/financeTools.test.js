@@ -15,7 +15,16 @@ import {
 } from '../src/accountingRules.js';
 import { parseCardInput } from '../src/cardRules.js';
 import { decodeCodefBody } from '../src/codef.js';
-import { codefCardRow, codefList, codefOrgOf, codefTaxDocRow, parseTaxDocRows, taxDocDedupeKey } from '../src/taxDocRules.js';
+import {
+  codefCardRow,
+  codefFieldReport,
+  codefFields,
+  codefList,
+  codefOrgOf,
+  codefTaxDocRow,
+  parseTaxDocRows,
+  taxDocDedupeKey,
+} from '../src/taxDocRules.js';
 
 const accounts = accountsOf(null);
 
@@ -176,4 +185,25 @@ test('CODEF — 응답 풀기, 카드 승인내역·홈택스 줄 맞추기, 기
   assert.equal(codefOrgOf({ issuer: 'IBK기업', codefOrganization: '0305' }), '0305');
   assert.equal(parseCardInput({ codefOrganization: '03x6' }, { partial: true }).error !== undefined, true);
   assert.deepEqual(parseCardInput({ codefOrganization: '' }, { partial: true }), { card: { codefOrganization: null } });
+});
+
+test('CODEF 칸 이름 — .env로 더한 이름을 먼저 보고, 연동 점검은 값 없이 칸 이름과 읽은 이름만', () => {
+  const fields = codefFields('card', { amount: 'resApprovalAmt', merchant: ['resStoreNm', 'bad name'], nope: 'x' });
+  assert.deepEqual(fields.amount.slice(0, 2), ['resApprovalAmt', 'resUsedAmount']);
+  assert.deepEqual(fields.merchant.slice(0, 2), ['resStoreNm', 'resMemberStoreName']);
+  assert.equal(fields.nope, undefined);
+  const raw = { resUsedDate: '20261018', resApprovalAmt: '12,000', resStoreNm: '가게', resCardNo: '1234-****-****-5678' };
+  assert.match(codefCardRow(raw).error, /금액/);
+  const row = codefCardRow(raw, fields);
+  assert.equal(row.tx.amount, 12_000);
+  assert.equal(row.tx.merchant, '가게');
+  const report = codefFieldReport([raw, { resUsedDate: '20261019' }], 'card', fields);
+  assert.deepEqual(report.keys, ['resApprovalAmt', 'resCardNo', 'resStoreNm', 'resUsedDate']);
+  assert.deepEqual(report.fields.amount.matched, { resApprovalAmt: 1 });
+  assert.equal(report.fields.amount.missing, 1);
+  assert.equal(report.fields.amount.required, true);
+  assert.equal(report.fields.approvalNo.required, false);
+  assert.ok(!JSON.stringify(report).includes('가게'));
+  const doc = codefTaxDocRow({ resDate: '20261005', resSumAmount: '5000' }, { kind: 'cash_receipt', fields: codefFields('taxDoc', { total: 'resSumAmount' }) });
+  assert.equal(doc.doc.totalAmount, 5_000);
 });

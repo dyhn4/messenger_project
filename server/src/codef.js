@@ -5,10 +5,11 @@ import {
   CODEF_CLIENT_ID,
   CODEF_CLIENT_SECRET,
   CODEF_ENV,
+  CODEF_FIELD_MAP,
   CODEF_PUBLIC_KEY,
   CODEF_TAX_INVOICE_PATH,
 } from './config.js';
-import { codefDay, codefList } from './taxDocRules.js';
+import { codefDay, codefFields, codefList } from './taxDocRules.js';
 
 /**
  * CODEF(코드에프) 중계 — 카드사·홈택스 계정을 CODEF에 연결해(connectedId) 법인카드 승인내역·홈택스 현금영수증·전자세금계산서 목록을 가져온다.
@@ -19,7 +20,8 @@ import { codefDay, codefList } from './taxDocRules.js';
  * client_credentials — 일주일)은 만료 1분 전까지 다시 쓴다. 키·토큰·계정 정보는 오류·로그에 넣지 않는다.
  *
  * 상품 주소·응답 칸 이름은 계약한 상품의 개발 가이드를 따른다 — 응답은 taxDocRules.js codefCardRow·codefTaxDocRow가 흔한 칸 이름을 차례로
- * 보고 맞춘다. 실제 계약 전에는 실서비스 응답으로 확인하지 못했다(README).
+ * 보고 맞춘다(.env의 CODEF_FIELD_MAP으로 이름을 앞에 더한다). 실제 계약 전에는 실서비스 응답으로 확인하지 못했다(README) — 지출 관리 도구의
+ * 연동 점검(financeTools.js /codef/probe)이 실제 응답의 코드·칸 이름을 보여 준다.
  */
 
 const OAUTH_URL = 'https://oauth.codef.io/oauth/token';
@@ -42,7 +44,14 @@ export const codefStatus = () => ({
   env: CODEF_ENV,
   canConnect: codefEnabled() && Boolean(CODEF_PUBLIC_KEY),
   hometaxKinds: codefEnabled() ? codefHometaxKinds() : [],
+  // 연동 점검 화면에 보일 상품 주소(키·토큰이 아니라 숨기지 않는다)와 .env로 더한 칸 이름이 있는지.
+  paths: { card: CODEF_CARD_APPROVAL_PATH, cashReceipt: CODEF_CASH_RECEIPT_PATH, taxInvoice: CODEF_TAX_INVOICE_PATH },
+  fieldOverrides: Boolean(Object.keys(CODEF_FIELD_MAP.card ?? {}).length || Object.keys(CODEF_FIELD_MAP.taxDoc ?? {}).length),
 });
+
+/** 응답 칸 이름 — 기본 이름 앞에 .env의 CODEF_FIELD_MAP을 더한 것. */
+export const codefCardFields = () => codefFields('card', CODEF_FIELD_MAP.card);
+export const codefTaxDocFields = () => codefFields('taxDoc', CODEF_FIELD_MAP.taxDoc);
 
 let token = null;
 

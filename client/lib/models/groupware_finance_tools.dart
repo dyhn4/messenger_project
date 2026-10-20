@@ -13,6 +13,9 @@ List<Map<String, dynamic>> _maps(Object? v) => [
 ];
 Map<String, dynamic> _map(Object? v) =>
     (v as Map?)?.cast<String, dynamic>() ?? const {};
+Map<String, int> _intMap(Object? v) => {
+  for (final e in _map(v).entries) e.key: _int(e.value),
+};
 
 // ── 한 해 집계·연말정산 ──
 
@@ -70,6 +73,14 @@ class YearEndEstimate {
   final int earnedCredit;
   final int childCredit;
   final int standardCredit;
+
+  /// 공제 자료의 세액공제 합계(산출세액 안에서 쓴 것).
+  final int claimCredit;
+
+  /// 공제 자료가 있을 때 공제마다의 금액 — 소득공제(extraPersonal·card·subscription·other·rentLoan·mortgage)와 세액공제
+  /// (pensionAccount·political·hometown·marriage·births·other·insurance·medical·education·donation·monthlyRent). 고른 쪽에서 쓰지 못한 것은 0.
+  final Map<String, int> claimDeductions;
+  final Map<String, int> claimCredits;
   final bool useStandard;
   final int decidedTax;
   final int decidedLocalTax;
@@ -84,6 +95,9 @@ class YearEndEstimate {
     this.earnedCredit = 0,
     this.childCredit = 0,
     this.standardCredit = 0,
+    this.claimCredit = 0,
+    this.claimDeductions = const {},
+    this.claimCredits = const {},
     this.useStandard = false,
     this.decidedTax = 0,
     this.decidedLocalTax = 0,
@@ -100,6 +114,9 @@ class YearEndEstimate {
     earnedCredit: _int(j['earnedCredit']),
     childCredit: _int(j['childCredit']),
     standardCredit: _int(j['standardCredit']),
+    claimCredit: _int(j['claimCredit']),
+    claimDeductions: _intMap(_map(j['claim'])['deductions']),
+    claimCredits: _intMap(_map(j['claim'])['credits']),
     useStandard: j['useStandard'] == true,
     decidedTax: _int(j['decidedTax']),
     decidedLocalTax: _int(j['decidedLocalTax']),
@@ -117,6 +134,9 @@ class PayrollYearPerson {
   final TaxProfile profile;
   final PayrollYearTotals totals;
   final YearEndEstimate estimate;
+
+  /// 연말정산 공제 자료를 냈는지·확인했는지.
+  final YearEndClaimStatus claim;
   const PayrollYearPerson({
     required this.userId,
     required this.name,
@@ -124,6 +144,7 @@ class PayrollYearPerson {
     this.profile = const TaxProfile(),
     this.totals = const PayrollYearTotals(),
     this.estimate = const YearEndEstimate(),
+    this.claim = const YearEndClaimStatus(),
   });
 
   factory PayrollYearPerson.fromJson(Map<String, dynamic> j) =>
@@ -134,6 +155,7 @@ class PayrollYearPerson {
         profile: TaxProfile.fromJson(_map(j['profile'])),
         totals: PayrollYearTotals.fromJson(_map(j['totals'])),
         estimate: YearEndEstimate.fromJson(_map(j['estimate'])),
+        claim: YearEndClaimStatus.fromJson(_map(j['claim'])),
       );
 }
 
@@ -288,6 +310,11 @@ class InsuranceReport {
   final int? monthlyPay;
   final num? weeklyHours;
   final String? jobName;
+
+  /// EDI 일괄 신고 양식에 옮길 부호(직종 부호·국민연금/건강보험 취득·상실 부호).
+  final String? jobCode;
+  final String? pensionCode;
+  final String? healthCode;
   final String? memo;
   final DateTime? filedAt;
   final String? filedByName;
@@ -302,6 +329,9 @@ class InsuranceReport {
     this.monthlyPay,
     this.weeklyHours,
     this.jobName,
+    this.jobCode,
+    this.pensionCode,
+    this.healthCode,
     this.memo,
     this.filedAt,
     this.filedByName,
@@ -320,6 +350,9 @@ class InsuranceReport {
     monthlyPay: _intOrNull(j['monthlyPay']),
     weeklyHours: j['weeklyHours'] as num?,
     jobName: j['jobName'] as String?,
+    jobCode: j['jobCode'] as String?,
+    pensionCode: j['pensionCode'] as String?,
+    healthCode: j['healthCode'] as String?,
     memo: j['memo'] as String?,
     filedAt: _time(j['filedAt']),
     filedByName: j['filedByName'] as String?,
@@ -434,6 +467,10 @@ class CodefStatus {
 
   /// 카드사 → CODEF 기관 코드.
   final Map<String, String> organizations;
+
+  /// 상품 주소(card·cashReceipt·taxInvoice — 비어 있으면 그 종류는 꺼짐)와 .env로 더한 응답 칸 이름이 있는지.
+  final Map<String, String?> paths;
+  final bool fieldOverrides;
   const CodefStatus({
     this.enabled = false,
     this.env = 'production',
@@ -445,6 +482,8 @@ class CodefStatus {
     this.lastSyncAt,
     this.lastResult,
     this.organizations = const {},
+    this.paths = const {},
+    this.fieldOverrides = false,
   });
 
   factory CodefStatus.fromJson(Map<String, dynamic> j) => CodefStatus(
@@ -460,6 +499,10 @@ class CodefStatus {
     organizations: {
       for (final e in _map(j['organizations']).entries) e.key: '${e.value}',
     },
+    paths: {
+      for (final e in _map(j['paths']).entries) e.key: e.value as String?,
+    },
+    fieldOverrides: j['fieldOverrides'] == true,
   );
 }
 
@@ -675,4 +718,356 @@ class TaxDocImportResult {
         total: _int(j['total']),
         applied: j['applied'] == true,
       );
+}
+
+// ── 연말정산 공제 자료 ──
+
+/// 공제 자료를 냈는지·담당자가 확인했는지(금액 없이).
+class YearEndClaimStatus {
+  final bool exists;
+  final DateTime? submittedAt;
+  final DateTime? confirmedAt;
+  final String? confirmedByName;
+  final String? updatedByName;
+  final DateTime? updatedAt;
+  const YearEndClaimStatus({
+    this.exists = false,
+    this.submittedAt,
+    this.confirmedAt,
+    this.confirmedByName,
+    this.updatedByName,
+    this.updatedAt,
+  });
+
+  bool get confirmed => confirmedAt != null;
+
+  factory YearEndClaimStatus.fromJson(Map<String, dynamic> j) =>
+      YearEndClaimStatus(
+        exists: j['exists'] == true,
+        submittedAt: _time(j['submittedAt']),
+        confirmedAt: _time(j['confirmedAt']),
+        confirmedByName: j['confirmedByName'] as String?,
+        updatedByName: j['updatedByName'] as String?,
+        updatedAt: _time(j['updatedAt']),
+      );
+}
+
+/// 연말정산 공제 자료(server yearEndClaimRules.js parseYearEndClaim) — 홈택스 간소화 자료의 항목별 합계(원). 서버가 보낸 모양을 그대로 들고,
+/// 칸마다 읽는다(화면이 같은 모양으로 다시 보낸다).
+class YearEndClaim {
+  final Map<String, dynamic> json;
+  const YearEndClaim([this.json = const {}]);
+
+  /// 묶음마다의 칸(server GROUPS와 같다). births·extraPersonal은 사람 수.
+  static const groups = {
+    'card': ['credit', 'debitCash', 'culture', 'sports', 'market', 'transit'],
+    'insurance': ['general', 'disabled'],
+    'medical': ['general', 'special', 'premature', 'infertility'],
+    'donation': ['political', 'hometown', 'special', 'general', 'religious'],
+    'pension': ['savings', 'retirement'],
+    'housing': ['rentLoan', 'subscription', 'mortgage'],
+    'births': ['first', 'second', 'third'],
+    'extraPersonal': ['elderly', 'disabled'],
+  };
+  static const countGroups = {'births', 'extraPersonal'};
+  static const educationKinds = [
+    'self',
+    'preschool',
+    'school',
+    'college',
+    'disabled',
+  ];
+  static const mortgageLimits = [6000000, 8000000, 18000000, 20000000];
+
+  int value(String group, String field) => _int(_map(json[group])[field]);
+  int top(String key) => _int(json[key]);
+  bool get marriage => json['marriage'] == true;
+  bool get woman => _map(json['extraPersonal'])['woman'] == true;
+  bool get singleParent => _map(json['extraPersonal'])['singleParent'] == true;
+  int get mortgageLimit =>
+      _intOrNull(_map(json['housing'])['mortgageLimit']) ?? 18000000;
+  String? get memo => json['memo'] as String?;
+  List<({String kind, int amount})> get education => [
+    for (final m in _maps(json['education']))
+      (kind: m['kind'] as String? ?? 'self', amount: _int(m['amount'])),
+  ];
+}
+
+/// 한 사람·한 해의 공제 자료와 상태.
+class YearEndClaimDetail {
+  final YearEndClaimStatus status;
+  final YearEndClaim? claim;
+  const YearEndClaimDetail({
+    this.status = const YearEndClaimStatus(),
+    this.claim,
+  });
+
+  factory YearEndClaimDetail.fromJson(Map<String, dynamic> j) =>
+      YearEndClaimDetail(
+        status: YearEndClaimStatus.fromJson(j),
+        claim: j['claim'] is Map ? YearEndClaim(_map(j['claim'])) : null,
+      );
+}
+
+/// 내 연말정산(받는 사람) — 내 공제 자료와, 그해 내 명세서로 계산한 어림.
+class MyYearEnd {
+  final int year;
+  final YearEndClaimDetail detail;
+  final bool canEdit;
+  final TaxProfile profile;
+  final PayrollYearTotals totals;
+  final YearEndEstimate estimate;
+  const MyYearEnd({
+    required this.year,
+    this.detail = const YearEndClaimDetail(),
+    this.canEdit = false,
+    this.profile = const TaxProfile(),
+    this.totals = const PayrollYearTotals(),
+    this.estimate = const YearEndEstimate(),
+  });
+
+  factory MyYearEnd.fromJson(Map<String, dynamic> j) => MyYearEnd(
+    year: _int(j['year']),
+    detail: YearEndClaimDetail.fromJson(j),
+    canEdit: j['canEdit'] == true,
+    profile: TaxProfile.fromJson(_map(j['profile'])),
+    totals: PayrollYearTotals.fromJson(_map(j['totals'])),
+    estimate: YearEndEstimate.fromJson(_map(j['estimate'])),
+  );
+}
+
+// ── 내보내기 양식(급여 이체·4대보험 신고 파일) ──
+
+class ExportColumn {
+  final String field;
+  final String header;
+
+  /// field가 'fixed'일 때 모든 줄에 넣는 값.
+  final String? value;
+  const ExportColumn(this.field, {this.header = '', this.value});
+
+  factory ExportColumn.fromJson(Map<String, dynamic> j) => ExportColumn(
+    j['field'] as String? ?? 'blank',
+    header: j['header'] as String? ?? '',
+    value: j['value'] as String?,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'field': field,
+    'header': header,
+    if (field == 'fixed') 'value': value ?? '',
+  };
+}
+
+/// 내보내기 양식(server exportTemplateRules.js) — [kind] 'transfer' | 'acquire' | 'lose'.
+class ExportTemplate {
+  final String? id;
+  final String kind;
+  final String name;
+  final bool builtin;
+
+  /// 첫 줄에 머리 글을 넣는지.
+  final bool header;
+
+  /// 'dash' | 'compact' | 'dot'.
+  final String dateFormat;
+  final bool rrnDash;
+
+  /// 'xlsx' | 'csv'.
+  final String fileType;
+  final List<ExportColumn> columns;
+  const ExportTemplate({
+    this.id,
+    required this.kind,
+    required this.name,
+    this.builtin = false,
+    this.header = true,
+    this.dateFormat = 'dash',
+    this.rrnDash = true,
+    this.fileType = 'xlsx',
+    this.columns = const [],
+  });
+
+  bool get wantsRrn => columns.any((c) => c.field == 'rrn');
+
+  factory ExportTemplate.fromJson(Map<String, dynamic> j) => ExportTemplate(
+    id: j['id'] as String?,
+    kind: j['kind'] as String? ?? 'transfer',
+    name: j['name'] as String? ?? '',
+    builtin: j['builtin'] == true,
+    header: j['header'] != false,
+    dateFormat: j['dateFormat'] as String? ?? 'dash',
+    rrnDash: j['rrnDash'] != false,
+    fileType: j['fileType'] as String? ?? 'xlsx',
+    columns: [for (final m in _maps(j['columns'])) ExportColumn.fromJson(m)],
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': ?id,
+    'kind': kind,
+    'name': name,
+    'header': header,
+    'dateFormat': dateFormat,
+    'rrnDash': rrnDash,
+    'fileType': fileType,
+    'columns': [for (final c in columns) c.toJson()],
+  };
+
+  ExportTemplate copyWith({
+    String? name,
+    bool? header,
+    String? dateFormat,
+    bool? rrnDash,
+    String? fileType,
+    List<ExportColumn>? columns,
+  }) => ExportTemplate(
+    id: id,
+    kind: kind,
+    name: name ?? this.name,
+    header: header ?? this.header,
+    dateFormat: dateFormat ?? this.dateFormat,
+    rrnDash: rrnDash ?? this.rrnDash,
+    fileType: fileType ?? this.fileType,
+    columns: columns ?? this.columns,
+  );
+}
+
+class ExportTemplateSet {
+  /// 담당자가 만든 양식.
+  final List<ExportTemplate> templates;
+  final List<ExportTemplate> builtins;
+
+  /// 종류마다 고를 수 있는 칸.
+  final Map<String, List<String>> fields;
+  const ExportTemplateSet({
+    this.templates = const [],
+    this.builtins = const [],
+    this.fields = const {},
+  });
+
+  /// [kind]의 양식 — 기본 양식 먼저.
+  List<ExportTemplate> forKind(String kind) => [
+    ...builtins.where((t) => t.kind == kind),
+    ...templates.where((t) => t.kind == kind),
+  ];
+
+  factory ExportTemplateSet.fromJson(Map<String, dynamic> j) =>
+      ExportTemplateSet(
+        templates: [
+          for (final m in _maps(j['templates'])) ExportTemplate.fromJson(m),
+        ],
+        builtins: [
+          for (final m in _maps(j['builtins'])) ExportTemplate.fromJson(m),
+        ],
+        fields: {
+          for (final e in _map(j['fields']).entries)
+            e.key: (e.value as List? ?? const []).cast<String>(),
+        },
+      );
+}
+
+/// 급여 이체 미리 보기 — 이체할 사람 수·합계, 빠진 사람.
+class TransferPreview {
+  final int count;
+  final int total;
+  final List<({String userName, String reason})> missing;
+  const TransferPreview({
+    this.count = 0,
+    this.total = 0,
+    this.missing = const [],
+  });
+
+  factory TransferPreview.fromJson(Map<String, dynamic> j) => TransferPreview(
+    count: _int(j['count']),
+    total: _int(j['total']),
+    missing: [
+      for (final m in _maps(j['missing']))
+        (
+          userName: m['userName'] as String? ?? '',
+          reason: m['reason'] as String? ?? '',
+        ),
+    ],
+  );
+}
+
+// ── CODEF 연동 점검 ──
+
+/// 응답 칸 하나를 어느 이름으로 읽었는지.
+class CodefFieldCheck {
+  final List<String> names;
+
+  /// 읽은 이름 → 줄 수.
+  final Map<String, int> matched;
+  final int missing;
+  final bool required;
+  const CodefFieldCheck({
+    this.names = const [],
+    this.matched = const {},
+    this.missing = 0,
+    this.required = false,
+  });
+
+  factory CodefFieldCheck.fromJson(Map<String, dynamic> j) => CodefFieldCheck(
+    names: (j['names'] as List? ?? const []).cast<String>(),
+    matched: _intMap(j['matched']),
+    missing: _int(j['missing']),
+    required: j['required'] == true,
+  );
+}
+
+/// 연동 점검 결과(server financeTools.js /codef/probe) — 값 없이 응답 코드·줄 수·칸 이름.
+class CodefProbeResult {
+  final String target;
+  final String? organization;
+  final String? path;
+  final String from;
+  final String to;
+  final bool ok;
+  final String? code;
+  final String? message;
+  final int count;
+  final int parsed;
+  final int skipped;
+  final List<({String error, int count})> errors;
+  final List<String> keys;
+  final Map<String, CodefFieldCheck> fields;
+  const CodefProbeResult({
+    required this.target,
+    this.organization,
+    this.path,
+    this.from = '',
+    this.to = '',
+    this.ok = false,
+    this.code,
+    this.message,
+    this.count = 0,
+    this.parsed = 0,
+    this.skipped = 0,
+    this.errors = const [],
+    this.keys = const [],
+    this.fields = const {},
+  });
+
+  factory CodefProbeResult.fromJson(Map<String, dynamic> j) => CodefProbeResult(
+    target: j['target'] as String? ?? 'card',
+    organization: j['organization'] as String?,
+    path: j['path'] as String?,
+    from: j['from'] as String? ?? '',
+    to: j['to'] as String? ?? '',
+    ok: j['ok'] == true,
+    code: j['code'] as String?,
+    message: j['message'] as String?,
+    count: _int(j['count']),
+    parsed: _int(j['parsed']),
+    skipped: _int(j['skipped']),
+    errors: [
+      for (final m in _maps(j['errors']))
+        (error: m['error'] as String? ?? '', count: _int(m['count'])),
+    ],
+    keys: (j['keys'] as List? ?? const []).cast<String>(),
+    fields: {
+      for (final e in _map(j['fields']).entries)
+        e.key: CodefFieldCheck.fromJson(_map(e.value)),
+    },
+  );
 }

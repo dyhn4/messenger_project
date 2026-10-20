@@ -656,6 +656,27 @@ class _CodefDialogState extends State<_CodefDialog> {
     await _act(() => widget.api.codefConnect(target: target, connectedId: id));
   }
 
+  /// 연동 점검 — 계약한 상품 주소로 한 번 불러 응답 코드·칸 이름을 본다(넣지 않음).
+  Future<void> _probe(String target) async {
+    setState(() => _busy = true);
+    CodefProbeResult? result;
+    try {
+      result = await widget.api.codefProbe(target: target);
+    } catch (e) {
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (result == null || !mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => CodefProbeView(
+        result: result!,
+        fieldOverrides: _status.fieldOverrides,
+      ),
+    );
+  }
+
   Future<void> _sync() async {
     setState(() {
       _busy = true;
@@ -832,6 +853,44 @@ class _CodefDialogState extends State<_CodefDialog> {
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(_message!, key: const ValueKey('codef-result')),
                   ),
+                const Divider(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        tr(
+                          '연동 점검 — 계약한 상품 주소로 한 번 불러 응답 코드와 응답 칸 이름을 봅니다(아무것도 넣지 않음). 실제 계약 계정으로 처음 쓸 때 확인하세요.',
+                        ),
+                        style: TextStyle(fontSize: 12, color: hint),
+                      ),
+                    ),
+                    PopupMenuButton<String>(
+                      key: const ValueKey('codef-probe'),
+                      enabled:
+                          !_busy && (s.cardConnected || s.hometaxConnected),
+                      tooltip: tr('연동 점검'),
+                      icon: const Icon(Icons.fact_check_outlined),
+                      onSelected: _probe,
+                      itemBuilder: (_) => [
+                        if (s.cardConnected)
+                          PopupMenuItem(
+                            value: 'card',
+                            child: Text(tr('카드 승인내역')),
+                          ),
+                        if (s.hometaxConnected) ...[
+                          PopupMenuItem(
+                            value: 'cash_receipt',
+                            child: Text(tr('홈택스 현금영수증')),
+                          ),
+                          PopupMenuItem(
+                            value: 'tax_invoice',
+                            child: Text(tr('홈택스 전자세금계산서')),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
               ],
             ],
           ),
@@ -851,6 +910,199 @@ class _CodefDialogState extends State<_CodefDialog> {
             icon: const Icon(Icons.sync, size: 18),
             label: Text(tr('지난 7일 가져오기')),
           ),
+      ],
+    );
+  }
+}
+
+/// CODEF 응답 칸 이름(server taxDocRules.js CODEF_CARD_FIELDS·CODEF_TAX_DOC_FIELDS의 키).
+String codefFieldLabel(String key) => switch (key) {
+  'usedDate' => tr('사용 날짜'),
+  'usedTime' => tr('사용 시각'),
+  'amount' => tr('금액'),
+  'cancel' => tr('취소 여부'),
+  'cancelAmount' => tr('취소 금액'),
+  'cardNo' => tr('카드 번호'),
+  'merchant' => tr('가맹점'),
+  'merchantBizNo' => tr('가맹점 사업자번호'),
+  'approvalNo' => tr('승인번호'),
+  'date' => tr('날짜'),
+  'time' => tr('시각'),
+  'supply' => tr('공급가액'),
+  'tax' => tr('세액'),
+  'total' => tr('합계'),
+  'status' => tr('거래 구분'),
+  'supplierName' => tr('공급자'),
+  'supplierBizNo' => tr('공급자 사업자번호'),
+  'buyerName' => tr('공급받는자'),
+  'buyerBizNo' => tr('공급받는자 사업자번호'),
+  'itemName' => tr('품목'),
+  _ => key,
+};
+
+/// 연동 점검 결과 — 상품 주소·응답 코드·줄 수, 칸마다 읽은 이름(못 읽은 꼭 필요한 칸은 빨갛게), 응답에 있던 칸 이름들(값은 없음).
+class CodefProbeView extends StatelessWidget {
+  final CodefProbeResult result;
+  final bool fieldOverrides;
+  const CodefProbeView({
+    super.key,
+    required this.result,
+    this.fieldOverrides = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    final error = theme.colorScheme.error;
+    final r = result;
+    final mapKey = r.target == 'card' ? 'card' : 'taxDoc';
+    final unmatched = [
+      for (final e in r.fields.entries)
+        if (e.value.matched.isEmpty && r.count > 0) e.key,
+    ];
+    return AlertDialog(
+      title: Text(switch (r.target) {
+        'card' => tr('연동 점검 — 카드 승인내역'),
+        'cash_receipt' => tr('연동 점검 — 홈택스 현금영수증'),
+        _ => tr('연동 점검 — 홈택스 전자세금계산서'),
+      }),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SelectableText(
+                [
+                  tr('상품 주소 {path}', {'path': r.path ?? tr('(없음)')}),
+                  if (r.organization != null)
+                    tr('기관 코드 {org}', {'org': r.organization}),
+                  tr('기간 {from} ~ {to}', {'from': r.from, 'to': r.to}),
+                ].join('\n'),
+                style: const TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                r.ok
+                    ? tr('응답 {code} · {n}줄 · 읽은 줄 {p} · 건너뛴 줄(승인 거절) {s}', {
+                        'code': r.code ?? '',
+                        'n': r.count,
+                        'p': r.parsed,
+                        's': r.skipped,
+                      })
+                    : tr('실패 {code} — {message}', {
+                        'code': r.code ?? '',
+                        'message': r.message ?? '',
+                      }),
+                key: const ValueKey('codef-probe-result'),
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: r.ok ? null : error,
+                ),
+              ),
+              if (!r.ok)
+                Text(
+                  tr(
+                    '상품 주소가 계약한 상품과 다르면 server/.env의 CODEF_CARD_APPROVAL_PATH·CODEF_CASH_RECEIPT_PATH·CODEF_TAX_INVOICE_PATH를 고치고 서버를 다시 시작하세요.',
+                  ),
+                  style: TextStyle(fontSize: 12, color: hint),
+                ),
+              for (final e in r.errors)
+                Text(
+                  tr('못 읽은 줄 {n}개: {error}', {'n': e.count, 'error': e.error}),
+                  style: TextStyle(fontSize: 12, color: error),
+                ),
+              if (r.ok && r.count == 0)
+                Text(
+                  tr('이 기간에 응답 줄이 없어 칸 이름을 볼 수 없습니다. 쓴 내역이 있는 기간으로 다시 해 보세요.'),
+                  style: TextStyle(fontSize: 12, color: hint),
+                ),
+              if (r.ok && r.count > 0) ...[
+                const Divider(height: 20),
+                for (final e in r.fields.entries)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 150,
+                          child: Text(
+                            codefFieldLabel(e.key) +
+                                (e.value.required ? ' *' : ''),
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            e.value.matched.isEmpty
+                                ? tr('못 찾음 (본 이름: {names})', {
+                                    'names': e.value.names.join(', '),
+                                  })
+                                : [
+                                    for (final m in e.value.matched.entries)
+                                      tr('{name} ({n}줄)', {
+                                        'name': m.key,
+                                        'n': m.value,
+                                      }),
+                                    if (e.value.missing > 0)
+                                      tr('빈 줄 {n}', {'n': e.value.missing}),
+                                  ].join(' · '),
+                            key: ValueKey('codef-probe-field-${e.key}'),
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: e.value.matched.isEmpty
+                                  ? (e.value.required ? error : hint)
+                                  : null,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                Text(
+                  tr('응답에 있던 칸 이름(값은 보이지 않습니다)'),
+                  style: TextStyle(fontSize: 12, color: hint),
+                ),
+                SelectableText(
+                  r.keys.join(', '),
+                  key: const ValueKey('codef-probe-keys'),
+                  style: const TextStyle(fontSize: 12),
+                ),
+                if (unmatched.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    tr(
+                      '못 찾은 칸이 응답에 다른 이름으로 있으면 server/.env에 아래처럼 넣고 서버를 다시 시작하세요(* 칸을 못 읽으면 그 줄을 넣지 못합니다).',
+                    ),
+                    style: TextStyle(fontSize: 12, color: hint),
+                  ),
+                  SelectableText(
+                    'CODEF_FIELD_MAP={"$mapKey":{${unmatched.map((k) => '"$k":"…"').join(',')}}}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+                if (fieldOverrides)
+                  Text(
+                    tr('server/.env의 CODEF_FIELD_MAP으로 더한 이름을 먼저 봅니다.'),
+                    style: TextStyle(fontSize: 12, color: hint),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(tr('닫기')),
+        ),
       ],
     );
   }

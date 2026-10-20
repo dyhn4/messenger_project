@@ -1511,21 +1511,54 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 
 #### 급여 부가 기능 — 연말정산 자료·퇴직금·4대보험 신고·급여 이체
 
-서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0138`)가 돌아야 합니다. 서버는 `server/src/payrollReports.js`, 규칙은 `incomeTaxRules.js`(간이세액표·연말정산
-어림)·`severanceRules.js`(퇴직금·퇴직소득세)·`payrollReportRules.js`(은행·이체 줄·4대보험 신고·한 해 집계), 앱은 `client/lib/screens/groupware/payroll_reports.dart`.
-모두 급여 담당자만 씁니다(급여 탭 → 급여 관리의 단추들, 대장 메뉴).
+서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0138`·`0139`)가 돌아야 합니다. 서버는 `server/src/payrollReports.js`, 규칙은 `incomeTaxRules.js`(간이세액표·
+연말정산 어림)·`yearEndClaimRules.js`(연말정산 공제 자료 — 신용카드·의료비·교육비 등)·`severanceRules.js`(퇴직금·퇴직소득세)·`payrollReportRules.js`(은행·이체
+줄·4대보험 신고·한 해 집계)·`exportTemplateRules.js`(내보내기 양식), 앱은 `client/lib/screens/groupware/payroll_reports.dart`·`year_end_claim.dart`·
+`export_templates.dart`. 연말정산 공제 자료를 내는 것만 받는 사람(근로자)이 하고, 나머지는 급여 담당자만 씁니다(급여 탭 → 급여 관리의 단추들, 대장 메뉴).
 
 - **급여 계좌·급여 이체 파일** — 급여 설정 → **급여 계좌**에서 사람마다 은행(금융결제원 코드 24곳)·계좌번호(숫자 8~16자리)·예금주를 정합니다(DB에 **암호화** —
-  명세서와 같은 방식). 대장 메뉴 → **급여 이체 파일**은 실수령액을 은행 대량 이체 엑셀("이체" 시트 — 은행코드·은행명·계좌번호·예금주·이체금액·받는 분 통장 표시
-  (회사 이름 10자)·내 통장 표시·이름·사번, 합계 줄)로 내려줍니다. 계좌가 없거나 실수령액이 0원 이하인 사람은 "빠진 사람" 시트, "은행코드" 시트도 함께.
-  기업뱅킹마다 올리는 양식이 조금씩 달라 열을 맞춰 붙여 넣습니다. 내려받기는 감사 로그(`payroll.transfer`)에 남습니다.
+  명세서와 같은 방식). 대장 메뉴 → **급여 이체 파일**은 먼저 이체할 사람 수·합계와 빠진 사람(계좌 없음·실수령액 0원 이하)을 보이고 **내보내기 양식**을 골라
+  받습니다(아래). **기본(모든 칸)** 양식은 예전과 같은 엑셀("이체" 시트 — 은행코드·은행명·계좌번호·예금주·이체금액·받는 분 통장 표시(회사 이름 10자)·내 통장
+  표시·이름·사번, 합계 줄 + "빠진 사람"·"은행코드" 시트), 담당자가 만든 양식은 **그 모양 그대로만**(합계 줄·다른 시트 없이 — 은행이 줄로 읽게) 냅니다.
+  내려받기는 감사 로그(`payroll.transfer` — 양식 이름)에 남습니다.
+- **내보내기 양식**(은행별 대량 이체 양식·EDI 일괄 신고 양식 — 급여 이체 파일·4대보험 신고 파일을 받을 때 고르는 창의 **새 양식**·연필·휴지통) — 은행 기업뱅킹의
+  대량 이체 양식과 4대사회보험 정보연계센터(EDI)의 일괄 신고 엑셀은 곳마다·판마다 열이 달라, **받은 양식의 열 순서대로 한 번 만들어 두고** 내려받을 때 고릅니다
+  (마지막에 고른 것을 앱을 켜 둔 동안 기억). 양식은 이름(예: "신한 기업뱅킹 대량이체")·종류(급여 이체 / 자격 취득 / 자격 상실)·**열**(왼쪽부터 — 칸을 고르고
+  머리 글을 적고 ↑↓로 순서, **고정 값**은 모든 줄에 같은 글(취득 부호 "1"·구분 "01" 등), **빈 칸**은 비워 둘 열)·**첫 줄 머리 글** 넣기(끄면 첫 줄부터 자료)·
+  **날짜 모양**(2026-03-02 / 20260302 / 2026.03.02)·주민등록번호에 "-" 넣기·**엑셀/CSV**(UTF-8 — 엑셀이 알아보게 BOM)입니다. 칸은 급여 이체: 은행코드·은행명·
+  계좌번호·예금주·이체금액·받는 분/내 통장 표시·이름·사번, 신고: 성명·**주민등록번호**·사번·취득일/상실일·마지막 근무일·월 소득액·주 소정근로시간·직종·직종 부호·
+  국민연금/건강보험 부호·상실 사유 코드·사유·해당 연도/전년도 보수총액·근무 개월 수·신고 기한·메모. 은행코드·계좌번호·주민등록번호·부호는 엑셀에서 글자로(앞 0이
+  지워지지 않게), 금액은 숫자로 씁니다. 범위마다 30개·열 60개까지, 급여 설정(`payroll_settings.export_templates`)에 둡니다. **은행·EDI의 실제 양식은 확인하지
+  못해 은행별 기본 양식은 넣지 않았습니다** — 담당자가 받은 양식을 보고 만듭니다.
 - **연말정산 자료**(급여 관리 → **연말정산 자료**) — 귀속 연도(◀ ▶)의 지급일에 보낸 명세서를 사람마다 모아 지급 개월·총급여(과세)·비과세·국민연금·건강·요양·
   고용보험·기납부 소득세·지방소득세를 보이고, **연말정산 어림**(참고용 — 지금 법: 근로소득공제·기본공제(150만 원 × 가족)·연금보험료공제·보험료 특별소득공제와
   표준세액공제(13만 원) 중 세금이 적은 쪽·기본세율·근로소득세액공제(130만 원 기준 55%·30%, 한도 74만~20만)·자녀세액공제(1명 25만·2명 55만·그 넘게 1명마다
-  40만))으로 결정세액과 차감징수세액(+추징 / −환급)을 셉니다. 의료비·교육비·기부금·카드·주택자금·연금저축은 홈택스 간소화 자료가 있어야 해서 넣지 않습니다 —
-  세무 프로그램에서 정산한 값으로 칸을 고친 뒤 **대장에 정산분 넣기**로 작성 중인 대장(보통 2월 급여)의 명세서에 "연말정산 소득세"·"연말정산 지방소득세" 공제
-  항목(계산 방법 "2025년 귀속 연말정산")을 넣습니다(0원이면 그 항목을 뺌). **엑셀**은 "○○년 집계"(사람마다 합계·가족·어림)·"달별"(근로소득 원천징수부처럼
-  사람·귀속 월마다) 시트입니다. 정산분 항목은 다음 해 집계에서 기납부세액에 넣지 않습니다.
+  40만))과 사람마다의 **연말정산 공제 자료**(아래)로 결정세액과 차감징수세액(+추징 / −환급)을 셉니다. 사람마다 공제 자료 상태(없음·냄 — 확인 전·확인함·담당자가
+  넣음)와 카드 공제·세액공제 합계가 보이고 **공제 자료** 단추로 열어 고치거나 **저장하고 확인**합니다. 세무 프로그램에서 정산한 값이 다르면 칸을 고친 뒤 **대장에
+  정산분 넣기**로 작성 중인 대장(보통 2월 급여)의 명세서에 "연말정산 소득세"·"연말정산 지방소득세" 공제 항목(계산 방법 "2025년 귀속 연말정산")을 넣습니다(0원이면
+  그 항목을 뺌). **엑셀**은 "○○년 집계"(사람마다 합계·가족·공제 자료 상태·신용카드 등 공제·공제 자료 세액공제·어림)·"달별"(근로소득 원천징수부처럼 사람·귀속
+  월마다) 시트입니다. 정산분 항목은 다음 해 집계에서 기납부세액에 넣지 않습니다.
+- **연말정산 공제 자료**(소득·세액공제 신고서의 금액 — 간소화 자료 공제) — 받는 사람이 급여 탭 → 내 급여명세서 위 **연말정산 공제 자료**에서 귀속 연도(◀ ▶ —
+  기본 지난해)마다 홈택스 연말정산 간소화 자료의 **항목별 합계**를 넣어 냅니다(지난 2년과 올해만, 비밀번호 다시 묻기를 켠 범위는 명세서처럼 비밀번호를 다시 확인).
+  간소화 PDF를 직접 읽지는 않습니다(국세청 변환 모듈이 있어야 함). 넣는 칸: 인적공제 추가공제(70세 이상·장애인 인원, 부녀자·한부모), 신용카드·체크카드/현금영수증·
+  도서공연 등·체육시설·전통시장·대중교통, 주택임차차입금 원리금·주택청약종합저축·장기주택저당차입금 이자(한도 600·800·1,800·2,000만 원 고르기), 연금저축·
+  퇴직연금, 보장성보험료(일반·장애인전용), 의료비(그 밖의 가족 / 본인·65세 이상·장애인·6세 이하·산정특례자 / 미숙아·선천성이상아 / 난임 — 실손보험금은 뺀
+  금액), 교육비(사람마다 한 줄 — 본인·취학 전·초중고·대학생·장애인 특수교육), 기부금(정치자금·고향사랑·특례·일반(종교 단체 외·종교 단체)), 월세, 결혼세액공제,
+  그해 출생·입양 자녀(첫째·둘째·셋째 이상), 그 밖의 소득공제·세액공제(직접 — 우리사주·벤처투자·소비 증가분·주택자금 이자 세액공제 등), 메모(500자). 화면 아래에
+  그해 내 명세서로 센 **연말정산 어림**(총급여·근로소득금액·공제마다·과세표준·산출세액·세액공제마다·결정세액·기납부·추징/환급)이 보입니다. 담당자는 연말정산 자료
+  화면에서 사람마다 보고 고치고 **확인**하면(감사 로그 — 금액 없이) 그 사람은 더 고치지 못하고(409), **확인 풀기**로 다시 열어 줍니다. 자료는 DB에 **암호화**
+  (`payroll_year_end_claims` — 명세서와 같은 방식). 계산(`yearEndClaimRules.js` — 2025년 귀속 법 기준, 참고용): 추가공제(경로우대 100만·장애인 200만·부녀자 50만·
+  한부모 100만), **신용카드 등 소득공제**(최저사용금액 총급여 25%를 신용카드 → 체크·현금·도서공연 등 → 전통시장·대중교통 순으로 빼고 15·30·30·40·40%, 기본한도
+  300만(7,000만 원 넘으면 250만)·추가한도 300만(200만 — 전통시장·대중교통·도서공연 등의 공제분 안에서), 7,000만 원 넘으면 도서공연·체육시설은 신용카드로),
+  주택자금(임차 원리금·청약 40% — 합쳐 400만, 청약은 총급여 7,000만 원 이하·납입 300만까지, 저당 이자는 고른 한도 — 앞의 둘과 합해서도), 연금계좌(연금저축 600만·
+  합쳐 900만 — 5,500만 원 이하 15%·넘으면 12%), 보험료(각 100만 — 12%·15%), 의료비(총급여 3% 초과분 — 그 밖의 가족에서 먼저 빼고 모자라면 본인 등 → 미숙아 →
+  난임 순, 그 밖의 가족 700만까지, 15%·20%·30%), 교육비(15% — 본인·장애인 한도 없음, 취학 전·초중고 300만, 대학생 900만), 기부금(정치자금·고향사랑 10만 원까지
+  100/110, 넘는 금액 15%(정치자금 3,000만 넘으면 25%), 고향사랑 2,000만(2024년 귀속까지 500만)까지, 특례는 근로소득금액까지·일반은 × 30%(종교 단체가 있으면 × 10% +
+  min(× 20%, 종교 외)), 특례·일반 합쳐 1,000만 원까지 15%·넘는 금액 30%), 월세(총급여 8,000만 원 이하, 1,000만 원까지 — 5,500만 이하 17%·넘으면 15%), 결혼 50만
+  (2024~2026년 귀속), 출산·입양(30·50·70만). 특별소득공제(건강·고용보험료·주택임차·저당)·특별세액공제(보험·의료·교육·특례/일반기부)·월세 대신 **표준세액공제(13만
+  원)**가 세금이 적으면 그쪽으로 셉니다(신용카드·청약·연금계좌·정치자금·고향사랑·결혼·출산은 함께). 세액공제는 산출세액을 넘지 못합니다. 공제 대상인지(나이·소득·
+  무주택 등)는 넣는 사람이 확인하고, 소득공제 종합한도(2,500만)·이월·농어촌특별세·소비 증가분 공제·자녀 수에 따른 카드 한도 상향 같은 세부는 계산하지 않습니다 —
+  해마다 세법이 바뀌므로 실제 정산은 세무 프로그램·홈택스로 합니다.
 - **퇴직금 계산**(급여 관리 → **퇴직금 계산**) — 사람·마지막 근무일, 입사일(비우면 관리 탭 값)·3개월 임금 총액(비우면 보낸 명세서의 귀속 월 지급 총액을
   기간에 든 날만큼 나눠 더함)·연간 상여금·연차수당(전년도 미사용분 — 둘 다 3/12을 더함)·통상시급(비우면 관리 탭 값)으로 1일 평균임금(퇴직일 — 마지막 근무일
   다음 날 — 전 3개월의 총일수로 나눔, 통상임금 = 통상시급 × 8보다 적으면 통상임금)·퇴직금(× 30일 × 재직일수 ÷ 365, 1년 미만이면 0)·**퇴직소득세**(2023년
@@ -1535,9 +1568,12 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 - **4대보험 취득·상실 신고**(급여 관리 → **4대보험 신고**) — 신고할 것(취득 — 입사일, 상실 — 퇴직일 = 마지막 근무일 다음 날, 상실 사유는 고용보험 상실 사유
   코드 11·12·22·23·26·31·32·41·42)을 더하고 **신고 기한**(그 달의 다음 달 15일 — 지나면 빨갛게)과 **신고함** 표시(누가·언제)를 챙깁니다. 관리 탭의 입사일이
   지난 62일 안인데 취득 신고가 없는 사람은 위에 제안으로 나옵니다. 취득의 월 보수액은 비우면 최근 보낸 명세서의 과세 급여, 주 소정근로시간은 40시간입니다
-  (보수·메모는 DB에 암호화). **엑셀**(취득·상실 — 아직 신고하지 않은 것)은 4대사회보험 정보연계센터·공단 EDI 신고서에 옮겨 적을 칸(성명·사번·취득일·월 소득액·
-  주 소정근로시간 / 상실일·사유·해당 연도와 전년도 보수총액·근무 개월 — 보낸 명세서의 과세 급여)이고, **주민등록번호는 서버에 두지 않아 비어 있습니다**. EDI로
-  바로 올리는 공식 파일 양식은 아니며, 신고 자체는 EDI(공동인증서)에서 합니다.
+  (보수·메모는 DB에 암호화). 신고마다 **직종 부호·국민연금/건강보험 취득·상실 부호**(영문·숫자 10자 — 신고서 뒤쪽 부호표, 뜻은 따지지 않음)도 적어 둡니다.
+  **신고 파일**(내려받기 단추 → 취득·상실 — 아직 신고하지 않은 것)은 **내보내기 양식**(위)을 골라 받습니다 — 정보연계센터에서 받은 일괄 신고 양식의 열 순서대로
+  만든 양식이면 그 파일을 EDI 일괄 신고에 바로 올립니다. 기본 양식은 예전 엑셀(성명·사번·주민등록번호·취득일·월 소득액·주 소정근로시간·직종·4대보험 Y·부호·
+  신고 기한·메모 / 상실일·사유·해당 연도와 전년도 보수총액·근무 개월 — 보낸 명세서의 과세 급여 + "안내" 시트). 고른 양식에 **주민등록번호** 칸이 있으면 사람마다
+  번호(외국인등록번호 — 13자리, 앞 6자리가 날짜 모양)를 받아 **POST 본문으로만** 보내고, 서버는 파일에 쓰고 버립니다(DB·감사 로그·주소에 남기지 않음 — 감사 로그에는
+  "주민등록번호 포함"만, 비우면 빈칸). 받은 파일은 신고 뒤 지우세요. 신고 자체는 EDI(공동인증서)에서 합니다.
 - **회계 전표**(대장 메뉴 → **회계 전표**) — 지급일에 차변 급여(지급 총액) / 대변 예수금(공제 항목마다)·보통예금(실수령 합계). 계정·모양은 아래 지출 관리
   설정을 따릅니다.
 
@@ -1604,7 +1640,14 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
   `codef` — 같은 건은 건너뛰고 승인 취소는 짝을 지어 뺌, 엑셀 가져오기와 같다). 홈택스 현금영수증·전자세금계산서는 계약한 상품 주소(`CODEF_CASH_RECEIPT_PATH`·
   `CODEF_TAX_INVOICE_PATH`)를 넣어야 가져옵니다. **카드 승인내역 상품 주소의 기본값(`/v1/kr/card/b/account/approval-list`)과 응답 칸 이름(`resUsedDate`·
   `resMemberStoreName`·`resUsedAmount`·`resApprovalNo`·`resCancelYN` 등 — 흔한 이름을 차례로 본다)은 실제 계약 계정으로 확인하지 못했습니다** — 계약한 상품의
-  개발 가이드와 다르면 `CODEF_CARD_APPROVAL_PATH`로 바꾸고, 응답이 맞지 않으면 알려 주세요. 계약 전에는 카드사 엑셀 가져오기와 연동 키를 씁니다.
+  개발 가이드와 다르면 `CODEF_CARD_APPROVAL_PATH`로 바꿉니다. 계약 전에는 카드사 엑셀 가져오기와 연동 키를 씁니다.
+- **연동 점검**(연동 창 아래 점검 단추 → 카드 승인내역 / 홈택스 현금영수증 / 전자세금계산서) — 실제 계약 계정으로 처음 쓸 때 상품 주소·응답 칸을 맞춰 봅니다. 계약한
+  상품 주소로 지난 7일을 **한 번 불러**(아무것도 넣지 않음 — 감사 로그 `finance.codef`) 상품 주소·기관 코드·응답 코드(실패면 CODEF의 코드·문구 — 주소가 틀리면
+  `.env`의 주소를 고침)·줄 수·읽은 줄·못 읽은 까닭, **칸마다 어느 응답 이름으로 읽었는지**(못 찾은 칸 — 사용 날짜·금액·합계처럼 꼭 필요한 칸(*)은 빨갛게)와
+  **응답에 있던 칸 이름들**을 보입니다. 값(카드 번호·가맹점·금액)은 서버가 빼고 보냅니다. 칸 이름이 다르면 서버 관리자가 `server/.env`의 **`CODEF_FIELD_MAP`**
+  (JSON 한 줄 — `{"card":{"amount":"resApprovalAmt"},"taxDoc":{"total":"resSumAmount"}}`, 칸은 card: usedDate·usedTime·amount·cancel·cancelAmount·cardNo·
+  merchant·merchantBizNo·approvalNo / taxDoc: date·time·supply·tax·total·status·approvalNo·supplierName·supplierBizNo·buyerName·buyerBizNo·itemName)으로 그 이름을
+  앞에 더하고 서버를 다시 시작합니다(점검 창이 못 찾은 칸으로 예시를 만들어 줌). 가져오기·매일 자동도 같은 이름을 씁니다.
 - **영수증 원본 보관 기간** — 장부·증빙은 법정신고기한이 지난 날부터 5년 보관합니다(국세기본법 제85조의3). 영수증(카드 사용 건의 영수증, 지출 결재의 첨부와
   청구한 사용 건의 영수증)의 **보관 기한** = 쓴 해의 다음 해 신고기한(법인 3월 31일 / 개인사업자 5월 31일) + 5·7·10년(또는 기한 없음). 보관 현황은 해마다 파일
   수·크기·기한·기한 지난 수, 지운 수입니다. **기한이 지나면 원본을 지우기**를 켜면 하루에 한 번(또는 **지금 지우기** — 되돌릴 수 없음, 감사 로그
@@ -1780,9 +1823,10 @@ DKIM 서명), `mailFormatHtml.js`(서식 있는 메일 쓰기), 앱은 `client/l
 ### 2순위 — 그룹웨어로서 부족한 것
 
 - **급여·법인카드 후속(남은 것)** — 간이세액표 소득세·연말정산 자료·퇴직금·4대보험 신고 자료·급여 이체 파일·회계 전표·현금영수증/세금계산서·CODEF 연동·명세서
-  비밀번호 다시 묻기·영수증 보관 기간은 들어갔습니다(위 "급여 부가 기능"·"지출 관리 도구"). 남은 것: CODEF 실계약 계정으로 상품 주소·응답 칸 확인(홈택스 상품
-  주소의 기본값 없음), 연말정산의 간소화 자료 공제(의료비·교육비·카드 등 — 지금은 세무 프로그램 값을 넣음), 4대보험 EDI 파일 신고 양식으로 바로 내보내기,
-  은행별 대량 이체 양식 고르기.
+  비밀번호 다시 묻기·영수증 보관 기간, 그리고 연말정산 공제 자료(간소화 자료 공제 — 근로자가 내고 담당자가 확인)·내보내기 양식(은행별 대량 이체·EDI 일괄 신고
+  양식 고르기, 신고 파일에 주민등록번호를 내려받을 때만)·CODEF 연동 점검(응답 칸 보기·`CODEF_FIELD_MAP`)은 들어갔습니다(위 "급여 부가 기능"·"지출 관리 도구").
+  남은 것: CODEF 실계약 계정으로 연동 점검을 돌려 기본 상품 주소·칸 이름 맞추기(홈택스 상품 주소의 기본값 없음), 은행·EDI의 실제 양식으로 기본 양식 만들어 넣기
+  (지금은 담당자가 만듦), 간소화 PDF 바로 읽기(국세청 변환 모듈), 연말정산 계산의 세부(소득공제 종합한도·소비 증가분·자녀 수 카드 한도·해마다 바뀌는 세법 반영).
 
 ### 3순위 — 메신저 편의
 
@@ -1949,8 +1993,9 @@ messenger_project/
 │  │  ├─ corporateCards.js        법인카드 API(카드·사용 건·이용내역 가져오기·연동 키·영수증 읽기) — cardRules.js(이용내역 읽기·중복·취소 짝·청구 확인)가 순수 규칙
 │  │  ├─ receiptOcr.js            영수증 읽기(Claude·OpenAI 호환 비전·CLOVA OCR) — receiptOcrRules.js(응답 맞추기·분류 짐작·사용 건 맞추기)가 순수 규칙
 │  │  ├─ sheetRows.js             올린 표 파일(엑셀·CSV·HTML 표) → 줄들(급여대장·카드 이용내역 가져오기)
-│  │  ├─ payrollReports.js        급여 부가 기능 API(연말정산 자료·퇴직금·4대보험 신고·급여 이체 파일·급여 전표) — incomeTaxRules.js(근로소득 간이세액표·
-│  │  │                           연말정산 어림)·severanceRules.js(퇴직금·퇴직소득세)·payrollReportRules.js(은행·4대보험 신고·한 해 집계)가 순수 규칙
+│  │  ├─ payrollReports.js        급여 부가 기능 API(연말정산 자료·공제 자료·퇴직금·4대보험 신고·급여 이체 파일·급여 전표·내보내기 양식) — incomeTaxRules.js
+│  │  │                           (근로소득 간이세액표·연말정산 어림)·yearEndClaimRules.js(연말정산 공제 자료)·severanceRules.js(퇴직금·퇴직소득세)·
+│  │  │                           payrollReportRules.js(은행·4대보험 신고·한 해 집계)·exportTemplateRules.js(이체·신고 파일 양식)가 순수 규칙
 │  │  ├─ financeTools.js          지출 관리 도구 API(회계 전표·현금영수증/세금계산서·CODEF 연동·영수증 보관 기간, 매일 도는 일) — accountingRules.js(계정·분개·
 │  │  │                           보관 기한)·taxDocRules.js(홈택스 엑셀·CODEF 응답)가 순수 규칙, codef.js(CODEF 호출)
 │  │  ├─ backup.js                서버 전체 백업(DB를 모름 — 만들기·보관·외부 위치·첨부파일 미러·예약) — backupService.js가 DB·pg_dump와 잇고,
@@ -2206,7 +2251,7 @@ notepad .env
 | `UPLOADS_DIR` | 선택 | 첨부파일 저장 위치. 기본은 `server/uploads/`. UNC 경로나 매핑된 네트워크 드라이브도 가능(예: `\\192.168.0.10\share\messenger_uploads`, `Z:\messenger_uploads`) — 항상 접근 가능해야 업로드/다운로드가 됩니다. |
 | `TODO_FOLDER_HOSTS` | 선택 | 할 일의 폴더 경로(파일 다운로드·업로드)에 더 허용할 사내 서버 이름, 쉼표로 구분(예: `nas.corp.local,corp.example.com`). 점이 든 이름(AD/DFS 도메인)이나 한글 이름의 사내 NAS를 쓸 때만 넣습니다 — 정식 표기의 사설 IP(`\\192.168.0.5\…`)와 점 없는 영문·숫자 컴퓨터 이름(`\\NAS\…`)은 없어도 됩니다. IP 주소는 이 목록과 상관없이 사내망 대역만 받으므로 공인 IP나 `@`가 든 이름은 넣어도 무시합니다(서버가 켜질 때 콘솔에 경고). 바꾼 뒤에는 서버를 다시 시작합니다([주요 기능](#주요-기능)의 "할 일") |
 | `RECEIPT_OCR_ENGINE`·`RECEIPT_OCR_URL`·`RECEIPT_OCR_API_KEY`·`RECEIPT_OCR_MODEL` | 선택 | 영수증 읽기([법인카드·영수증 읽기](#법인카드영수증-읽기)) — 영수증 사진을 바깥 서비스로 보내므로 `RECEIPT_OCR_ENGINE`을 정했을 때만 켜진다. `claude`(키는 `RECEIPT_OCR_API_KEY`, 없으면 `ANTHROPIC_API_KEY`, 모델 기본 `claude-opus-5-5`) · `openai`(OpenAI 호환 `/chat/completions` 비전 모델 — `RECEIPT_OCR_URL`은 `…/v1`까지, `RECEIPT_OCR_MODEL`은 꼭) · `clova`(CLOVA OCR 영수증 특화 — `RECEIPT_OCR_URL`은 영수증 호출 주소, `RECEIPT_OCR_API_KEY`는 Secret Key). |
-| `CODEF_CLIENT_ID`·`CODEF_CLIENT_SECRET`·`CODEF_PUBLIC_KEY`·`CODEF_ENV`·`CODEF_CARD_APPROVAL_PATH`·`CODEF_CASH_RECEIPT_PATH`·`CODEF_TAX_INVOICE_PATH` | 선택 | 카드사·홈택스 직접 연동([지출 관리 도구](#지출-관리-도구--회계-전표현금영수증세금계산서카드사홈택스-연동영수증-보관)) — CODEF(코드에프)와 계약해 받은 클라이언트 아이디·시크릿을 넣으면 켜진다(`CODEF_PUBLIC_KEY`는 카드사 계정을 화면에서 연결할 때 비밀번호를 암호화할 RSA 공개 키 — 한 줄, PEM 머리는 있어도 됨). `CODEF_ENV`는 `production`(기본 — api.codef.io)·`development`(데모)·`sandbox`. 카드 승인내역 상품 주소는 기본 `/v1/kr/card/b/account/approval-list`(계약한 상품과 다르면 바꿈), 홈택스 현금영수증·전자세금계산서는 계약한 상품 주소를 넣어야 가져온다. 바꾼 뒤에는 서버를 다시 시작한다. |
+| `CODEF_CLIENT_ID`·`CODEF_CLIENT_SECRET`·`CODEF_PUBLIC_KEY`·`CODEF_ENV`·`CODEF_CARD_APPROVAL_PATH`·`CODEF_CASH_RECEIPT_PATH`·`CODEF_TAX_INVOICE_PATH`·`CODEF_FIELD_MAP` | 선택 | 카드사·홈택스 직접 연동([지출 관리 도구](#지출-관리-도구--회계-전표현금영수증세금계산서카드사홈택스-연동영수증-보관)) — CODEF(코드에프)와 계약해 받은 클라이언트 아이디·시크릿을 넣으면 켜진다(`CODEF_PUBLIC_KEY`는 카드사 계정을 화면에서 연결할 때 비밀번호를 암호화할 RSA 공개 키 — 한 줄, PEM 머리는 있어도 됨). `CODEF_ENV`는 `production`(기본 — api.codef.io)·`development`(데모)·`sandbox`. 카드 승인내역 상품 주소는 기본 `/v1/kr/card/b/account/approval-list`(계약한 상품과 다르면 바꿈), 홈택스 현금영수증·전자세금계산서는 계약한 상품 주소를 넣어야 가져온다. `CODEF_FIELD_MAP`은 응답 칸 이름이 다를 때 더할 이름(JSON 한 줄 — 지출 관리 도구의 연동 점검이 응답 칸과 예시를 보여 준다). 바꾼 뒤에는 서버를 다시 시작한다. |
 | `NODE_ENV` | 선택 | `production`이면 Express 기본 오류 처리기까지 간 오류의 응답에 스택 추적(서버 파일 경로) 대신 짧은 상태 문구만 보냅니다(자세한 내용은 그대로 로그에). 설치형 서버(서비스·"서버 콘솔로 실행" — 기존 설치는 새 설치 프로그램을 한 번 다시 실행한 뒤부터)와 pm2(`ecosystem.config.cjs`)는 이미 `production`으로 돌고, 개발용 `npm start`는 그대로입니다 |
 
 **여러 서버 인스턴스를 두거나 DB를 옮길 계획이 있다면** `JWT_SECRET`/`DB_ENCRYPTION_KEY`를 반드시
@@ -2984,13 +3029,17 @@ Xcode로 직접 빌드할 때는 Signing & Capabilities에서 팀을 고르면 �
 | POST | `/api/groupware/payroll/runs/:id/fill-attendance` · `/calc-deductions` | 근태에서 채우기 `{ updated, withAllowance }` / 공제 계산 `{ userIds?, incomeTax?(기본 true — 간이세액표 소득세·지방소득세) }` → `{ updated }`(작성 중만) |
 | GET / POST | `/api/groupware/payroll/runs/:id/export` · `/import?dryRun=1` | 급여대장 엑셀 / 엑셀·CSV 가져오기(본문 그대로, 5MB) → `{ updated, added, unmatched, errors, columns, applied }` |
 | PUT / DELETE | `/api/groupware/payroll/payslips/:id` | 명세서 고치기 `{ earnings, deductions, work?, memo?, employeeNo?, reason? }`(보낸 뒤에는 `reason` 꼭 — 정정 기록·푸시) / 빼기(작성 중만) |
-| GET | `/api/groupware/payroll/runs/:id/transfer` · `/vouchers` | 급여 이체 파일(은행 대량 이체 엑셀 — 감사 로그) / 급여 회계 전표 엑셀 |
-| GET | `/api/groupware/payroll/year-summary` · `/year-summary/export` | 한 해 집계 `?year=` → `{ year, people: [{ userId, name, employeeNo, profile, totals, estimate }], draftRuns }` / 엑셀(집계·달별) |
+| GET | `/api/groupware/payroll/runs/:id/transfer` · `/vouchers` | 급여 이체 파일 `?template=`(내보내기 양식 — 비우면 기본, 엑셀·CSV — 감사 로그) / 급여 회계 전표 엑셀 |
+| GET | `/api/groupware/payroll/runs/:id/transfer/preview` | 이체 미리 보기 → `{ count, total, missing: [{ userName, reason }] }` |
+| GET / PUT | `/api/groupware/payroll/export-templates` | 내보내기 양식 `{ templates, builtins, fields }` / 저장 `{ templates: [{ id?, kind: transfer\|acquire\|lose, name, header, dateFormat, rrnDash, fileType, columns: [{ field, header, value? }] }] }`(전부 — 30개) |
+| GET / PUT | `/api/groupware/payroll/year-end/claims/:userId` | 한 사람의 공제 자료(담당자) `?year=` → `{ exists, submittedAt, confirmedAt, confirmedByName, claim }` / 넣기·고치기 `{ year, claim?(null이면 지움), confirmed?: true\|false }` |
+| GET / PUT | `/api/groupware/payroll/year-end/mine` | 내 공제 자료 `?year=&unlock=` → `{ year, …상태, claim, canEdit, profile, totals, estimate }`(비밀번호 다시 묻기면 423) / 내기 `{ year, claim }`(확인된 뒤면 409) |
+| GET | `/api/groupware/payroll/year-summary` · `/year-summary/export` | 한 해 집계 `?year=` → `{ year, people: [{ userId, name, employeeNo, profile, totals, claim(공제 자료 상태), estimate(공제 자료 반영 — claim: { deductions, credits }) }], draftRuns }` / 엑셀(집계·달별) |
 | POST | `/api/groupware/payroll/runs/:id/year-end` | 연말정산 정산분 넣기 `{ year, rows: [{ userId, incomeTax, localTax }] }`(작성 중만 — "연말정산 소득세·지방소득세" 항목) → `{ updated }` |
 | POST | `/api/groupware/payroll/severance` · `/severance/run` | 퇴직금 계산 `{ userId, lastDay, hireDate?, wages?, annualBonus?, leavePay?, hourlyWage? }` → 계산 내역 / 명세서 만들기(`payDate` 더) → 201 `{ runId }` |
-| GET / POST | `/api/groupware/payroll/insurance-reports` | 4대보험 신고 목록 `{ items, suggestions, lossReasons, today }` / 더하기 `{ kind: acquire\|lose, userId, eventDate, reasonCode?, monthlyPay?, weeklyHours?, jobName?, memo? }` |
+| GET / POST | `/api/groupware/payroll/insurance-reports` | 4대보험 신고 목록 `{ items, suggestions, lossReasons, today }` / 더하기 `{ kind: acquire\|lose, userId, eventDate, reasonCode?, monthlyPay?, weeklyHours?, jobName?, jobCode?, pensionCode?, healthCode?, memo? }` |
 | PATCH / DELETE | `/api/groupware/payroll/insurance-reports/:id` | 고치기(`filed: true\|false` — 신고함 표시) / 지우기 |
-| GET | `/api/groupware/payroll/insurance-reports/export` | 신고 자료 엑셀 `?kind=acquire\|lose&ids=`(비우면 아직 안 한 것 모두) |
+| GET / POST | `/api/groupware/payroll/insurance-reports/export` | 신고 파일 `?kind=acquire\|lose&ids=&template=`(비우면 아직 안 한 것 모두·기본 양식) / 주민등록번호와 함께 `{ kind, ids?, template?, rrns: { 신고 id: 번호 } }`(번호는 파일에만 — 남기지 않음) |
 | GET / POST | `/api/groupware/cards` | 카드들 `?month=`(관리자는 모두 — 그 달 사용 합계, 사용자는 내 카드) / 등록(관리자) `{ name, issuer, last4, holderIds, monthlyLimit?, memo? }` |
 | PATCH / DELETE | `/api/groupware/cards/:id` | 카드 고치기·끄기 / 지우기(사용 건도 — 올린 결재에는 그때의 사용 건이 남음) |
 | GET / POST | `/api/groupware/card-transactions` | 사용 건 `?month=YYYY-MM\|open&cardId=&mine=1` → `{ items, totals }`(사용자는 늘 내 것) / 직접 넣기(관리자) |
@@ -3009,6 +3058,7 @@ Xcode로 직접 빌드할 때는 Signing & Capabilities에서 팀을 고르면 �
 | PATCH / DELETE | `/api/groupware/tax-documents/:id` | 분류·메모 / 지우기 |
 | POST / DELETE | `/api/groupware/codef/connect` | CODEF 계정 연결 `{ target: card\|hometax, organization?, loginId?, password? \| connectedId? }`(아이디·비밀번호는 남기지 않음) / 끊기 `?target=` |
 | POST | `/api/groupware/codef/sync` | 지금 가져오기 `{ from?, to?(93일까지 — 기본 지난 7일), target?: card\|hometax\|all }` → `{ cards, hometax }`(꺼져 있으면 503) |
+| POST | `/api/groupware/codef/probe` | 연동 점검 `{ target: card\|cash_receipt\|tax_invoice, organization?, from?, to? }` → `{ path, ok, code, message, count, parsed, skipped, errors, keys, fields: { 칸: { names, matched, missing, required } } }`(값 없음 — 넣지 않음) |
 | GET | `/api/drive` · `/api/drive/search` | **공유 드라이브** 폴더 내용 `?teamId&folderId=` → `{ folder, path, folders, files: [{ id, name, version, size, updatedByName, url }], canWrite, isManager, usageBytes }` / 이름 찾기 `?teamId&q=` |
 | POST / PATCH / DELETE | `/api/drive/folders` · `/api/drive/folders/:id` | 폴더 만들기 `{ teamId, name, parentId? }` / 이름 바꾸기·옮기기 `{ name?, parentId? }`(자기 아래로 못 옮김, 10단계) / 휴지통으로(만든 사람·팀 관리자) |
 | POST | `/api/drive/files` | 파일 넣기 `{ teamId, folderId?, file(올린 경로), fileName, mimeType?, note? }` — 같은 이름이면 409(`existingId`) |
@@ -3205,14 +3255,15 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `resource_bookings` | 자원 예약 — `scope_key`, `resource_id`(자원을 지우면 cascade), `user_id`·`user_name`(잡은 사람), `team_id`(잡은 팀 — 캘린더 새로고침 알림), `title`, `start_at`·`end_at`(같은 자원끼리 겹치지 않음 — 자원 행을 잠그고 검사해 넣음), `event_id`(캘린더 일정에 붙은 예약이면 그 일정 — 일정 하나에 여러 줄(자원마다), 일정을 지우면 cascade), `status`(`confirmed`\|`pending` 승인 대기), `series_id`(반복 예약 묶음), `reminded_at`(시작 전 알림). 인덱스 (`resource_id`, `start_at`)·(`scope_key`, `start_at`)·`event_id`·`series_id` |
 | `surveys` / `survey_responses` | 그룹웨어 설문 — `scope_key`, `questions`(jsonb), `anonymous`, `result_visibility`, `audience`·`target_ids`, `closes_at`·`closed_at`, `reminded_at`(독촉 1시간 제한) / 응답(`survey_id`, `user_id` PK, `answers` jsonb) |
 | `work_reports` / `work_report_comments` / `work_report_reads` | 업무일지 — (`scope_key`, `user_id`, `kind`, `period_start`) 유일, `done`·`plan`·`issues` / 댓글 / 검토자가 처음 읽은 시각 |
-| `payroll_settings` | 급여 설정 — `scope_key`마다 `staff_ids`(급여 담당자)·`item_template`(새 명세서 항목 틀)·`insurance`(4대보험 요율 중 바꾼 것)·`employee_nos`(사번)·`company_name`, `tax_profiles`(원천징수 정보 — 가족·8~20세 자녀·비율)·`bank_accounts`(**암호화한** 급여 계좌)·`require_reauth`(명세서 비밀번호 다시 묻기) |
+| `payroll_settings` | 급여 설정 — `scope_key`마다 `staff_ids`(급여 담당자)·`item_template`(새 명세서 항목 틀)·`insurance`(4대보험 요율 중 바꾼 것)·`employee_nos`(사번)·`company_name`, `tax_profiles`(원천징수 정보 — 가족·8~20세 자녀·비율)·`bank_accounts`(**암호화한** 급여 계좌)·`require_reauth`(명세서 비밀번호 다시 묻기)·`export_templates`(내보내기 양식 — 급여 이체·4대보험 신고 파일) |
+| `payroll_year_end_claims` | 연말정산 공제 자료 — `scope_key`·`user_id`·`year`(귀속 — 셋이 하나), `data`(**암호화한** JSON — 간소화 자료의 항목별 합계), `submitted_at`(근로자가 낸 때)·`confirmed_at`·`confirmed_by_name`(담당자 확인 — 확인되면 근로자는 못 고침)·`updated_by_name` |
 | `payroll_runs` | 급여 대장 — `scope_key`·`pay_month`(YYYY-MM)·`pay_date`·`title`·`note`, `status`(`draft`\|`published`)·`published_at`·`published_by_name` |
 | `payslips` | 급여명세서 — (`run_id`, `user_id`) 유일, 만들 때의 `user_name`·`employee_no`·`department`·`position`, `data`(**암호화한** JSON — 항목·근무 내역·메모), `revision`·`history`(암호화한 정정 기록)·`corrected_at`, `viewed_at`(받는 사람이 처음 연 시각) |
 | `corporate_cards` | 법인카드 — `scope_key`·`name`·`issuer`·`last4`(끝 4자리만)·`holder_ids`·`monthly_limit`·`enabled`·`codef_organization`(CODEF 기관 코드 — 비우면 카드사로) |
 | `card_transactions` | 법인카드 사용 건 — (`card_id`, `dedupe_key`) 유일, `used_at`·`used_on`(한국 날짜)·`merchant`·`merchant_biz_no`·`amount`(취소는 음수)·`approval_no`·`source`(`excel`\|`api`\|`manual`\|`codef`), `user_id`, `memo`·`category`·`receipts`(보관 기한이 지나 지운 것은 `purgedAt`)·`receipt_scan`, `expense_doc_id`(청구한 지출 결재 — 상태는 그 결재를 따름), `excluded_at`·`excluded_reason` |
 | `card_feed_keys` | 법인카드 연동 키 — `scope_key`마다 하나, `token_hash`(lookupHash)·`token_hint`·`last_used_at` |
 | `receipt_scans` | 영수증 읽기 결과 — 올린 파일 이름(`file_name`)마다 `engine`·`result`(한 번만 바깥 서비스로) |
-| `payroll_insurance_reports` | 4대보험 취득·상실 신고 — `scope_key`·`user_id`·`user_name`·`kind`(`acquire`\|`lose`)·`event_date`·`reason_code`, `data`(**암호화한** JSON — 보수월액·주 소정근로시간·직종·메모), `filed_at`·`filed_by_name` |
+| `payroll_insurance_reports` | 4대보험 취득·상실 신고 — `scope_key`·`user_id`·`user_name`·`kind`(`acquire`\|`lose`)·`event_date`·`reason_code`, `data`(**암호화한** JSON — 보수월액·주 소정근로시간·직종·직종/국민연금/건강보험 부호·메모 — 주민등록번호는 없음), `filed_at`·`filed_by_name` |
 | `finance_settings` | 지출 관리 설정 — `scope_key`마다 `account_map`(바꾼 계정)·`voucher_format`·`receipt_retention_years`·`receipt_filing`·`receipt_purge`, CODEF `codef_card_connected_id`·`codef_hometax_connected_id`(암호화)·`codef_auto_sync`·`codef_last_sync_at`·`codef_last_result` |
 | `tax_documents` | 현금영수증·전자세금계산서 — (`scope_key`, `dedupe_key`) 유일, `kind`·`direction`·`issued_on`·`approval_no`·공급자/공급받는 자 이름·사업자번호·`supply_amount`·`tax_amount`·`total_amount`(취소는 음수)·`item_name`·`category`·`memo`·`source`(`excel`\|`codef`) |
 | `receipt_purges` | 보관 기한이 지나 지운 영수증 파일 — `file_name`마다 `scope_key`·`used_on`·`keep_until`·`purged_at`(결재 문서의 첨부 목록은 전자서명 지문이라 그대로 둔다) |

@@ -186,63 +186,138 @@ function codefDate(date, time) {
 }
 
 /**
- * CODEF 법인 카드 승인내역 한 줄 → 사용 건 `{ last4, usedAt, usedOn, merchant, merchantBizNo, amount, approvalNo }` | `{ error }`. 칸 이름은
- * 상품 판마다 조금씩 달라 흔한 이름을 차례로 본다(resUsedDate·resUsedTime·resMemberStoreName·resUsedAmount·resApprovalNo·resCardNo·
- * resCancelYN — '1'·'Y'·'취소'면 취소 — ·resCancelAmount·resMemberStoreCorpNo).
+ * CODEF 응답 칸 이름 — 상품 판마다 조금씩 달라 흔한 이름을 차례로 본다. 계약한 상품의 칸 이름이 다르면 서버 관리자가 `.env`의
+ * `CODEF_FIELD_MAP`(config.js — `{"card":{"amount":"resXxx"},"taxDoc":{…}}`)으로 앞에 더한다(codefFields). 연동 점검(financeTools.js
+ * /codef/probe)이 응답의 칸 이름과 어느 이름으로 읽었는지를 보여 준다(codefFieldReport).
  */
-export function codefCardRow(row) {
-  const usedAt = codefDate(pick(row, ['resUsedDate', 'resApprovalDate', 'resUsedDay']), pick(row, ['resUsedTime', 'resApprovalTime']));
+export const CODEF_CARD_FIELDS = Object.freeze({
+  usedDate: ['resUsedDate', 'resApprovalDate', 'resUsedDay'],
+  usedTime: ['resUsedTime', 'resApprovalTime'],
+  amount: ['resUsedAmount', 'resApprovalAmount', 'resAmount'],
+  // '1'·'2'·'Y'·'취소'면 취소, '3'·'거절'이면 승인 거절.
+  cancel: ['resCancelYN', 'resCancelYn', 'resApprovalStatus'],
+  cancelAmount: ['resCancelAmount'],
+  cardNo: ['resCardNo', 'resCardNo1', 'resCardNumber'],
+  merchant: ['resMemberStoreName', 'resStoreName', 'resMerchantName'],
+  merchantBizNo: ['resMemberStoreCorpNo', 'resMemberStoreBizNo', 'resStoreCorpNo'],
+  approvalNo: ['resApprovalNo', 'resApprovalNum'],
+});
+export const CODEF_TAX_DOC_FIELDS = Object.freeze({
+  date: ['resIssueDate', 'resWriteDate', 'resUsedDate', 'resTradeDate', 'resDate'],
+  time: ['resUsedTime', 'resTradeTime'],
+  supply: ['resSupplyValue', 'resSupplyAmount'],
+  tax: ['resTaxAmt', 'resTaxAmount', 'resVAT'],
+  total: ['resTotalAmount', 'resTotalAmt', 'resUsedAmount', 'resAmount'],
+  status: ['resTradeType', 'resCancelYN', 'resIssueType'],
+  approvalNo: ['resApprovalNo', 'resIssueId', 'resETaxInvoiceNo'],
+  supplierName: ['resSupplierCompanyName', 'resMemberStoreName', 'resCompanyNm', 'resSupplierName'],
+  supplierBizNo: ['resSupplierRegNumber', 'resMemberStoreCorpNo', 'resSupplierCorpNo'],
+  buyerName: ['resContractorCompanyName', 'resBuyerName'],
+  buyerBizNo: ['resContractorRegNumber', 'resBuyerCorpNo'],
+  itemName: ['resItemName', 'resProductName'],
+});
+/** 이 칸을 못 읽으면 그 줄을 넣지 못하는 칸(연동 점검에서 빨갛게). */
+export const CODEF_REQUIRED_FIELDS = Object.freeze({ card: ['usedDate', 'amount'], taxDoc: ['date', 'total'] });
+
+/**
+ * 칸 이름 목록 — 기본 이름 앞에 [overrides]`{ 칸: 'resX' | ['resX', 'resY'] }`를 더한다(없는 칸·이름 모양이 아닌 값은 버린다).
+ */
+export function codefFields(kind, overrides = null) {
+  const base = kind === 'card' ? CODEF_CARD_FIELDS : CODEF_TAX_DOC_FIELDS;
+  const out = {};
+  for (const [key, names] of Object.entries(base)) {
+    const extra = overrides?.[key];
+    const list = (Array.isArray(extra) ? extra : extra ? [extra] : []).filter((n) => typeof n === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,60}$/.test(n));
+    out[key] = [...new Set([...list, ...names])];
+  }
+  return out;
+}
+
+/** 응답 줄에서 처음으로 값이 있는 칸의 이름 | null. */
+const pickName = (row, names) => names.find((n) => row?.[n] !== undefined && row[n] !== null && String(row[n]).trim() !== '') ?? null;
+
+/**
+ * 연동 점검 — 응답 줄들([rows] — 앞 50줄)의 칸 이름(값은 빼고)과 칸마다 어느 이름으로 읽었는지. `{ keys: [이름], fields: { 칸: { names: [본 이름들],
+ * matched: { 이름: 줄 수 }, missing: 못 읽은 줄 수, required } } }` — 값은 담지 않는다(카드 번호·가맹점이 화면·로그에 남지 않게).
+ */
+export function codefFieldReport(rows, kind, fields) {
+  const sample = rows.slice(0, 50);
+  const keys = new Set();
+  for (const r of sample) if (r && typeof r === 'object') for (const k of Object.keys(r)) if (k.length <= 60) keys.add(k);
+  const required = CODEF_REQUIRED_FIELDS[kind] ?? [];
+  const report = {};
+  for (const [key, names] of Object.entries(fields)) {
+    const matched = {};
+    let missing = 0;
+    for (const r of sample) {
+      const n = pickName(r, names);
+      if (n) matched[n] = (matched[n] ?? 0) + 1;
+      else missing += 1;
+    }
+    report[key] = { names, matched, missing, required: required.includes(key) };
+  }
+  return { keys: [...keys].sort(), fields: report };
+}
+
+/**
+ * CODEF 법인 카드 승인내역 한 줄 → 사용 건 `{ last4, usedAt, usedOn, merchant, merchantBizNo, amount, approvalNo }` | `{ error }`. 칸 이름은
+ * [fields](codefFields('card', …) — 기본은 CODEF_CARD_FIELDS)를 차례로 본다.
+ */
+export function codefCardRow(row, fields = CODEF_CARD_FIELDS) {
+  const f = fields;
+  const usedAt = codefDate(pick(row, f.usedDate), pick(row, f.usedTime));
   if (!usedAt) return { error: '사용 날짜를 읽지 못했습니다.' };
-  let amount = parseTxAmount(String(pick(row, ['resUsedAmount', 'resApprovalAmount', 'resAmount']) ?? ''));
+  let amount = parseTxAmount(String(pick(row, f.amount) ?? ''));
   if (amount === null || amount === 0) return { error: '금액을 읽지 못했습니다.' };
-  const cancel = String(pick(row, ['resCancelYN', 'resCancelYn', 'resApprovalStatus']) ?? '');
+  const cancel = String(pick(row, f.cancel) ?? '');
   if (/^(1|2|y|Y)$|취소/.test(cancel)) {
-    const canceled = parseTxAmount(String(pick(row, ['resCancelAmount']) ?? ''));
+    const canceled = parseTxAmount(String(pick(row, f.cancelAmount) ?? ''));
     amount = -Math.abs(canceled || amount);
   }
   if (/^3$|거절/.test(cancel)) return { error: '승인 거절 건입니다.', skip: true };
   return {
     tx: {
-      last4: last4Of(pick(row, ['resCardNo', 'resCardNo1', 'resCardNumber'])),
+      last4: last4Of(pick(row, f.cardNo)),
       usedAt,
       usedOn: seoulDateKey(usedAt),
-      merchant: cleanText(String(pick(row, ['resMemberStoreName', 'resStoreName', 'resMerchantName']) ?? ''), 100) || '(가맹점 없음)',
-      merchantBizNo: normalizeBizNo(pick(row, ['resMemberStoreCorpNo', 'resMemberStoreBizNo', 'resStoreCorpNo'])),
+      merchant: cleanText(String(pick(row, f.merchant) ?? ''), 100) || '(가맹점 없음)',
+      merchantBizNo: normalizeBizNo(pick(row, f.merchantBizNo)),
       amount,
-      approvalNo: String(pick(row, ['resApprovalNo', 'resApprovalNum']) ?? '').replace(/\s/g, '').slice(0, 30) || null,
+      approvalNo: String(pick(row, f.approvalNo) ?? '').replace(/\s/g, '').slice(0, 30) || null,
     },
   };
 }
 
-/** CODEF 홈택스 목록 한 줄(현금영수증·전자세금계산서) → 증빙 | `{ error }`. 칸 이름은 흔한 것을 차례로 본다. */
-export function codefTaxDocRow(row, { kind, direction = 'purchase' }) {
-  const at = codefDate(pick(row, ['resIssueDate', 'resWriteDate', 'resUsedDate', 'resTradeDate', 'resDate']), pick(row, ['resUsedTime', 'resTradeTime']));
+/** CODEF 홈택스 목록 한 줄(현금영수증·전자세금계산서) → 증빙 | `{ error }`. 칸 이름은 [fields](기본 CODEF_TAX_DOC_FIELDS)를 차례로 본다. */
+export function codefTaxDocRow(row, { kind, direction = 'purchase', fields = CODEF_TAX_DOC_FIELDS }) {
+  const f = fields;
+  const at = codefDate(pick(row, f.date), pick(row, f.time));
   if (!at) return { error: '날짜를 읽지 못했습니다.' };
   const num = (names) => {
     const v = pick(row, names);
     return v === null ? null : parseTxAmount(String(v));
   };
-  const supply = num(['resSupplyValue', 'resSupplyAmount']);
-  const tax = num(['resTaxAmt', 'resTaxAmount', 'resVAT']);
-  let total = num(['resTotalAmount', 'resTotalAmt', 'resUsedAmount', 'resAmount']);
+  const supply = num(f.supply);
+  const tax = num(f.tax);
+  let total = num(f.total);
   if (total === null && supply !== null) total = supply + (tax ?? 0);
   if (total === null) return { error: '금액을 읽지 못했습니다.' };
-  const status = String(pick(row, ['resTradeType', 'resCancelYN', 'resIssueType']) ?? '');
+  const status = String(pick(row, f.status) ?? '');
   const sign = /취소|^1$|^Y$/.test(status) && total > 0 ? -1 : 1;
   return {
     doc: {
       kind,
       direction,
       issuedOn: seoulDateKey(at),
-      approvalNo: String(pick(row, ['resApprovalNo', 'resIssueId', 'resETaxInvoiceNo']) ?? '').replace(/\s/g, '').slice(0, 40) || null,
-      supplierName: cleanText(String(pick(row, ['resSupplierCompanyName', 'resMemberStoreName', 'resCompanyNm', 'resSupplierName']) ?? ''), 100) || null,
-      supplierBizNo: normalizeBizNo(pick(row, ['resSupplierRegNumber', 'resMemberStoreCorpNo', 'resSupplierCorpNo'])),
-      buyerName: cleanText(String(pick(row, ['resContractorCompanyName', 'resBuyerName']) ?? ''), 100) || null,
-      buyerBizNo: normalizeBizNo(pick(row, ['resContractorRegNumber', 'resBuyerCorpNo'])),
+      approvalNo: String(pick(row, f.approvalNo) ?? '').replace(/\s/g, '').slice(0, 40) || null,
+      supplierName: cleanText(String(pick(row, f.supplierName) ?? ''), 100) || null,
+      supplierBizNo: normalizeBizNo(pick(row, f.supplierBizNo)),
+      buyerName: cleanText(String(pick(row, f.buyerName) ?? ''), 100) || null,
+      buyerBizNo: normalizeBizNo(pick(row, f.buyerBizNo)),
       supplyAmount: supply === null ? null : sign * Math.abs(supply),
       taxAmount: tax === null ? null : sign * Math.abs(tax),
       totalAmount: sign * Math.abs(total),
-      itemName: cleanText(String(pick(row, ['resItemName', 'resProductName']) ?? ''), 100) || null,
+      itemName: cleanText(String(pick(row, f.itemName) ?? ''), 100) || null,
     },
   };
 }

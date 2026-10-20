@@ -974,6 +974,13 @@
       "when": 1792452460873,
       "tag": "0138_payroll_finance_more",
       "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1792471631110,
+      "tag": "0139_payroll_claims_templates",
+      "breakpoints": true
     }
   ]
 }

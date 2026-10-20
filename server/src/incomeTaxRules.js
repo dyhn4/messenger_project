@@ -1,5 +1,5 @@
 /**
- * 근로소득 세금 계산(급여 — payroll.js·payrollReports.js)의 순수 규칙 — 매달 원천징수할 소득세(근로소득 간이세액표), 연말정산 어림(참고용),
+ * 근로소득 세금 계산(급여 — payroll.js·payrollReports.js)의 순수 규칙 — 매달 원천징수할 소득세(근로소득 간이세액표), 연말정산 어림(참고용 — 공제 자료는 yearEndClaimRules.js),
  * 종합소득 기본세율. DB 없이 `node --test`로 시험한다(test/incomeTax.test.js — 간이세액표의 칸 값과 맞춰 본다).
  *
  * ── 근로소득 간이세액표(소득세법 시행령 [별표 2], 2026. 2. 27. 개정 — 2026. 3. 1. 이후 지급분) ──
@@ -17,6 +17,7 @@
  *  - 지방소득세(개인지방소득세 특별징수) = 소득세 × 10%, 10원 미만 버림.
  * 이 계산은 별표의 647구간 × 11명(7,117칸) 모두와 맞는다(시험에서 확인). 금액은 원 단위 정수.
  */
+import { claimAllowances } from './yearEndClaimRules.js';
 
 /** 가족 수 입력 상한(본인 포함). */
 export const TAX_FAMILY_MAX = 20;
@@ -201,42 +202,60 @@ export function childTaxCredit(k) {
   return kids === 1 ? 250_000 : 550_000 + (kids - 2) * 400_000;
 }
 
+
 /**
  * 연말정산 어림(참고용) — 한 해 동안 보낸 명세서의 합계로 결정세액을 어림한다. [year]는 `{ taxable(총급여 — 비과세 뺀), pension(국민연금
- * 낸 것), insurance(건강·장기요양·고용보험 낸 것), withheldIncomeTax, withheldLocalTax }`, [profile]은 원천징수 정보(가족·자녀).
- * 근로소득공제 → 기본공제(150만 원 × 가족) → 연금보험료공제 → 특별소득공제(보험료) 또는 표준세액공제(13만 원) 중 세금이 적은 쪽 → 기본세율 →
- * 근로소득세액공제·자녀세액공제. 의료비·교육비·기부금·신용카드·주택자금·연금저축 같은 공제는 간소화 자료가 있어야 해서 넣지 않는다.
+ * 낸 것), insurance(건강·장기요양·고용보험 낸 것), withheldIncomeTax, withheldLocalTax }`, [profile]은 원천징수 정보(가족·자녀), [claim]은
+ * 연말정산 공제 자료(yearEndClaimRules.js — 간소화 자료의 합계, 없으면 null), [taxYear]는 귀속 연도.
+ * 근로소득공제 → 기본공제(150만 원 × 가족)·추가공제 → 연금보험료공제 → 특별소득공제(보험료·주택자금) → 그 밖의 소득공제(신용카드·주택청약·직접)
+ * → 기본세율 → 근로소득세액공제·자녀세액공제 → 공제 자료의 세액공제(연금계좌·보험·의료·교육·기부·월세·결혼·출산·직접). 특별소득공제·특별세액공제·
+ * 월세 대신 표준세액공제(13만 원)를 고르는 쪽과 견줘 세금이 적은 쪽을 쓴다.
  * `{ grossIncome, earnedDeduction, earnedIncome, personal, pension, insurance, useStandard, taxBase, computedTax, earnedCredit, childCredit,
- *    standardCredit, decidedTax, decidedLocalTax, withheldIncomeTax, withheldLocalTax, diffIncomeTax, diffLocalTax }` — diff가 양수면 더 낼
- * 세금(추징), 음수면 돌려받을 세금(환급). 10원 미만은 버린다.
+ *    standardCredit, claimCredit, decidedTax, decidedLocalTax, withheldIncomeTax, withheldLocalTax, diffIncomeTax, diffLocalTax, claim? }` —
+ * diff가 양수면 더 낼 세금(추징), 음수면 돌려받을 세금(환급). claim은 공제 자료가 있을 때 공제마다의 금액(`{ deductions, credits }` — 고른 쪽에서
+ * 쓰지 못한 것은 0). 10원 미만은 버린다.
  */
-export function yearEndEstimate(year, profile = null) {
+export function yearEndEstimate(year, profile = null, { claim = null, taxYear = null } = {}) {
   const g = Math.max(0, Math.floor(year?.taxable ?? 0));
   const dependents = profile?.dependents ?? 1;
   const children = profile?.children ?? 0;
   const earnedDeduction = Math.floor(earnedIncomeDeduction(g));
   const earnedIncome = Math.max(0, g - earnedDeduction);
-  const personal = 1_500_000 * dependents;
   const pension = Math.max(0, Math.floor(year?.pension ?? 0));
   const insurance = Math.max(0, Math.floor(year?.insurance ?? 0));
-  const decide = (withInsurance) => {
-    const taxBase = Math.max(0, earnedIncome - personal - pension - (withInsurance ? insurance : 0));
+  const allow = claim ? claimAllowances(g, earnedIncome, claim, taxYear ?? 2025) : null;
+  const personal = 1_500_000 * dependents + (allow?.deductions.extraPersonal ?? 0);
+  const decide = (itemized) => {
+    const deductions = personal + pension + (allow ? allow.commonDeductions - allow.deductions.extraPersonal : 0) + (itemized ? insurance + (allow?.itemizedDeductions ?? 0) : 0);
+    const taxBase = Math.max(0, earnedIncome - deductions);
     const computedTax = Math.floor(basicTax(taxBase));
-    const earnedCredit = Math.min(computedTax, earnedIncomeTaxCredit(computedTax, g));
-    const childCredit = Math.min(computedTax - earnedCredit, childTaxCredit(children));
-    const standardCredit = withInsurance ? 0 : Math.min(computedTax - earnedCredit - childCredit, 130_000);
-    const decidedTax = floor10(Math.max(0, computedTax - earnedCredit - childCredit - standardCredit));
-    return { taxBase, computedTax, earnedCredit, childCredit, standardCredit, decidedTax };
+    let left = computedTax;
+    const take = (n) => {
+      const t = Math.min(left, Math.max(0, n));
+      left -= t;
+      return t;
+    };
+    const earnedCredit = take(earnedIncomeTaxCredit(computedTax, g));
+    const childCredit = take(childTaxCredit(children));
+    const claimCredit = take((allow?.commonCredits ?? 0) + (itemized ? (allow?.itemizedCredits ?? 0) : 0));
+    const standardCredit = itemized ? 0 : take(130_000);
+    const decidedTax = floor10(left);
+    return { taxBase, computedTax, earnedCredit, childCredit, claimCredit, standardCredit, decidedTax };
   };
-  const withIns = decide(true);
+  const withItems = decide(true);
   const standard = decide(false);
-  const useStandard = standard.decidedTax < withIns.decidedTax;
-  const best = useStandard ? standard : withIns;
+  const useStandard = standard.decidedTax < withItems.decidedTax;
+  const best = useStandard ? standard : withItems;
   const decidedLocalTax = floor10(best.decidedTax * 0.1);
   const withheldIncomeTax = Math.floor(year?.withheldIncomeTax ?? 0);
   const withheldLocalTax = Math.floor(year?.withheldLocalTax ?? 0);
   // 차감징수세액도 10원 미만은 버린다(환급은 음수 — 버린 쪽으로).
   const trunc10 = (n) => (n >= 0 ? floor10(n) : -floor10(-n));
+  // 표준세액공제를 고르면 특별소득공제·특별세액공제·월세는 쓰지 않은 것으로 보인다.
+  const used = allow && {
+    deductions: { ...allow.deductions, ...(useStandard && { rentLoan: 0, mortgage: 0 }) },
+    credits: { ...allow.credits, ...(useStandard && { insurance: 0, medical: 0, education: 0, donation: 0, monthlyRent: 0 }) },
+  };
   return {
     grossIncome: g,
     earnedDeduction,
@@ -251,5 +270,6 @@ export function yearEndEstimate(year, profile = null) {
     withheldLocalTax,
     diffIncomeTax: trunc10(best.decidedTax - withheldIncomeTax),
     diffLocalTax: trunc10(decidedLocalTax - withheldLocalTax),
+    ...(used && { claim: used }),
   };
 }

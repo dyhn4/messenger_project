@@ -98,6 +98,12 @@ const unlockOk = (req) => {
   }
 };
 
+/**
+ * 받는 사람이 자기 급여 정보를 보기 전에 비밀번호를 다시 확인해야 하는지(payroll.js 안의 needsUnlock과 같다 — payrollReports.js의 내 연말정산
+ * 공제 자료가 쓴다) — 급여 설정 [settings]가 켰고, 비밀번호가 있는 계정이고, 지난 10분 안의 확인 표(?unlock=)가 없으면.
+ */
+export const payrollLocked = (req, user, settings) => settings?.requireReauth === true && user.authSource !== 'sso' && !unlockOk(req);
+
 const readHistory = (stored) => {
   if (!stored) return [];
   try {

@@ -8,24 +8,28 @@ import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import 'approval_forms.dart' show ApprovalDateField;
+import 'export_templates.dart' show askRrns, pickExportTemplate;
 import 'finance_widgets.dart';
 import 'groupware_screen.dart';
 import 'payroll_admin.dart';
+import 'year_end_claim.dart';
 import '../../l10n/tr.dart';
 
-/// 급여 부가 기능(급여 담당자) — 한 해 급여 집계·연말정산 어림(정산분을 작성 중인 대장에 넣기), 퇴직금 계산(명세서로 만들기),
-/// 4대보험 취득·상실 신고 자료(기한·신고함·엑셀). 서버는 server/src/payrollReports.js.
+/// 급여 부가 기능(급여 담당자) — 한 해 급여 집계·연말정산 어림(사람마다 공제 자료 — year_end_claim.dart, 정산분을 작성 중인 대장에 넣기),
+/// 퇴직금 계산(명세서로 만들기), 4대보험 취득·상실 신고 자료(기한·신고함·내보내기 양식으로 파일). 서버는 server/src/payrollReports.js.
 
 Future<void> _download(
   BuildContext context,
   Session session,
   String path,
-  String fileName,
-) async {
+  String fileName, {
+  Map<String, dynamic>? body,
+}) async {
   try {
     final local = await session.downloadAuthedFile(
       path,
       fileName: fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_'),
+      body: body,
     );
     await openLocalFile(local);
   } catch (e) {
@@ -116,6 +120,39 @@ class _YearEndScreenState extends State<YearEndScreen> {
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
+  }
+
+  /// 한 사람의 공제 자료 — 보고 고치고 확인한다(확인하면 그 사람은 더 못 고침).
+  Future<void> _openClaim(PayrollYearPerson p) async {
+    YearEndClaimDetail detail;
+    try {
+      detail = await widget.api.yearEndClaim(p.userId, _year);
+    } catch (e) {
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
+      return;
+    }
+    if (!mounted) return;
+    final year = _year;
+    final saved = await openYearEndClaimForm(
+      context,
+      title: tr('{name} — {y}년 귀속 공제 자료', {'name': p.name, 'y': year}),
+      year: year,
+      claim: detail.claim,
+      status: detail.status,
+      onSave: (claim) => widget.api.saveYearEndClaim(
+        p.userId,
+        year: year,
+        claim: claim,
+        clear: claim == null,
+      ),
+      onConfirm: (confirm, claim) => widget.api.saveYearEndClaim(
+        p.userId,
+        year: year,
+        claim: claim,
+        confirmed: confirm,
+      ),
+    );
+    if (saved == true && mounted) await _load();
   }
 
   Future<void> _apply(PayrollYearSummary s) async {
@@ -220,7 +257,7 @@ class _YearEndScreenState extends State<YearEndScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
               tr(
-                '그해 지급일의 보낸 명세서를 모았습니다. 결정세액은 근로소득공제·기본공제(가족 수)·국민연금·보험료(또는 표준세액공제)·근로소득세액공제·자녀세액공제만 넣은 어림입니다. 의료비·교육비·카드 등은 홈택스 간소화 자료로 세무 프로그램에서 정산한 뒤, 그 차감징수세액으로 아래 칸을 고쳐 대장에 넣으세요(+추징, −환급).',
+                '그해 지급일의 보낸 명세서를 모았습니다. 결정세액은 근로소득공제·기본공제(가족 수)·국민연금·보험료·근로소득세액공제·자녀세액공제와, 사람마다의 공제 자료(신용카드·의료비·교육비·기부금·주택자금·연금계좌·월세 등 — 근로자가 내 급여에서 내거나 담당자가 넣음)로 계산한 어림입니다. 세무 프로그램에서 정산한 값이 다르면 아래 칸을 고쳐 대장에 넣으세요(+추징, −환급).',
               ),
               style: TextStyle(fontSize: 12, color: hint),
             ),
@@ -280,7 +317,54 @@ class _YearEndScreenState extends State<YearEndScreen> {
                         }),
                         style: TextStyle(fontSize: 12, color: hint),
                       ),
-                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(
+                            p.claim.confirmed
+                                ? Icons.verified_outlined
+                                : p.claim.exists
+                                ? Icons.assignment_turned_in_outlined
+                                : Icons.assignment_outlined,
+                            size: 16,
+                            color: p.claim.confirmed
+                                ? Colors.green.shade700
+                                : p.claim.exists
+                                ? theme.colorScheme.primary
+                                : hint,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              [
+                                if (p.claim.confirmed)
+                                  tr('공제 자료 확인함')
+                                else if (p.claim.submittedAt != null)
+                                  tr('공제 자료 냄 — 확인 전')
+                                else if (p.claim.exists)
+                                  tr('공제 자료(담당자가 넣음)')
+                                else
+                                  tr('공제 자료 없음'),
+                                if (p.estimate.claimDeductions['card']
+                                    case final c? when c > 0)
+                                  tr('카드 공제 {won}', {'won': signedWonText(c)}),
+                                if (p.estimate.claimCredit > 0)
+                                  tr('세액공제 {won}', {
+                                    'won': signedWonText(
+                                      p.estimate.claimCredit,
+                                    ),
+                                  }),
+                              ].join(' · '),
+                              style: TextStyle(fontSize: 12, color: hint),
+                            ),
+                          ),
+                          TextButton(
+                            key: ValueKey('year-end-claim-${p.userId}'),
+                            onPressed: () => _openClaim(p),
+                            child: Text(tr('공제 자료')),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
                       Row(
                         children: [
                           Expanded(
@@ -760,6 +844,65 @@ class _InsuranceReportsScreenState extends State<InsuranceReportsScreen> {
     if (saved == true) await _load();
   }
 
+  /// 신고 파일 — 아직 신고하지 않은 그 종류를, 고른 내보내기 양식으로. 양식에 주민등록번호 칸이 있으면 사람마다 받아 POST로 보낸다
+  /// (서버는 파일에만 쓰고 남기지 않는다).
+  Future<void> _export(String kind) async {
+    final list = _list;
+    if (list == null) return;
+    final pending = list.items
+        .where((r) => r.kind == kind && r.filedAt == null)
+        .toList();
+    if (pending.isEmpty) {
+      showAppToast(
+        context,
+        kind == 'acquire'
+            ? tr('아직 신고하지 않은 취득 신고가 없습니다.')
+            : tr('아직 신고하지 않은 상실 신고가 없습니다.'),
+      );
+      return;
+    }
+    final template = await pickExportTemplate(
+      context,
+      api: widget.api,
+      kind: kind,
+      title: kind == 'acquire' ? tr('취득 신고 파일') : tr('상실 신고 파일'),
+      intro: Text(
+        tr('{n}명 — {names}', {
+          'n': pending.length,
+          'names': pending.map((r) => r.userName).join(', '),
+        }),
+        key: const ValueKey('insurance-export-intro'),
+      ),
+    );
+    if (template == null || !mounted) return;
+    var rrns = const <String, String>{};
+    if (template.wantsRrn) {
+      final got = await askRrns(context, [
+        for (final r in pending) (id: r.id, name: r.userName),
+      ]);
+      if (got == null || !mounted) return;
+      rrns = got;
+    }
+    final ext = template.fileType == 'csv' ? 'csv' : 'xlsx';
+    final name = kind == 'acquire' ? '4대보험_취득.$ext' : '4대보험_상실.$ext';
+    final templateId = template.builtin ? null : template.id;
+    await _download(
+      context,
+      widget.session,
+      rrns.isEmpty
+          ? widget.api.insuranceReportExportPath(kind, template: templateId)
+          : widget.api.insuranceReportExportPostPath,
+      name,
+      body: rrns.isEmpty
+          ? null
+          : widget.api.insuranceReportExportBody(
+              kind,
+              template: templateId,
+              rrns: rrns,
+            ),
+    );
+  }
+
   Future<void> _toggleFiled(InsuranceReport r) async {
     try {
       await widget.api.saveInsuranceReport(id: r.id, filed: r.filedAt == null);
@@ -779,22 +922,18 @@ class _InsuranceReportsScreenState extends State<InsuranceReportsScreen> {
         title: Text(tr('4대보험 취득·상실 신고')),
         actions: [
           PopupMenuButton<String>(
-            tooltip: tr('신고 자료 엑셀'),
+            key: const ValueKey('insurance-export'),
+            tooltip: tr('신고 파일'),
             icon: const Icon(Icons.download),
-            onSelected: (kind) => _download(
-              context,
-              widget.session,
-              widget.api.insuranceReportExportPath(kind),
-              kind == 'acquire' ? '4대보험_취득.xlsx' : '4대보험_상실.xlsx',
-            ),
+            onSelected: _export,
             itemBuilder: (_) => [
               PopupMenuItem(
                 value: 'acquire',
-                child: Text(tr('취득 신고 자료(아직 안 한 것)')),
+                child: Text(tr('취득 신고 파일(아직 안 한 것)')),
               ),
               PopupMenuItem(
                 value: 'lose',
-                child: Text(tr('상실 신고 자료(아직 안 한 것)')),
+                child: Text(tr('상실 신고 파일(아직 안 한 것)')),
               ),
             ],
           ),
@@ -815,7 +954,7 @@ class _InsuranceReportsScreenState extends State<InsuranceReportsScreen> {
               padding: const EdgeInsets.all(16),
               child: Text(
                 tr(
-                  '입사하면 취득, 퇴사하면 상실 신고를 그 달의 다음 달 15일까지 4대사회보험 정보연계센터(EDI)에서 합니다. 여기서는 신고할 사람·기한을 챙기고 신고서에 옮겨 적을 자료(보수월액·보수총액)를 엑셀로 받습니다. 주민등록번호는 서버에 두지 않습니다.',
+                  '입사하면 취득, 퇴사하면 상실 신고를 그 달의 다음 달 15일까지 4대사회보험 정보연계센터(EDI)에서 합니다. 여기서는 신고할 사람·기한을 챙기고, 내려받기(위 단추)에서 EDI 일괄 신고 양식에 맞춘 내보내기 양식을 골라 파일(보수월액·보수총액·부호)을 받습니다. 주민등록번호는 서버에 두지 않고 파일을 받을 때만 넣습니다.',
                 ),
                 style: TextStyle(fontSize: 12, color: hint),
               ),
@@ -972,6 +1111,13 @@ class _InsuranceReportDialogState extends State<_InsuranceReportDialog> {
     text: widget.report?.weeklyHours?.toString(),
   );
   late final _memo = TextEditingController(text: widget.report?.memo);
+  late final _jobCode = TextEditingController(text: widget.report?.jobCode);
+  late final _pensionCode = TextEditingController(
+    text: widget.report?.pensionCode,
+  );
+  late final _healthCode = TextEditingController(
+    text: widget.report?.healthCode,
+  );
   bool _saving = false;
   String? _error;
 
@@ -980,6 +1126,9 @@ class _InsuranceReportDialogState extends State<_InsuranceReportDialog> {
     _pay.dispose();
     _hours.dispose();
     _memo.dispose();
+    _jobCode.dispose();
+    _pensionCode.dispose();
+    _healthCode.dispose();
     super.dispose();
   }
 
@@ -1004,6 +1153,9 @@ class _InsuranceReportDialogState extends State<_InsuranceReportDialog> {
         weeklyHours: _hours.text.trim().isEmpty
             ? null
             : num.tryParse(_hours.text.trim()),
+        jobCode: _kind == 'acquire' ? _jobCode.text.trim() : null,
+        pensionCode: _pensionCode.text.trim(),
+        healthCode: _healthCode.text.trim(),
         memo: _memo.text.trim(),
       );
       if (mounted) Navigator.pop(context, true);
@@ -1110,6 +1262,62 @@ class _InsuranceReportDialogState extends State<_InsuranceReportDialog> {
                     ),
                   ],
                 ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  if (_kind == 'acquire') ...[
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('insurance-job-code'),
+                        controller: _jobCode,
+                        maxLength: 10,
+                        decoration: InputDecoration(
+                          labelText: tr('직종 부호'),
+                          counterText: '',
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('insurance-pension-code'),
+                      controller: _pensionCode,
+                      maxLength: 10,
+                      decoration: InputDecoration(
+                        labelText: _kind == 'acquire'
+                            ? tr('국민연금 취득 부호')
+                            : tr('국민연금 상실 부호'),
+                        counterText: '',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('insurance-health-code'),
+                      controller: _healthCode,
+                      maxLength: 10,
+                      decoration: InputDecoration(
+                        labelText: _kind == 'acquire'
+                            ? tr('건강보험 취득 부호')
+                            : tr('건강보험 상실 부호'),
+                        counterText: '',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  tr('부호는 EDI 일괄 신고 파일에 그대로 옮깁니다(신고서 뒤쪽의 부호표를 보세요). 비워도 됩니다.'),
+                  style: TextStyle(fontSize: 12, color: theme.hintColor),
+                ),
+              ),
               const SizedBox(height: 8),
               TextField(
                 controller: _memo,

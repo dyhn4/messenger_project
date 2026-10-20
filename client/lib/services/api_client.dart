@@ -744,9 +744,18 @@ class ApiClient {
   }
 
   /// 인증이 필요한 파일 내려받기(그룹웨어 근태 엑셀 등) — [path]는 쿼리까지 붙은 서버 경로. [exportRoomChat]처럼 스트림으로 받고,
-  /// 401이어도 토큰을 갱신해 다시 시도하지 않는다(가끔 누르는 내려받기라 실패하면 다시 누르면 된다).
-  Future<http.StreamedResponse> downloadAuthed(String path) {
-    final req = http.Request('GET', _uri(path))..headers.addAll(_authHeaders);
+  /// 401이어도 토큰을 갱신해 다시 시도하지 않는다(가끔 누르는 내려받기라 실패하면 다시 누르면 된다). [body]를 주면 POST(JSON) —
+  /// 주소에 실으면 안 되는 값(4대보험 신고 파일의 주민등록번호 등)을 보낼 때.
+  Future<http.StreamedResponse> downloadAuthed(
+    String path, {
+    Map<String, dynamic>? body,
+  }) {
+    final req = http.Request(body == null ? 'GET' : 'POST', _uri(path))
+      ..headers.addAll(_authHeaders);
+    if (body != null) {
+      req.headers['content-type'] = 'application/json';
+      req.body = jsonEncode(body);
+    }
     return _client.send(req);
   }
 

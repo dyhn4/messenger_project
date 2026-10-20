@@ -96,6 +96,16 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/unread_widget_info"/>
         </receiver>
+        <!-- 앱이 꺼져 있는 동안 온 채팅 푸시로 위젯 숫자 올리기(PushWidgetReceiver.kt) — FCM 플러그인의 수신기와 같은 방송을 따로 받는다.
+             Google Play 서비스만 보낼 수 있게 플러그인과 같은 권한을 건다. -->
+        <receiver
+            android:name=".PushWidgetReceiver"
+            android:exported="true"
+            android:permission="com.google.android.c2dm.permission.SEND">
+            <intent-filter>
+                <action android:name="com.google.android.c2dm.intent.RECEIVE"/>
+            </intent-filter>
+        </receiver>
         <!-- flutter_foreground_task의 서비스(이름은 바꾸면 안 됨). stopWithTask=true라
              최근 앱에서 앱을 밀어 없애면 통화 서비스도 같이 끝난다. -->
         <service

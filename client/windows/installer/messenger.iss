@@ -35,6 +35,9 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "바탕화면에 바로가기 만들기"; GroupDescription: "추가 아이콘:"
+; 탐색기에서 파일을 오른쪽 클릭 → "보내기" → TangoTalk으로 대화방에 보내기(기본 켬). 바로가기 인자 --share 뒤에 탐색기가 고른 파일
+; 경로들을 붙여 실행한다 — 앱이 떠 있으면 그 창에 넘기고(windows/runner/main.cpp), 아니면 켜서 공유하기 화면을 띄운다(share_intake.dart).
+Name: "sendto"; Description: "탐색기 ""보내기"" 메뉴에 {#MyAppName} 넣기"; GroupDescription: "추가 아이콘:"
 
 [Files]
 Source: "{#ReleaseDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -43,6 +46,8 @@ Source: "{#ReleaseDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{#MyAppName} 제거"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+; SendTo 폴더(%APPDATA%\Microsoft\Windows\SendTo)의 바로가기 — 제거하면 함께 지워진다.
+Name: "{usersendto}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--share"; Tasks: sendto
 
 ; 초대 링크(tangotalk://pair?...)를 클릭하면 이 앱이 열리도록 커스텀 URL 프로토콜을 등록한다.
 ; PrivilegesRequired=lowest와 맞춰 HKCU에만 쓴다(관리자 권한 불필요, 현재 사용자에게만 적용).

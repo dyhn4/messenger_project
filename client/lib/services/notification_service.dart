@@ -15,6 +15,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/avatar_utils.dart' show parseHexColor;
 import 'app_platform.dart';
 import 'avatar_thumbnail.dart';
+import 'notification_reply.dart'
+    show onNotificationActionBackground, replyActionId;
 import 'notification_popup.dart'
     if (dart.library.js_interop) 'notification_popup_stub.dart';
 import 'notification_popup_style.dart';
@@ -80,10 +82,15 @@ class NotificationService {
         windows: windows,
       ),
       onDidReceiveNotificationResponse: (response) {
+        // 답장 칸은 화면 없는 엔진(onNotificationActionBackground)이 받는다 — 여기 오더라도 방을 열지 않는다.
+        if (response.actionId == replyActionId) return;
         if (AppPlatform.isWindows) _bringWindowToFront();
         final roomId = response.payload;
         if (roomId != null) onTap(roomId);
       },
+      // 알림에서 바로 답장(안드로이드 — notification_reply.dart). 앱이 켜져 있어도 이 함수가 따로 받는다.
+      onDidReceiveBackgroundNotificationResponse:
+          onNotificationActionBackground,
     );
     // PC 알림 창의 카드를 눌렀을 때도 Windows 알림을 눌렀을 때와 똑같이.
     if (AppPlatform.isWindows) {
@@ -434,6 +441,7 @@ class NotificationService {
     bool isSecret = false,
     bool flashTaskbarUntilRoomOpened = false,
     bool flashWindowFrame = true,
+    bool replyable = false,
   }) async {
     if (deferToRemotePush) return; // 아이폰이 뒤에 있다 — 서버 푸시가 그린다.
     if (kIsWeb) {
@@ -508,6 +516,18 @@ class NotificationService {
         groupAlertBehavior: GroupAlertBehavior.children,
         // 런처 아이콘 배지 숫자 — 안 지운 이 방 메시지 개수(위 _appendHistory 참고).
         number: history?.length,
+        // 알림에서 바로 답장 — 쓴 글은 화면 없이 보내고(notification_reply.dart) 보냈으면 이 알림을 지운다.
+        actions: replyable
+            ? [
+                AndroidNotificationAction(
+                  replyActionId,
+                  tr('답장'),
+                  inputs: [AndroidNotificationActionInput(label: tr('메시지 입력'))],
+                  cancelNotification: false,
+                  semanticAction: SemanticAction.reply,
+                ),
+              ]
+            : null,
         styleInformation: MessagingStyleInformation(
           Person(name: tr('나')),
           conversationTitle: conversationTitle,
@@ -601,6 +621,32 @@ class NotificationService {
         untilRoomOpened: flashTaskbarUntilRoomOpened,
       );
     }
+  }
+
+  /// 알림에서 바로 답장하지 못했을 때(notification_reply.dart) — 그 방 알림 자리에 이유를 띄운다(누르면 그 방이 열린다). 쌓아 둔 기록은
+  /// 그대로 두어 다음 알림이 이어 붙는다.
+  Future<void> showReplyFailed({
+    required String roomId,
+    required String message,
+  }) async {
+    if (!AppPlatform.isAndroid) return;
+    await _plugin.show(
+      id: roomId.hashCode,
+      title: tr('답장을 보내지 못했습니다'),
+      body: message,
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          'messages',
+          tr('새 메시지'),
+          channelDescription: tr('새 채팅 메시지 알림'),
+          importance: Importance.high,
+          priority: Priority.high,
+          groupKey: _messageGroupKey,
+          onlyAlertOnce: true,
+        ),
+      ),
+      payload: roomId,
+    );
   }
 
   /// 방을 열 때(또는 다시 포그라운드로 돌아와 그 방을 계속 보고 있을 때) 그 방으로 떠있는

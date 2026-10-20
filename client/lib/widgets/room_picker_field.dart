@@ -18,12 +18,22 @@ class RoomPickerField extends StatefulWidget {
   /// 고를 수 있는 방만 남긴다(없으면 비밀 대화를 뺀 모든 방) — 공유·전달 화면이 보드 뷰 토픽과
   /// 내가 글을 쓸 수 없는 토픽을 빼는 데 쓴다.
   final bool Function(Room room)? filter;
+
+  /// 비밀 대화도 목록에 넣는다(다른 앱에서 공유하기 — 보낼 때 이 기기에서 암호화한다). 기본은 뺀다.
+  final bool includeSecret;
+
+  /// 여러 방을 고르는 화면(공유하기)이 이미 고른 방 — 목록에 체크로 보인다. 칸에는 [value] 대신 [placeholder]가 보인다.
+  final Set<String> selectedIds;
+  final String? placeholder;
   const RoomPickerField({
     super.key,
     required this.session,
     required this.value,
     required this.onChanged,
     this.filter,
+    this.includeSecret = false,
+    this.selectedIds = const {},
+    this.placeholder,
   });
 
   @override
@@ -90,6 +100,8 @@ class _RoomPickerFieldState extends State<RoomPickerField> {
                 session: widget.session,
                 value: widget.value,
                 filter: widget.filter,
+                includeSecret: widget.includeSecret,
+                selectedIds: widget.selectedIds,
                 onSelected: (room) {
                   widget.onChanged(room);
                   _removeOverlay();
@@ -128,7 +140,7 @@ class _RoomPickerFieldState extends State<RoomPickerField> {
             children: [
               Expanded(
                 child: Text(
-                  label ?? tr('대화방 선택'),
+                  label ?? widget.placeholder ?? tr('대화방 선택'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: label == null
@@ -154,6 +166,8 @@ class _RoomPickerDropdown extends StatefulWidget {
   final Session session;
   final Room? value;
   final bool Function(Room room)? filter;
+  final bool includeSecret;
+  final Set<String> selectedIds;
   final ValueChanged<Room> onSelected;
   final VoidCallback onDismiss;
   const _RoomPickerDropdown({
@@ -161,6 +175,8 @@ class _RoomPickerDropdown extends StatefulWidget {
     required this.session,
     required this.value,
     required this.filter,
+    required this.includeSecret,
+    required this.selectedIds,
     required this.onSelected,
     required this.onDismiss,
   });
@@ -204,7 +220,9 @@ class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
     final lowerFilter = _filter.trim().toLowerCase();
     final rooms =
         widget.session.rooms
-            .where((r) => r.type == _tab && !r.isSecret)
+            .where(
+              (r) => r.type == _tab && (widget.includeSecret || !r.isSecret),
+            )
             // session.rooms엔 다른 팀 방도 다 들어 있다 — 다른 목록 화면처럼 지금 팀 방만 보여 준다(팀마다
             // 하나씩 있는 나와의 대화가 여러 줄로 겹쳐 보이지 않게).
             .where((r) => teamId == null || r.teamId == teamId)
@@ -308,7 +326,9 @@ class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
                       itemCount: rooms.length,
                       itemBuilder: (context, i) {
                         final room = rooms[i];
-                        final selected = widget.value?.id == room.id;
+                        final selected =
+                            widget.value?.id == room.id ||
+                            widget.selectedIds.contains(room.id);
                         return ListTile(
                           dense: true,
                           leading: _tab == RoomType.topic
@@ -326,10 +346,25 @@ class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
                                   onlineUserIds: widget.session.onlineUserIds,
                                   size: 28,
                                 ),
-                          title: Text(
-                            room.displayName(myUserId),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          title: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  room.displayName(myUserId),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (room.isSecret) ...[
+                                const SizedBox(width: 4),
+                                Icon(
+                                  Icons.lock,
+                                  size: 14,
+                                  color: Colors.green.shade700,
+                                  semanticLabel: tr('비밀 대화'),
+                                ),
+                              ],
+                            ],
                           ),
                           trailing: selected
                               ? Icon(

@@ -34,6 +34,8 @@ import 'services/home_widget_bridge.dart';
 import 'services/notification_popup.dart'
     if (dart.library.js_interop) 'services/notification_popup_stub.dart';
 import 'services/notification_controller.dart' show NotificationTab;
+import 'services/notification_reply.dart' show replyTicketPrefsKey;
+import 'widgets/app_toast.dart' show showAppToast;
 import 'services/notification_service.dart';
 import 'services/password_ime.dart';
 import 'services/pinned_tls.dart';
@@ -111,6 +113,14 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     'flutter.${Session.kActiveRoomIdPrefsKey}',
   );
   final isViewingNow = fg == true && active == roomId;
+  // 알림에서 바로 답장할 표(서버가 새 메시지 푸시에만 기기마다 싣는다 — notification_reply.dart). 방마다 마지막 것만 둔다.
+  final replyTicket = data['replyTicket'] as String?;
+  if (replyTicket != null) {
+    await prefs.setString(
+      'flutter.${replyTicketPrefsKey(roomId)}',
+      replyTicket,
+    );
+  }
   if (isViewingNow) return;
 
   final notifications = NotificationService();
@@ -160,10 +170,11 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     avatarColor: data['avatarColor'] as String?,
     avatarUrl: avatarUrl,
     isSecret: data['isSecret'] == 'true',
+    replyable: replyTicket != null,
   );
 }
 
-Future<void> main() async {
+Future<void> main([List<String> args = const []]) async {
   WidgetsFlutterBinding.ensureInitialized();
   // 화면 언어(l10n/tr.dart) — 첫 화면을 그리기 전에, 서브 창(프로젝트·알림 창)도 같은 언어로.
   await AppLocale.load();
@@ -193,6 +204,8 @@ Future<void> main() async {
       return;
     }
   }
+  // 메인 창의 시작 인자 — Windows 탐색기 "보내기 → TangoTalk"으로 켜졌으면 `--share` 뒤에 파일 경로들(share_intake.dart).
+  ShareIntake.launchArgs = args;
   // NetworkImage/CachedNetworkImage처럼 우리 ApiClient/ChatSocket을 거치지 않고 자체
   // HttpClient를 만드는 코드도 전부 서버의 자체 서명 인증서를 신뢰하도록, runApp() 전에
   // 앱 전체 HttpClient 생성을 가로챈다. 이거 없이는 프로필 사진/채팅 이미지가 인증서
@@ -302,12 +315,21 @@ class _MyAppState extends State<MyApp>
     _pendingShare = null;
     _shareScreenOpen = true;
     try {
-      final room = await showShareTargetScreen(
+      final sent = await showShareTargetScreen(
         context,
         session: session,
         payload: payload,
       );
-      if (room != null) await _openRoomFromNotification(room.id);
+      // 한 곳에 보냈으면 그 방을 열고, 여러 곳이면 지금 화면에 둔 채 알린다.
+      if (sent == null || sent.isEmpty) return;
+      if (sent.length == 1) {
+        await _openRoomFromNotification(sent.single.id);
+      } else {
+        final ctx = navigatorKey.currentContext;
+        if (ctx != null && ctx.mounted) {
+          showAppToast(ctx, tr('{n}개 대화방에 보냈습니다.', {'n': sent.length}));
+        }
+      }
     } finally {
       _shareScreenOpen = false;
     }

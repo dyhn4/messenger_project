@@ -141,7 +141,10 @@ class Session extends ChangeNotifier {
   static const _kServerUrl = 'server_base_url';
   static const _kExternalServerUrl = 'server_external_url';
   static const _kInternalServerUrls = 'server_internal_urls';
-  static const _kToken = 'auth_token';
+
+  /// AccessToken을 두는 열쇠 — 알림에서 바로 답장(notification_reply.dart — 화면 없는 엔진)이 같은 값을 읽는다.
+  static const kAuthTokenPrefsKey = 'auth_token';
+  static const _kToken = kAuthTokenPrefsKey;
   static const _kRefreshToken = 'auth_refresh_token';
   static const _kUserId = 'auth_user_id';
   static const _kUsername = 'auth_username';
@@ -4178,6 +4181,8 @@ class Session extends ChangeNotifier {
           ? resolveUrl(sender!.avatarUrl!)
           : null,
       isSecret: room?.isSecret == true,
+      // 알림에서 바로 답장(안드로이드) — 글을 쓸 수 있는 방, 비밀 대화가 아닐 때만(암호화할 수 없다).
+      replyable: room != null && !room.isSecret && room.canWrite(this),
     );
   }
 

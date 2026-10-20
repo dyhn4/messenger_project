@@ -50,6 +50,7 @@ class _QuietNotifications extends NotificationService {
     bool isSecret = false,
     bool flashTaskbarUntilRoomOpened = false,
     bool flashWindowFrame = true,
+    bool replyable = false,
   }) async {}
 }
 

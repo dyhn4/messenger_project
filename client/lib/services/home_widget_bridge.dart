@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
 import '../models/room.dart';
 import 'app_platform.dart';
@@ -39,8 +40,10 @@ Map<String, dynamic> homeWidgetState({
   };
 }
 
-/// 세션이 바뀔 때마다(잠깐 모아서) 위젯 내용을 다시 만들어, 달라졌을 때만 안드로이드로 넘긴다(채널 tangotalk/widget).
-class HomeWidgetBridge {
+/// 세션이 바뀔 때마다(잠깐 모아서) 위젯 내용을 다시 만들어, 달라졌을 때만 안드로이드로 넘긴다(채널 tangotalk/widget). 앱이 꺼져 있는 동안
+/// 온 푸시는 안드로이드가 위젯 숫자만 직접 올리므로(PushWidgetReceiver.kt — 어림), 앱이 앞으로 돌아오면 같은 내용이어도 한 번 다시 넘겨
+/// 정확한 값으로 덮는다.
+class HomeWidgetBridge with WidgetsBindingObserver {
   HomeWidgetBridge(this.session, {MethodChannel? channel, bool? enabled})
     : _channel = channel ?? const MethodChannel('tangotalk/widget'),
       _enabled = enabled ?? AppPlatform.isAndroid;
@@ -54,6 +57,14 @@ class HomeWidgetBridge {
   void start() {
     if (!_enabled) return;
     session.addListener(_schedule);
+    WidgetsBinding.instance.addObserver(this);
+    _schedule();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    _lastJson = null;
     _schedule();
   }
 
@@ -85,5 +96,6 @@ class HomeWidgetBridge {
   void stop() {
     _timer?.cancel();
     session.removeListener(_schedule);
+    if (_enabled) WidgetsBinding.instance.removeObserver(this);
   }
 }

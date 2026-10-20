@@ -10,7 +10,10 @@ import { findTeamById } from './db/queries/teams.js';
 import { listActiveUsersByIds } from './db/queries/users.js';
 import { isUserInDnd } from './statusRules.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
+import { accountState } from './authState.js';
+import { JWT_SECRET } from './config.js';
 import { fcmMessageFor } from './fcmMessage.js';
+import { replyAllowed, signReplyTicket, unreadDeltaOf, widgetNameOf } from './pushReplyRules.js';
 import { pushesToDevice, skipsPush } from './presence.js';
 import { signFileUrl } from './upload.js';
 import { sendWebPushToUser } from './webPush.js';
@@ -44,20 +47,22 @@ async function pushableFcmTokens(userId) {
 }
 
 /**
- * [devices]에 한 통씩 보낸다 — [content]는 fcmMessageFor의 { android, ios }(기기 종류마다 모양이 다르다). 앱을 지웠거나 다시 깔아
- * 토큰이 없어졌으면 그 기기의 토큰을 지워 다음부터 헛발송하지 않는다. [label]은 실패 로그에 남길 알림 종류(영문 — 앱 번역 대상이 아니다).
+ * [devices]에 한 통씩 보낸다 — [content]는 fcmMessageFor의 { android, ios }(기기 종류마다 모양이 다르다) 또는 기기를 받아 그것을 돌려주는
+ * 함수(기기마다 다른 값 — 알림 답장 표). 앱을 지웠거나 다시 깔아 토큰이 없어졌으면 그 기기의 토큰을 지워 다음부터 헛발송하지 않는다.
+ * [label]은 실패 로그에 남길 알림 종류(영문 — 앱 번역 대상이 아니다).
  */
-async function sendToDevices(messaging, userId, devices, content, label) {
+async function sendToDevices(messaging, userId, devices, contentFor, label) {
   await Promise.all(
-    devices.map((device) =>
-      messaging.send(fcmMessageFor(device, content)).catch(async (err) => {
+    devices.map((device) => {
+      const content = typeof contentFor === 'function' ? contentFor(device) : contentFor;
+      return messaging.send(fcmMessageFor(device, content)).catch(async (err) => {
         if (err?.code === 'messaging/registration-token-not-registered') {
           await setDeviceFcmToken(device.deviceId, userId, null).catch(() => {});
           return;
         }
         console.error(`[push] ${label} 알림 발송 실패:`, err?.message ?? err);
-      }),
-    ),
+      });
+    }),
   );
 }
 
@@ -198,7 +203,7 @@ export async function notifyOfflineMembers({
         ? `${roomTag}·공지`
         : roomTag
     : null;
-  await sendChatDataPush({ targets, room, sender, senderName, kind, conversationTitle, body: preview });
+  await sendChatDataPush({ targets, room, sender, senderName, kind, conversationTitle, body: preview, roomTag });
 }
 
 /**
@@ -209,7 +214,7 @@ export async function notifyOfflineMembers({
 export async function notifyRecordPush({ targets, room, sender, senderName, kind, conversationTag, body, roomTag }) {
   if (targets.length === 0) return;
   const conversationTitle = roomTag ? `${roomTag}·${conversationTag}` : conversationTag;
-  await sendChatDataPush({ targets, room, sender, senderName, kind, conversationTitle, body });
+  await sendChatDataPush({ targets, room, sender, senderName, kind, conversationTitle, body, roomTag });
 }
 
 /**
@@ -224,8 +229,12 @@ async function withoutDndUsers(userIds) {
   return inDnd.size === 0 ? userIds : userIds.filter((id) => !inDnd.has(id));
 }
 
-/** 채팅 푸시 본체 — notifyOfflineMembers(메시지·댓글·공지)와 notifyRecordPush(멘션 등)가 같은 모양으로 보낸다. */
-async function sendChatDataPush({ targets: requested, room, sender, senderName, kind, conversationTitle, body: preview }) {
+/**
+ * 채팅 푸시 본체 — notifyOfflineMembers(메시지·댓글·공지)와 notifyRecordPush(멘션 등)가 같은 모양으로 보낸다. 안드로이드 data에는 앱이 꺼져
+ * 있어도 홈 화면 위젯을 고칠 칸(widgetName·unreadDelta — client UnreadWidgetProvider.kt가 FCM을 직접 받아 숫자를 올린다)과, 새 메시지면
+ * 알림에서 바로 답장할 표(replyTicket — 기기마다, pushReplyRules.js)를 싣는다.
+ */
+async function sendChatDataPush({ targets: requested, room, sender, senderName, kind, conversationTitle, body: preview, roomTag = null }) {
   const targets = await withoutDndUsers(requested);
   if (targets.length === 0) return;
   const { messaging } = await getMessagingInstance();
@@ -266,6 +275,8 @@ async function sendChatDataPush({ targets: requested, room, sender, senderName, 
         ...(sender?.avatarEmoji ? { avatarEmoji: sender.avatarEmoji } : {}),
         ...(sender?.avatarColor ? { avatarColor: sender.avatarColor } : {}),
         ...(avatarUrl ? { avatarUrl } : {}),
+        widgetName: widgetNameOf(room, roomTag, senderName),
+        unreadDelta: String(unreadDeltaOf(kind)),
       },
       android: { priority: 'high' },
     },
@@ -273,11 +284,34 @@ async function sendChatDataPush({ targets: requested, room, sender, senderName, 
     ios: { title: webPayload.title, body: preview, threadId: room.id, data: { kind, roomId: room.id } },
   };
 
+  const canReply = replyAllowed(kind, room);
   await Promise.all(
     targets.map(async (userId) => {
       await sendWebPushToUser(userId, webPayload);
       if (!messaging) return;
-      await sendToDevices(messaging, userId, await pushableFcmTokens(userId), content, 'chat');
+      const devices = await pushableFcmTokens(userId);
+      if (!canReply || devices.length === 0) return sendToDevices(messaging, userId, devices, content, 'chat');
+      // 답장 표는 그 사람의 지금 토큰 버전에 묶는다(비밀번호를 바꾸면 이전 표는 못 쓴다 — accountState는 30초 캐시).
+      const { tokenVersion } = await accountState(userId);
+      await sendToDevices(
+        messaging,
+        userId,
+        devices,
+        (device) =>
+          device.kind === 'ios'
+            ? content
+            : {
+                ...content,
+                android: {
+                  ...content.android,
+                  data: {
+                    ...content.android.data,
+                    replyTicket: signReplyTicket(JWT_SECRET, { userId, roomId: room.id, deviceId: device.deviceId, tokenVersion }),
+                  },
+                },
+              },
+        'chat',
+      );
     }),
   );
 }

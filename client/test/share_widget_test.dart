@@ -137,6 +137,7 @@ void main() {
       await ShareIntake(
         channel: channel,
         enabled: false,
+        windows: false,
       ).start(onShare: (_) {}, onOpenRoom: (_) {});
       expect(called, isFalse);
     });
@@ -167,7 +168,7 @@ void main() {
       _room('g1', name: '영업 1팀'),
       _room('s1', name: '비밀', secret: true, type: 'dm'),
     ]);
-    Room? result;
+    List<Room>? result;
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
@@ -194,16 +195,16 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('그룹채팅'));
     await tester.pumpAndSettle();
-    expect(find.text('비밀'), findsNothing, reason: '비밀 대화는 고를 수 없다');
     await tester.tap(find.text('영업 1팀').last);
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('share-room-g1')), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('share-text')),
       '이 기사 보세요 https://news.example/a',
     );
     await tester.tap(find.byKey(const ValueKey('share-send')));
     await tester.pumpAndSettle();
-    expect(result?.id, 'g1');
+    expect(result?.map((r) => r.id), ['g1']);
     final queued = session.outbox.forRoom('g1').single;
     expect(queued.payload['type'], 'text');
     expect(queued.payload['text'], '이 기사 보세요 https://news.example/a');

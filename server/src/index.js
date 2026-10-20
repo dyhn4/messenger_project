@@ -98,6 +98,7 @@ import { createFileResignRouter } from './fileResign.js';
 import { createUsersRouter } from './users.js';
 import { guideStatic, versionRouter, watchForVersionChanges } from './version.js';
 import { firebaseConfigRouter } from './push.js';
+import { createPushReplyRouter } from './pushReply.js';
 import { webPushRouter } from './webPush.js';
 import { getWebPublicUrl } from './webAddress.js';
 import { isMailEnabled } from './mailer.js';
@@ -192,6 +193,8 @@ app.use('/api/v1', createPublicApiRouter(io));
 app.use(createOAuthPublicRouter());
 // 회의실 앞 태블릿 화면(roomDisplay.js) — 로그인 없이 자원마다의 비밀 주소로 연다.
 app.use(createRoomDisplayRouter(io));
+// 알림에서 바로 답장(pushReply.js) — 앱이 꺼져 있으면 로그인 토큰 대신 푸시에 실린 답장 표로 오므로 앱 토큰 묶음보다 먼저.
+app.use(createPushReplyRouter(io));
 app.use('/api', requireAuth, uploadRouter);
 app.use('/api', uploadErrorHandler);
 app.use('/api', requireAuth, createFileResignRouter());

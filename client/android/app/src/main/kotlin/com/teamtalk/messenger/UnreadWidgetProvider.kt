@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.view.View
 import android.widget.RemoteViews
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -35,6 +36,45 @@ class UnreadWidgetProvider : AppWidgetProvider() {
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(ComponentName(context, UnreadWidgetProvider::class.java))
             for (id in ids) manager.updateAppWidget(id, render(context))
+        }
+
+        /**
+         * 앱이 꺼져 있는 동안 온 푸시 하나만큼 숫자를 올린다(PushWidgetReceiver.kt) — 합계에 [delta]를 더하고, 앱 잠금 중이 아니면 그 방을 맨 위로
+         * 올려 수를 더한다(이름은 푸시의 것 — 비밀 대화는 "비밀 대화"). 앱이 한 번도 내용을 넘기지 않았거나 로그아웃했으면 그대로 둔다.
+         */
+        fun bump(context: Context, roomId: String, name: String, secret: Boolean, delta: Int) {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val state = try {
+                JSONObject(prefs.getString(KEY, null) ?: return)
+            } catch (_: Exception) {
+                return
+            }
+            if (state.optBoolean("loggedOut", false)) return
+            state.put("total", state.optInt("total", 0) + delta)
+            if (!state.optBoolean("locked", false)) {
+                val old = state.optJSONArray("rooms") ?: JSONArray()
+                var existing: JSONObject? = null
+                val rest = JSONArray()
+                for (i in 0 until old.length()) {
+                    val r = old.optJSONObject(i) ?: continue
+                    if (r.optString("id") == roomId) existing = r else rest.put(r)
+                }
+                val shownName = when {
+                    secret -> "비밀 대화"
+                    name.isNotEmpty() -> name
+                    else -> existing?.optString("name", "") ?: ""
+                }
+                val rooms = JSONArray()
+                rooms.put(
+                    JSONObject()
+                        .put("id", roomId)
+                        .put("name", shownName)
+                        .put("unread", (existing?.optInt("unread", 0) ?: 0) + delta),
+                )
+                for (i in 0 until minOf(rest.length(), ROW_IDS.size - 1)) rooms.put(rest.get(i))
+                state.put("rooms", rooms)
+            }
+            save(context, state.toString())
         }
 
         private fun openAppIntent(context: Context, requestCode: Int, roomId: String?): PendingIntent {

@@ -29,11 +29,10 @@ import {
   isRoomMember,
   listRoomMemberIds,
   listRoomsForUser,
-  setMemberLastRead,
   setMemberLastReadAnnouncementAt,
 } from './db/queries/rooms.js';
+import { markRoomRead } from './roomRead.js';
 import { listCoTeamMemberIds } from './db/queries/teams.js';
-import { markRoomNotificationsRead } from './notifications.js';
 import {
   findSecretSessionByRoomId,
   replaceSecretRekeyProposal,
@@ -152,16 +151,8 @@ export function registerSocket(io) {
     socket.on('room:read', async (payload) => {
       const room = await findRoomById(payload?.roomId);
       if (!room || !(await isRoomMember(room.id, socket.data.userId))) return;
-
-      const lastReadAt = Date.now();
-      await setMemberLastRead(room.id, socket.data.userId, lastReadAt);
-
-      io.to(room.id).emit('room:read', { roomId: room.id, userId: socket.data.userId, lastReadAt });
-
-      // 방을 보고 있으니 이 방의 멘션·보드 알림(그 시각 이전 것)도 읽은 걸로 — 다른 기기에는 notification:sync로 알린다.
-      await markRoomNotificationsRead(io, socket.data.userId, room.id, lastReadAt).catch((err) =>
-        console.error('[notifications] 자동 읽음 실패:', err?.message ?? err),
-      );
+      // 마지막 읽은 시각 + room:read 알림 + 이 방의 멘션·보드 알림 읽음(roomRead.js — 알림에서 바로 답장도 같은 함수).
+      await markRoomRead(io, room.id, socket.data.userId);
     });
 
     // payload: { roomId } — 공지 목록/상세를 실제로 열었다는 뜻(room:read와 별개 —

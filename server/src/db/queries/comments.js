@@ -2,6 +2,15 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, ne, or, sql } from 'd
 import { db } from '../client.js';
 import { messageComments } from '../schema.js';
 
+/** 같은 사람이 같은 임시 id로 단 댓글(보내기 대기열이 다시 보냄 — comments.js). 없으면 null. */
+export async function findCommentByClientId(senderId, clientId) {
+  const [row] = await db
+    .select()
+    .from(messageComments)
+    .where(and(eq(messageComments.senderId, senderId), eq(messageComments.clientId, clientId)));
+  return row ?? null;
+}
+
 export async function insertComment(fields) {
   const [row] = await db.insert(messageComments).values(fields).returning();
   return row;

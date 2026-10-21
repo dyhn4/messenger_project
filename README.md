@@ -245,15 +245,20 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   (동시에 두 번 와도 하나만 — unique 인덱스) **두 번 올라가지 않습니다**. 서버가 거절한 것(읽기 전용·길이·수정 가능 시간 등)은 빨간 테두리에
   이유와 **다시 보내기(다시 하기)·지우기**가 붙습니다. 대기열은 이 기기에 사람별로 저장돼 앱을 다시 켜도 남고, 방에서 나가면 그 방 것은 버립니다.
   - **올리지 못한 사진·파일** — 연결이 끊겨 첨부가 올라가지 못하면 버리지 않고 "대기 · 연결되면 올립니다"로 두었다가, 보내면 그 파일을 이 기기의
-    앱 폴더(`outbox_files/<임시 id>`)에 복사해 대기열에 넣습니다. 연결되면 하나씩 올려(올린 것은 바로 기록 — 중간에 끊겨도 다시 올리지 않음)
-    한 메시지로 보냅니다. 비밀 대화와 웹은 예전처럼 첨부할 때 올라가야 합니다(암호화한 파일·앱 폴더 없음).
+    앱 폴더(`outbox_files/<임시 id>/<번호>/<원래 이름>` — 원래 이름으로 올라간다), **웹은 브라우저의 IndexedDB**(`tangotalk_outbox_files` — 새로
+    고쳐도 남음)에 복사해 대기열에 넣습니다. 연결되면 하나씩 올려(올린 것은 바로 기록 — 중간에 끊겨도 다시 올리지 않음) 한 메시지로 보냅니다.
   - **오프라인 중 고치기·지우기·공감** — 내 메시지를 고치거나 지우면 화면(과 이 기기 메시지 DB)에 먼저 반영하고 대기열에 넣어 연결되면 서버에
-    보냅니다. 공감은 말풍선에 바로 보이고 같은 메시지에 다시 누르면 마지막 것만 갑니다(서버 API가 "이것으로 정하기"라 늦게 보내도 같음).
+    보냅니다. **사진·파일 메시지의 설명 고치기**(함께 지운 첨부 포함)도 같습니다 — 설명과 지운 첨부가 먼저 보이고, 연결되면 지울 첨부와 함께
+    반영됩니다. 공감은 말풍선에 바로 보이고 같은 메시지에 다시 누르면 마지막 것만 갑니다(서버 API가 "이것으로 정하기"라 늦게 보내도 같음).
     서버가 거절하면(작성 5분이 지남 등) 대기 말풍선에 이유가 남고, **지우기**를 누르면 그 방을 서버 것으로 되돌립니다. 서버에 닿지 않는 것이
     확인된 동안(끊김 띠가 떴거나 앱을 오프라인으로 켬)은 서버에 보내 보지 않고 바로 대기열로 들어갑니다.
-  - **비밀 대화의 대기열** — 비밀 대화의 글·이모티콘·글 고치기도 대기열을 씁니다. 평문을 이 기기에 남기지 않으려고 **메모리에만** 두고(앱을
-    끄면 사라짐 — 대기 말풍선에 "비밀 대화 — 앱을 끄면 사라집니다"), 보낼 때마다 그때의 암호화 상태로 암호화합니다(같은 임시 id라 서버에 두 번
-    들어가지 않음). 비밀 대화의 사진·파일은 대기열에 넣지 않습니다.
+  - **오프라인 중 댓글** — 글·이모티콘 댓글은 임시 id를 붙여 달고, 서버에 닿지 않으면 같은 임시 id로 대기열에 넣어 연결되면 답니다(서버가
+    같은 사람·같은 임시 id면 처음 댓글을 돌려줘 두 번 달리지 않음 — `message_comments.client_id`, 동시에 두 번 와도 하나만). 기다리는 댓글은
+    대화방 아래 대기 말풍선("댓글 · …")과 그 메시지의 댓글 화면 아래에 보입니다. 사진·파일 댓글은 예전처럼 올라가야 달 수 있습니다.
+  - **비밀 대화의 대기열** — 비밀 대화의 글·이모티콘·글 고치기·댓글·**사진·파일**도 대기열을 씁니다. 평문을 이 기기에 남기지 않으려고
+    **메모리에만** 두고(앱을 끄면 사라짐 — 대기 말풍선에 "비밀 대화 — 앱을 끄면 사라집니다"), 보낼 때마다 그때의 암호화 상태로 암호화합니다(같은
+    임시 id라 서버에 두 번 들어가지 않음). 못 올린 사진·파일은 평문 바이트를 메모리에 든 채 기다렸다가 연결되면 암호화해 올리고(썸네일도 그때
+    만듦) 한 장씩 봉투로 보냅니다. 봉투에는 원래 파일 이름·형식을 담습니다(예전엔 받는 사람에게 파일 이름이 "encrypted"로 보였다).
 
   서버와 연결이 3초 넘게 끊기면 대화 목록·대화방 위에 **"서버와 연결이 끊겼습니다"** 띠가 뜹니다. 받은 팀·방 목록은 이 기기에 파일로, **메시지는
   이 기기의 SQLite DB**(`client/lib/services/local_message_store.dart` — package:sqlite3)에 서버가 준 모양 그대로 쌓아 둡니다 — 방을 열 때 받은
@@ -262,10 +267,21 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   파일·투표 탭)도 DB에서 합니다 — 결과 줄에 "연결이 끊겨 이 기기에 저장된 메시지에서 찾았습니다"(세 글자 이상은 전문 검색 색인 FTS5 trigram이라
   한국어 낱말 중간도 찾고, 짧은 말은 LIKE). 다시 연결되면 서버 것으로 맞춥니다. **사진 미리보기**는 첨부 id로 만든 변하지 않는 열쇠로 전용 캐시
   (`chat_image_cache.dart` — 1500장·60일)에 오래 보관해 오프라인에서도 보입니다(사진 주소는 한 시간마다 바뀌는 서명 링크라 예전엔 금방 못 찾았다).
-  비밀 대화는 저장하지 않고, **로그아웃하면 그 사람의 저장분(DB·목록·사진 미리보기)을 지웁니다**(공용 PC). 웹 앱은 저장하지 않습니다(DB 없음).
-  앱은 `client/lib/services/message_outbox.dart`·`offline_cache.dart`·`local_message_store.dart`·`outbox_files.dart`·`widgets/outbox_strip.dart`, 서버는
-  `server/src/sendMessage.js`(규칙 `outboxRules.js`). 서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0120`)가 필요합니다. 앱 빌드는 새 패키지
-  `sqlite3`(3.6.0 — 빌드할 때 SQLite 라이브러리를 받아 함께 넣는다, 인터넷 필요)를 씁니다.
+  비밀 대화는 저장하지 않고, **로그아웃하면 그 사람의 저장분(DB·목록·사진 미리보기)을 지웁니다**(공용 PC). **웹 앱은 브라우저의 IndexedDB**
+  (`tangotalk_messages_<서버·사람>` — `message_db_web.dart`)에 같은 모양으로 쌓습니다(팀·방 목록도 거기 — 웹은 폴더가 없음, 찾기는 전문 검색
+  색인 없이 새것부터 훑음, IndexedDB를 쓸 수 없는 브라우저면 예전처럼 저장하지 않음, 로그아웃하면 DB째 지움). 다만 웹 앱 자체는 서버가
+  내려 주므로 서버가 꺼진 채로 새로 열 수는 없고, 쓰는 중에 끊겼을 때 보여 줍니다.
+  - **빠진 구간 메우기(기록 동기화)** — 예전엔 받아 본 페이지만 쌓여, 끊긴 동안·앱이 꺼져 있던 동안 온 메시지가 DB에 없어 오프라인으로 보면
+    중간이 비었습니다. 이제 끊길 때와 로그인할 때 방마다 "여기까지는 빠짐없이 있다"는 자리(그 방에 저장된 가장 최근 메시지 시각)를 적어 두고,
+    방 목록을 서버에서 받으면(로그인·다시 연결) **그 뒤로 활동이 있던 방만**(방 목록의 마지막 활동 시각) 최근 페이지부터 100통씩 거꾸로 받아
+    그 자리까지 채웁니다(뒤에서 한 방씩 — 끊기면 멈추고 다음 연결 때 이어서, 자리는 다 메울 때까지 남음). 5000통 넘게 빠졌으면 이어 붙일 수
+    없는 옛 저장분을 지워 중간이 빈 기록이 남지 않게 합니다. 옛 메시지의 수정·댓글처럼 빠진 구간 밖의 변화는 그 페이지를 다시 받을 때 맞춰집니다.
+
+  앱은 `client/lib/services/message_outbox.dart`·`offline_cache.dart`·`message_db.dart`(앱 `local_message_store.dart`·`message_db_io.dart`, 웹
+  `message_db_web.dart`·`idb_web.dart`)·`outbox_files.dart`·`widgets/outbox_strip.dart`, 서버는 `server/src/sendMessage.js`·`comments.js`(규칙
+  `outboxRules.js`). 서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0120`·`0140` — 댓글 임시 id)가 필요합니다. 앱 빌드는 새 패키지
+  `sqlite3`(3.6.0 — 빌드할 때 SQLite 라이브러리를 받아 함께 넣는다, 인터넷 필요)를 씁니다. 웹 IndexedDB 시험은 브라우저에서
+  `flutter test --platform chrome test/web/message_db_web_test.dart`.
 - **다른 앱에서 공유하기·홈 화면 위젯·알림에서 바로 답장** — 안드로이드는 갤러리·파일·브라우저 등의 **"공유 → TangoTalk"**으로 글(링크)·
   파일(여러 개, 20개까지)을, **Windows는 탐색기에서 파일을 오른쪽 클릭 → "보내기" → TangoTalk**(설치 프로그램이 SendTo 폴더에 `--share`를 붙인
   바로가기를 만듦 — 설치 화면의 "탐색기 "보내기" 메뉴에 TangoTalk 넣기", 기본 켬, 제거하면 함께 지워짐)으로 파일(20개까지 — 폴더·없는 파일은
@@ -1864,9 +1880,10 @@ DKIM 서명), `mailFormatHtml.js`(서식 있는 메일 쓰기), 앱은 `client/l
   한꺼번에 보내기, 비밀 대화로 공유, 앱이 꺼져 있는 동안 푸시로 위젯 숫자 올리기, 알림에서 바로 답장(안드로이드)은 들어갔습니다(위 "다른 앱에서
   공유하기·홈 화면 위젯·알림에서 바로 답장"). 남은 것: 아이폰 공유 확장·위젯·알림 답장(Apple 개발자 등록 뒤 — App Group·확장 대상이 필요),
   다른 기기에서 읽은 것을 꺼진 앱의 위젯에 바로 반영하기(지금은 앱을 열 때 맞춰짐), Windows 알림에서 바로 답장.
-- **오프라인 후속(남은 것)** — 이 기기 메시지 DB(전체 기록·찾기)·올리지 못한 첨부의 대기열·오프라인 중 고치기·지우기·공감·사진 미리보기 보관·
-  비밀 대화의 대기열은 들어갔습니다(위 "보내기 대기열·오프라인 보기"). 남은 것: 오프라인 중 댓글 쓰기·사진/파일 메시지의 설명 고치기, 비밀 대화의
-  사진·파일 대기열, 웹 앱의 오프라인 저장(IndexedDB), 서버에서 빠진 구간을 메우는 기록 동기화(지금은 받아 본 페이지만 쌓인다).
+- **오프라인 후속(남은 것)** — 이 기기 메시지 DB(전체 기록·찾기)·올리지 못한 첨부의 대기열·오프라인 중 고치기(사진·파일 메시지의 설명 포함)·
+  지우기·공감·댓글·사진 미리보기 보관·비밀 대화의 대기열(사진·파일 포함)·웹 앱의 오프라인 저장(IndexedDB)·빠진 구간을 메우는 기록 동기화는
+  들어갔습니다(위 "보내기 대기열·오프라인 보기"). 남은 것: 오프라인 중 사진·파일 댓글(지금은 올라가야 달 수 있음), 서버가 꺼져 있어도 웹 앱을
+  여는 것(서비스 워커로 앱 파일 보관), 옛 메시지의 수정·댓글처럼 빠진 구간 밖에서 바뀐 것까지 맞추는 동기화(서버에 "이후 바뀐 것" API가 필요).
 - **자동 자리 비움** — 접속 상태가 접속/미접속뿐이라 한동안 손대지 않으면 "자리 비움"으로 바뀌는 것이 없습니다.
 - **통화 녹화·회의록 후속(남은 것)** — Egress 녹화·받아쓰기·요약 회의록·화이트보드 저장은 들어갔습니다(위 "화상회의 녹화·회의록").
   남은 것: Egress·Redis를 설치 프로그램이 함께 띄우기(지금은 관리자가 Docker로 — Windows 바이너리가 없음), 받아쓰기에서 말한 사람 나누기(지금은 섞인
@@ -2809,7 +2826,7 @@ Xcode로 직접 빌드할 때는 Signing & Capabilities에서 팀을 고르면 �
 | POST | `/api/reminders` | 직접 만든 리마인더 걸기 `{ text, remindAt, teamId }` — 글은 앞뒤 공백을 떼고 1~200자(줄바꿈 외 제어 문자는 400), 시각 규칙은 메시지 리마인더와 같다. [teamId] 팀의 멤버만(403), 울리기 전의 내 리마인더가 (메시지 리마인더와 합해) 100개면 400. 응답 `{ id, messageId: null, roomId: null, teamId, text, remindAt, createdAt }`(201), 내 기기들에 소켓 `reminder:changed` |
 | GET | `/api/reminders` | 울리기 전의 내 리마인더 — 울릴 시각 순 `[{ id, messageId, roomId, teamId, text, remindAt, createdAt, senderName, preview }]`. 메시지 리마인더는 `teamId·text`가 null(원본이 지워진 것은 빠지고, 비밀 대화는 `preview: null`), 직접 만든 리마인더는 `messageId·roomId`가 null |
 | DELETE | `/api/reminders/:id` | 리마인더 취소(내 것만, 아니면 404). 내 기기들에 `reminder:changed` |
-| POST | `/api/messages/:messageId/comments` | 댓글 작성 — 20,000자, 첨부는 메시지와 같은 규칙(직접 올린 파일이나 지금 볼 수 있는 방의 파일 — `fileRefs.js`), 한 사람이 10초에 20개·10분에 300개(첨부를 단 댓글은 10분 창만, 넘으면 429) |
+| POST | `/api/messages/:messageId/comments` | 댓글 작성 — 20,000자, 첨부는 메시지와 같은 규칙(직접 올린 파일이나 지금 볼 수 있는 방의 파일 — `fileRefs.js`), 한 사람이 10초에 20개·10분에 300개(첨부를 단 댓글은 10분 창만, 넘으면 429). `clientId`(보내기 대기열의 임시 id — 글자·숫자·_- 8~64자)를 주면 같은 사람이 같은 id로 이미 단 댓글을 200으로 돌려준다(다시 방송하지 않음, 다른 메시지에 단 것이면 400) |
 | POST | `/api/rooms/:roomId/polls` | **투표 만들기** — `{ title, description?, options[2~20], anonymous?, multiple?, closesAt(epoch ms, 최대 90일 뒤), attachments? }`. 방에 `type:'poll'` 메시지(`poll` 필드 포함)로 올라간다. 비밀 대화는 400, 첨부는 보드 뷰 토픽만. 소켓 `message:send`로는 못 만든다 |
 | PUT | `/api/polls/:pollId/vote` | 투표하기·다시 투표하기·취소(`{ optionIds }`, 빈 배열이면 취소). 응답은 `poll`. 방에는 표 수만 담은 소켓 `poll:updated`(`actorId`·`actorOptionIds`는 `null`), 투표한 사람의 기기들(`user:<id>`)에는 같은 이벤트에 `actorId`(나)·`actorOptionIds`(내 선택, 취소면 빈 배열)를 실어 보냄 — 아래 소켓 이벤트 표 |
 | POST | `/api/polls/:pollId/close` | 일찍 마감(만든 사람 또는 방 관리자). 방에 `poll:updated` + 시스템 메시지 |
@@ -3326,7 +3343,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `bookmarks` | 자주 쓰는 링크 모음. `kind`(`team`\|`personal`, 만든 뒤 변경 불가), 개인 북마크의 주인 `owner_id`(팀 북마크는 null), `creator_id`, `title`/`url`/`image_url`(미서명 `/uploads/` 경로 또는 외부 URL), `position`(드래그 순서 — `(team_id, kind, position)` 인덱스) |
 | `albums` / `album_items` | 대화방 안의 앨범(이미지·GIF·영상 모음, 대화방 파일과 독립). `albums`는 `team_id`/`room_id`(cascade)·제목·설명·`cover_item_id`(대표 항목, FK 없음), `album_items`는 `kind`(`image`\|`video`)·파일 정보·`width`/`height`/`duration_ms`·`uploader_id`(탈퇴 시 null)이고 앨범을 지우면 cascade |
 | `announcements` / `announcement_comments` | 토픽 공지와 공지 댓글. 공지는 여러 개(기록)지만 `pinned`는 토픽마다 최대 1개, `text_format`(글자 서식 구간 — 제목·글자색 포함), `auto_unpin_at`(자동 내리기), 작성자만 수정/삭제. **메시지로 등록한 공지**는 `source_message_id`(원본 메시지, 원본이 지워지면 null)와 사진 스냅샷 `image_url`/`image_thumbnail_url`/`image_name`(미서명 `/uploads/` 경로)을 가집니다 |
-| `message_comments` | 메시지별 댓글. `messages`와 거의 동일한 구조(첨부/소프트삭제/5분 수정 윈도우). `(sender_id, created_at desc)` 인덱스는 "내가 쓴 글 모아보기"용(`messages`에도 같은 모양의 `messages_sender_created_idx`) |
+| `message_comments` | 메시지별 댓글. `messages`와 거의 동일한 구조(첨부/소프트삭제/5분 수정 윈도우). `(sender_id, created_at desc)` 인덱스는 "내가 쓴 글 모아보기"용(`messages`에도 같은 모양의 `messages_sender_created_idx`). `client_id`는 보내기 대기열의 임시 id(`(sender_id, client_id)` 유일 — `messages.client_id`와 같다) |
 | `notifications` | 알림 기록(받는 사람마다 한 줄 — 멘션·보드 알림). `kind`(`mention`\|`mention_all`\|`board_post`\|`board_edit`\|`board_comment`), `team_id`, `room_id`/`message_id`/`comment_id`(cascade), `actor_id`/`actor_name`, `preview`(본문 앞 120자·게시글은 제목), `room_name`(알림 당시 이름), `read_at`. 90일 지난 것은 `retention.js`가 정리. 멘션 구간은 `messages`·`message_comments`·`scheduled_messages`의 `mentions`(jsonb)에 저장 |
 | `notification_settings` | 사람별 알림 설정(`user_id` PK). `mention_all`(@all 푸시, 기본 true), `board_level`(`all`\|`important`\|`new`, 기본 `important`), `email_digest`(멘션 요약 메일, 기본 true) — 행이 없으면 기본값 |
 | `projects` | 프로젝트(업무 관리 공간). 팀에 속하고, `identifier`(업무 번호 앞에 붙는 식별자 — 팀 안에서 unique), `next_task_seq`(다음 업무 번호 — 업무를 지워도 번호를 재사용하지 않도록 프로젝트가 직접 들고 있음), `color`(대표 색 `#RRGGBB`), `is_public`(공개 프로젝트 여부), `archived_at` — [프로젝트(업무 관리)](#프로젝트업무-관리) 참고 |

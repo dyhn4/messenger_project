@@ -12,28 +12,32 @@ import '../l10n/tr.dart';
 /// 대기 중인 메시지 하나의 상태 — 보내는 중 · 연결을 기다림(끊겨서 붙으면 다시 보냄) · 실패(서버가 거절 — 다시 보내기·지우기).
 enum OutboxState { sending, waiting, failed }
 
-/// 대기열에 든 일의 종류 — 새 메시지, 내 메시지 고치기·지우기, 공감.
+/// 대기열에 든 일의 종류 — 새 메시지, 내 메시지 고치기(글·사진/파일 메시지의 설명)·지우기, 공감, 댓글.
 abstract final class OutboxKind {
   static const message = 'message';
   static const edit = 'edit';
   static const delete = 'delete';
   static const reaction = 'reaction';
+  static const comment = 'comment';
 }
 
-/// 아직 서버에 올리지 못한 첨부 하나 — 이 기기에 복사해 둔 파일([path] — Session이 앱 폴더의 outbox_files에 둔다).
-/// 연결되면 올리고 메시지에 붙인다.
+/// 아직 서버에 올리지 못한 첨부 하나 — 이 기기에 복사해 둔 파일([path] — Session이 앱 폴더의 outbox_files에, 웹은 IndexedDB에
+/// 둔다 — outbox_files.dart). 비밀 대화는 평문 파일을 디스크에 남기지 않으려고 바이트를 메모리에만 든다([bytes] — 저장하지
+/// 않는다, 앱을 끄면 사라짐). 연결되면 올리고 메시지에 붙인다.
 class OutboxFile {
   final String path;
   final String name;
   final int size;
   final String? mimeType;
   final bool isImage;
+  final Uint8List? bytes;
   const OutboxFile({
     required this.path,
     required this.name,
     required this.size,
     this.mimeType,
     required this.isImage,
+    this.bytes,
   });
 
   Map<String, dynamic> toJson() => {
@@ -92,7 +96,10 @@ class OutboxItem {
 
   bool get isMessage => kind == OutboxKind.message;
 
-  /// 고치기·지우기·공감의 대상 메시지.
+  /// 새로 쓰는 것(메시지·댓글 — "보냅니다")인지, 이미 있는 것에 반영하는 것(고치기·지우기·공감 — "반영합니다")인지.
+  bool get isNew => isMessage || kind == OutboxKind.comment;
+
+  /// 고치기·지우기·공감의 대상 메시지, 댓글이면 댓글을 달 메시지.
   String? get targetId => payload['messageId'] as String?;
 
   Map<String, dynamic> toJson() => {
@@ -158,11 +165,15 @@ String outboxPreviewOf(
       final n = attachments is List || files.isNotEmpty
           ? uploaded + files.length
           : 1;
+      // 비밀 대화의 올린 첨부는 원래 이름이 `secretAttachment`에 있다(서버 칸은 'encrypted').
+      final secret = payload['secretAttachment'];
       final name = attachments is List && attachments.isNotEmpty
           ? (attachments.first as Map)['fileName'] as String? ?? tr('파일')
           : files.isNotEmpty
           ? files.first.name
-          : payload['fileName'] as String? ?? tr('파일');
+          : (secret is Map ? secret['fileName'] as String? : null) ??
+                payload['fileName'] as String? ??
+                tr('파일');
       final label = n > 1
           ? tr('{name} 외 {p0}개', {'name': name, 'p0': n - 1})
           : name;
@@ -231,11 +242,17 @@ class MessageOutbox extends ChangeNotifier {
   OutboxItem? pendingActionFor(String messageId) => _items
       .where(
         (i) =>
-            !i.isMessage &&
+            !i.isNew &&
             i.kind != OutboxKind.reaction &&
             i.targetId == messageId,
       )
       .lastOrNull;
+
+  /// 이 메시지에 달려고 기다리는 댓글(쓴 순서대로 — 댓글 화면 아래 대기 말풍선).
+  List<OutboxItem> commentsFor(String messageId) => [
+    for (final i in _items)
+      if (i.kind == OutboxKind.comment && i.targetId == messageId) i,
+  ];
 
   /// 로그인 직후 — 이 기기에 남아 있던 일을 불러온다(보내기는 연결되면 [drain]).
   Future<void> load(SharedPreferences prefs, String userId) async {
@@ -281,14 +298,16 @@ class MessageOutbox extends ChangeNotifier {
     return _add(item);
   }
 
-  /// 내 메시지 고치기·지우기·공감을 넣는다([kind] — [OutboxKind]). [payload]에는 `messageId`와 바꿀 값. 공감은 같은 메시지에 기다리던
-  /// 공감을 바꿔 끼운다. [secret]이면 비밀 대화의 고치기(평문 — 저장하지 않음).
+  /// 내 메시지 고치기·지우기·공감, 댓글을 넣는다([kind] — [OutboxKind]). [payload]에는 `messageId`(댓글이면 달 메시지)와 바꿀 값.
+  /// 공감은 같은 메시지에 기다리던 공감을 바꿔 끼운다. [secret]이면 비밀 대화의 고치기·댓글(평문 — 저장하지 않음). [clientId]를
+  /// 주면 그 임시 id로(댓글 — 처음 보낼 때 붙인 id라 서버가 같은 댓글을 두 번 만들지 않는다).
   OutboxItem submitAction({
     required String roomId,
     required String kind,
     required Map<String, dynamic> payload,
     required String preview,
     bool secret = false,
+    String? clientId,
   }) {
     if (kind == OutboxKind.reaction) {
       _items.removeWhere(
@@ -299,7 +318,7 @@ class MessageOutbox extends ChangeNotifier {
       );
     }
     final item = OutboxItem(
-      clientId: newClientId(),
+      clientId: clientId ?? newClientId(),
       roomId: roomId,
       kind: kind,
       payload: payload,

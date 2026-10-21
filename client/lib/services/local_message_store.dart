@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:sqlite3/sqlite3.dart';
 
+import 'message_db.dart';
+
 /// 이 기기의 메시지 DB(SQLite — package:sqlite3) — 서버에서 받은 메시지를 서버가 준 모양(JSON) 그대로 방마다 쌓아 둔다. 오프라인일 때
 /// 방의 최근 메시지([latest])와 그보다 오래된 기록([older]), 찾기([search])를 여기서 한다(offline_cache.dart가 부른다).
 ///
@@ -11,12 +13,12 @@ import 'package:sqlite3/sqlite3.dart';
 /// - `messages_fts`: 찾기용 글의 전문 검색 색인(FTS5 trigram — 한국어도 낱말 중간 글자로 찾는다). 세 글자보다 짧은 말은 LIKE로 찾는다.
 /// - 방마다 최근 [perRoomMax]통까지만 남긴다(오래된 것부터 지움).
 ///
-/// 비밀 대화는 넣지 않는다(부르는 쪽이 거른다). 웹은 쓰지 않는다(파일이 없다).
+/// 비밀 대화는 넣지 않는다(부르는 쪽이 거른다). 웹은 쓰지 않는다(IndexedDB — message_db_web.dart).
 class LocalMessageStore {
   LocalMessageStore._(this._db, this.path);
 
   /// 방마다 남기는 메시지 수.
-  static const perRoomMax = 5000;
+  static const perRoomMax = messageDbPerRoomMax;
 
   final Database _db;
   final String path;
@@ -51,35 +53,9 @@ class LocalMessageStore {
     }
   }
 
-  /// 메시지 JSON에서 찾기용 글 — 본문·게시글 제목·첨부 파일 이름.
-  static String searchTextOf(Map<String, dynamic> raw) {
-    final parts = <String>[];
-    void add(Object? v) {
-      if (v is String && v.trim().isNotEmpty) parts.add(v.trim());
-    }
-
-    add(raw['title']);
-    if (raw['type'] != 'sticker') add(raw['text']);
-    add(raw['fileName']);
-    final attachments = raw['attachments'];
-    if (attachments is List) {
-      for (final a in attachments) {
-        if (a is Map) add(a['fileName']);
-      }
-    }
-    return parts.join('\n');
-  }
-
-  static int _createdAtOf(Map<String, dynamic> raw) {
-    final v = raw['createdAt'];
-    if (v is num) return v.toInt();
-    if (v is String) {
-      return DateTime.tryParse(v)?.millisecondsSinceEpoch ??
-          int.tryParse(v) ??
-          0;
-    }
-    return 0;
-  }
+  /// 메시지 JSON에서 찾기용 글 — 본문·게시글 제목·첨부 파일 이름(message_db.dart — 웹 DB와 같다).
+  static String searchTextOf(Map<String, dynamic> raw) =>
+      messageSearchTextOf(raw);
 
   /// 메시지들을 넣거나 바꾼다(같은 id면 바꿈). 창 밖 부모처럼 방 id가 다른 것은 그 방으로. 넣은 수.
   int upsertAll(String roomId, Iterable<Map<String, dynamic>> raws) {
@@ -106,7 +82,7 @@ class LocalMessageStore {
         upsert.execute([
           id,
           room,
-          _createdAtOf(raw),
+          messageCreatedAtOf(raw),
           body,
           jsonEncode(raw),
           deleted ? 1 : 0,
@@ -234,6 +210,34 @@ class LocalMessageStore {
     if (_closed) return;
     _db.execute('DELETE FROM messages WHERE room_id = ?', [roomId]);
     _db.execute('DELETE FROM messages_fts WHERE room_id = ?', [roomId]);
+  }
+
+  /// 그 방에서 [before]보다 먼저 쓴 메시지를 지운다(이어지지 않는 옛 저장분 — offline_cache.dart fillGap).
+  void forgetBefore(String roomId, DateTime before) {
+    if (_closed) return;
+    final ms = before.millisecondsSinceEpoch;
+    _db.execute(
+      'DELETE FROM messages_fts WHERE id IN (SELECT id FROM messages WHERE room_id = ? AND created_at < ?)',
+      [roomId, ms],
+    );
+    _db.execute('DELETE FROM messages WHERE room_id = ? AND created_at < ?', [
+      roomId,
+      ms,
+    ]);
+  }
+
+  /// 방마다 저장된 가장 최근 메시지의 작성 시각 — 빠진 구간을 메울 자리(offline_cache.dart markSyncPoints).
+  Map<String, DateTime> newestByRoom() {
+    if (_closed) return const {};
+    final rows = _db.select(
+      'SELECT room_id, MAX(created_at) AS t FROM messages GROUP BY room_id',
+    );
+    return {
+      for (final r in rows)
+        r['room_id'] as String: DateTime.fromMillisecondsSinceEpoch(
+          r['t'] as int,
+        ),
+    };
   }
 
   /// 저장된 메시지 수(시험·설정 화면).

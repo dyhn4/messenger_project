@@ -2748,20 +2748,33 @@ class ApiClient {
     int limit = 50,
     DateTime? before,
   }) async {
+    final list = await fetchRoomMessagesRaw(
+      roomId,
+      limit: limit,
+      before: before,
+    );
+    // 최근 페이지든 더 오래된 페이지든 이 기기 메시지 DB에 쌓는다(오프라인으로 위로 넘겨 보기·찾기 — offline_cache.dart).
+    onCacheable?.call(
+      before == null ? 'messages:$roomId' : 'older:$roomId',
+      list,
+    );
+    return list.map(Message.fromJson).toList();
+  }
+
+  /// [fetchRoomMessages]와 같은 페이지를 서버가 준 JSON 그대로 — 오프라인 보기에 저장하지 않는다(부르는 쪽이 넣는다 — 이 기기 메시지
+  /// DB의 빠진 구간 메우기, offline_cache.dart fillGap).
+  Future<List<Map<String, dynamic>>> fetchRoomMessagesRaw(
+    String roomId, {
+    int limit = 50,
+    DateTime? before,
+  }) async {
     final beforeParam = before != null
         ? '&before=${before.millisecondsSinceEpoch}'
         : '';
     final list =
         await _get('/api/rooms/$roomId/messages?limit=$limit$beforeParam')
             as List;
-    // 최근 페이지든 더 오래된 페이지든 이 기기 메시지 DB에 쌓는다(오프라인으로 위로 넘겨 보기·찾기 — offline_cache.dart).
-    onCacheable?.call(
-      before == null ? 'messages:$roomId' : 'older:$roomId',
-      list,
-    );
-    return list
-        .map((e) => Message.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return [for (final e in list) Map<String, dynamic>.from(e as Map)];
   }
 
   /// 내 임시 저장(입력칸에 쓰다 만 글 — 서버 drafts.js) — `[{ roomId, text(지웠으면 null), format, mentions, updatedAt }]`.
@@ -4870,6 +4883,16 @@ class ApiClient {
           as Map<String, dynamic>,
     );
   }
+
+  /// [addComment]와 같지만 본문을 그대로 — 글·이모티콘 댓글(`type`·`text`·`textFormat`·`mentions` JSON)과 보내기 대기열의 임시 id
+  /// (`clientId` — 같은 id로 다시 보내도 서버가 새로 만들지 않는다).
+  Future<Comment> addCommentBody(
+    String messageId,
+    Map<String, dynamic> body,
+  ) async => Comment.fromJson(
+    await _post('/api/messages/$messageId/comments', body)
+        as Map<String, dynamic>,
+  );
 
   Future<Comment> editComment(
     String commentId,

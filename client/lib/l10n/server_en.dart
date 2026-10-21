@@ -583,6 +583,7 @@ const Map<String, String> serverEn = {
   '댓글은 1000자 이내로 작성하세요.': 'Comments must be 1000 characters or fewer.',
   '댓글은 1~500자로 입력하세요.': 'Comments must be 1–500 characters.',
   '댓글은 2000자 이내로 작성하세요.': 'Comments must be 2000 characters or fewer.',
+  '댓글을 달지 못했습니다. 다시 시도하세요.': 'Couldn\'t post the comment. Please try again.',
   '댓글을 쓰세요.': 'Write a comment.',
   '댓글을 지울 권한이 없습니다.': 'You don\'t have permission to delete this comment.',
   '댓글을 찾을 수 없습니다.': 'Comment not found.',

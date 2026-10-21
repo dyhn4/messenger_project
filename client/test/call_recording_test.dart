@@ -286,6 +286,14 @@ void main() {
       final post = items.last;
       expect(post.payload['type'], 'post');
       expect(post.payload['title'], '화상회의 화이트보드(통화가 끝나 저절로 저장)');
+      // 대기열이 뒤에서 올려 보는 것(연결 안 됨으로 끝난다)이 끝날 때까지 — 그 사이엔 파일을 쥐고 있어 Windows에서 폴더를 못 지운다.
+      for (
+        var i = 0;
+        i < 200 && items.any((it) => it.state == OutboxState.sending);
+        i++
+      ) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
     });
 
     testWidgets('도구 줄의 [저장] — 판이 비면 못 누르고, 누르면 부른다', (tester) async {

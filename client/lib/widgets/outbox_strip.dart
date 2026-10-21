@@ -7,22 +7,35 @@ import '../l10n/tr.dart';
 /// 대화방 아래(입력칸 바로 위)의 보내기 대기열 — 아직 서버에 닿지 않은 내 메시지(올리지 못한 첨부 포함)와 고치기·지우기를 오른쪽
 /// 말풍선으로 보여 준다. 보내는 중·연결을 기다림(붙으면 보냄)·실패(서버가 거절 — 이유와 다시 보내기·지우기). 서버에 닿으면 대화 목록에
 /// 진짜 메시지로 나타나고 여기서 사라진다. 공감은 말풍선에 이미 보이므로 실패했을 때만 여기 나온다. 비밀 대화의 것은 "앱을 끄면
-/// 사라집니다"를 붙인다(평문이라 이 기기에 저장하지 않는다).
+/// 사라집니다"를 붙인다(평문이라 이 기기에 저장하지 않는다). 오프라인 중 단 댓글도 여기(대화방 — "댓글 · …")와 그 메시지의 댓글
+/// 화면([commentsOf] — 그 메시지에 달 댓글만)에 보인다.
 class OutboxStrip extends StatelessWidget {
   final Session session;
   final String roomId;
-  const OutboxStrip({super.key, required this.session, required this.roomId});
+
+  /// 주면 이 메시지에 달려고 기다리는 댓글만(댓글 화면 — message_thread_screen.dart).
+  final String? commentsOf;
+  const OutboxStrip({
+    super.key,
+    required this.session,
+    required this.roomId,
+    this.commentsOf,
+  });
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: session.outbox,
       builder: (context, _) {
-        final items = [
-          for (final i in session.outbox.forRoom(roomId))
-            if (i.kind != OutboxKind.reaction || i.state == OutboxState.failed)
-              i,
-        ];
+        final parent = commentsOf;
+        final items = parent != null
+            ? session.outbox.commentsFor(parent)
+            : [
+                for (final i in session.outbox.forRoom(roomId))
+                  if (i.kind != OutboxKind.reaction ||
+                      i.state == OutboxState.failed)
+                    i,
+              ];
         if (items.isEmpty) return const SizedBox.shrink();
         return ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 220),
@@ -62,7 +75,7 @@ class _OutboxBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final failed = item.state == OutboxState.failed;
-    final action = !item.isMessage;
+    final action = !item.isNew;
     final base = switch (item.state) {
       OutboxState.sending =>
         action

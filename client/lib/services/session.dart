@@ -54,6 +54,7 @@ import 'device_identity.dart';
 import 'draft_sync.dart';
 import 'chat_image_cache.dart';
 import 'connection_errors.dart';
+import 'image_thumbnail.dart' show generateThumbnail;
 import 'message_outbox.dart';
 import 'outbox_files.dart';
 import 'offline_cache.dart';
@@ -350,8 +351,8 @@ class Session extends ChangeNotifier {
   );
   StreamSubscription? _draftChangedSub;
 
-  /// 보내기 대기열(message_outbox.dart) — 글·이모티콘·첨부 메시지(아직 올리지 못한 첨부 포함), 비밀 대화의 글(메모리에만),
-  /// 오프라인 중 고치기·지우기·공감. 연결되면 기다리던 것을 한다([_deliverOutbox]).
+  /// 보내기 대기열(message_outbox.dart) — 글·이모티콘·첨부 메시지(아직 올리지 못한 첨부 포함), 비밀 대화의 글·사진·파일(메모리에만),
+  /// 오프라인 중 고치기(사진·파일 메시지의 설명 포함)·지우기·공감·댓글. 연결되면 기다리던 것을 한다([_deliverOutbox]).
   late final outbox = MessageOutbox(
     send: (payload) => chatSocket.sendPayload(payload, requireConnection: true),
     deliver: _deliverOutbox,
@@ -359,8 +360,9 @@ class Session extends ChangeNotifier {
     onDiscarded: _outboxDiscarded,
   );
 
-  /// 대기열의 일 중 바로 보낼 수 없는 것 — 아직 올리지 못한 첨부를 올리고, 비밀 대화의 글을 암호화해 보내고, 고치기·지우기·공감을
-  /// 서버에 반영한다. 연결 문제면 [MessageSendException](transient) 또는 연결 오류가 그대로 나가 대기열이 기다린다.
+  /// 대기열의 일 중 바로 보낼 수 없는 것 — 아직 올리지 못한 첨부를 올리고(비밀 대화면 암호화해서), 비밀 대화의 글·첨부를 암호화해
+  /// 보내고, 고치기·지우기·공감·댓글을 서버에 반영한다. 연결 문제면 [MessageSendException](transient) 또는 연결 오류가 그대로 나가
+  /// 대기열이 기다린다.
   Future<void> _deliverOutbox(OutboxItem item) async {
     final client = api;
     if (client == null) {
@@ -369,18 +371,24 @@ class Session extends ChangeNotifier {
     final room = _findRoom(item.roomId);
     switch (item.kind) {
       case OutboxKind.message:
-        if (item.files.isNotEmpty) await _uploadOutboxFiles(client, item);
-        var payload = sendableOutboxPayload(item.payload);
-        if (item.secret) {
-          if (room == null) {
-            throw const MessageSendException('대화방을 찾을 수 없습니다.');
-          }
-          payload = {
-            ...payload,
-            'text': await encryptOutgoing(room, payload['text'] as String?),
-          };
+        if (item.secret && room == null) {
+          throw const MessageSendException('대화방을 찾을 수 없습니다.');
         }
+        if (item.files.isNotEmpty) {
+          if (item.secret) {
+            await _uploadSecretOutboxFile(client, item);
+          } else {
+            await _uploadOutboxFiles(client, item);
+          }
+        }
+        var payload = sendableOutboxPayload(item.payload);
+        if (item.secret) payload = await _secretOutboxPayload(room!, payload);
         await chatSocket.sendPayload(payload, requireConnection: true);
+      case OutboxKind.comment:
+        if (item.secret && room == null) {
+          throw const MessageSendException('대화방을 찾을 수 없습니다.');
+        }
+        await sendCommentPayload(room, item.payload);
       case OutboxKind.edit:
         final id = item.targetId!;
         var text = item.payload['text'] as String? ?? '';
@@ -400,6 +408,8 @@ class Session extends ChangeNotifier {
           'text': text,
           'textFormat': ?item.payload['textFormat'],
           'mentions': ?item.payload['mentions'],
+          // 사진·파일 메시지의 설명 고치기에서 함께 지운 첨부.
+          'removeAttachmentIds': ?item.payload['removeAttachmentIds'],
         });
       case OutboxKind.delete:
         try {
@@ -421,16 +431,14 @@ class Session extends ChangeNotifier {
   Future<void> _uploadOutboxFiles(ApiClient client, OutboxItem item) async {
     while (item.files.isNotEmpty) {
       final f = item.files.first;
-      if (!await outboxFileExists(f.path)) {
+      // 앱 폴더(웹은 IndexedDB)에 담아 둔 파일 — 없어졌으면(지웠거나 저장소를 비움) 서버가 거절한 것처럼 실패로.
+      final file = await openOutboxFile(f);
+      if (file == null) {
         throw MessageSendException(
           tr('올릴 파일을 찾을 수 없습니다: {name}', {'name': f.name}),
         );
       }
-      final uploaded = await uploadPlainFile(
-        client,
-        XFile(f.path, name: f.name, mimeType: f.mimeType),
-        isImage: f.isImage,
-      );
+      final uploaded = await uploadPlainFile(client, file, isImage: f.isImage);
       final attachments = [
         ...(item.payload['attachments'] as List? ?? const []),
         uploaded.toPayload(),
@@ -441,6 +449,96 @@ class Session extends ChangeNotifier {
       await deleteOutboxFile(f.path);
     }
     await deleteOutboxFiles(item.clientId);
+  }
+
+  /// 비밀 대화의 못 올린 첨부(메모리에 든 평문 바이트 — 한 일에 하나)를 암호화해 올려 [item]의 `secretAttachment`로 옮긴다(보낼 때
+  /// 봉투로 암호화한다 — [_secretOutboxPayload]). 썸네일은 그때 다시 만든다(입력칸과 같은 축소판).
+  Future<void> _uploadSecretOutboxFile(
+    ApiClient client,
+    OutboxItem item,
+  ) async {
+    final f = item.files.first;
+    final bytes = f.bytes;
+    if (bytes == null) {
+      throw MessageSendException(
+        tr('올릴 파일을 찾을 수 없습니다: {name}', {'name': f.name}),
+      );
+    }
+    final uploaded = await uploadSecretBytes(
+      client,
+      bytes,
+      isImage: f.isImage,
+      name: f.name,
+      mimeType: f.mimeType,
+      thumbBytes: f.isImage ? await generateThumbnail(bytes) : null,
+    );
+    item.payload['secretAttachment'] = secretAttachmentPayload(uploaded);
+    item.files = const [];
+    outbox.updated(item);
+  }
+
+  /// 비밀 대화의 대기열 본문을 보낼 모양으로 — 글은 그때의 암호화 상태로 암호화하고, 첨부(`secretAttachment`)면 설명·원래 파일
+  /// 정보·복호화 키를 봉투 하나로 암호화해 싣는다(서버 칸에는 'encrypted'·application/octet-stream — sendUploadedAttachment와 같다).
+  Future<Map<String, dynamic>> _secretOutboxPayload(
+    Room room,
+    Map<String, dynamic> payload,
+  ) async {
+    final a = payload['secretAttachment'];
+    if (a is! Map) {
+      return {
+        ...payload,
+        'text': await encryptOutgoing(room, payload['text'] as String?),
+      };
+    }
+    final envelope = await encryptAttachmentPayload(
+      room,
+      caption: payload['text'] as String?,
+      fileName: a['fileName'] as String? ?? '',
+      fileSize: (a['fileSize'] as num?)?.toInt() ?? 0,
+      mimeType: a['mimeType'] as String?,
+      attachmentKey: a['attachmentKey'] as String,
+      attachmentNonce: a['attachmentNonce'] as String,
+      thumbnailKey: a['thumbnailKey'] as String?,
+      thumbnailNonce: a['thumbnailNonce'] as String?,
+    );
+    return {
+      for (final e in payload.entries)
+        if (e.key != 'secretAttachment') e.key: e.value,
+      'text': envelope,
+      'fileUrl': a['url'],
+      'fileName': 'encrypted',
+      'fileSize': a['fileSize'],
+      'mimeType': 'application/octet-stream',
+      'thumbnailUrl': ?a['thumbnailUrl'],
+    };
+  }
+
+  /// 글·이모티콘 댓글 하나를 단다 — [payload]는 `messageId`·`type`·`text`·`textFormat`·`mentions`·`clientId`(보내기 대기열이 그대로
+  /// 저장해 두는 모양). 비밀 대화면 글을 그 메시지의 댓글 자리로 암호화한다. 반영은 서버가 보내는 comment:new로.
+  Future<void> sendCommentPayload(
+    Room? room,
+    Map<String, dynamic> payload,
+  ) async {
+    final client = api;
+    if (client == null) {
+      throw const MessageSendException('서버와 연결되어 있지 않습니다.', transient: true);
+    }
+    final messageId = payload['messageId'] as String;
+    var text = payload['text'] as String?;
+    if (room != null && room.isSecret) {
+      text = await encryptOutgoing(
+        room,
+        text,
+        place: SecretTextPlace.comment(parentId: messageId),
+      );
+    }
+    await client.addCommentBody(messageId, {
+      'type': payload['type'] ?? 'text',
+      'text': ?text,
+      'textFormat': ?payload['textFormat'],
+      'mentions': ?payload['mentions'],
+      'clientId': ?payload['clientId'],
+    });
   }
 
   /// 대기열에서 하지 않고 버렸다 — 복사해 둔 첨부를 치우고, 화면에 먼저 보인 고치기·지우기는 서버 것으로 되돌린다.
@@ -454,7 +552,7 @@ class Session extends ChangeNotifier {
     }
   }
 
-  /// 아직 올리지 못한 첨부를 대기열에 넣으려고 이 기기의 앱 폴더(outbox_files/<임시 id>)에 복사한다. 웹이면(폴더 없음) null.
+  /// 아직 올리지 못한 첨부를 대기열에 넣으려고 이 기기의 앱 폴더(outbox_files/<임시 id>), 웹은 IndexedDB에 복사한다. 못 담으면 null.
   Future<List<OutboxFile>?> stashOutboxFiles(
     String clientId,
     List<({List<int> bytes, String name, String? mimeType, bool isImage})>
@@ -519,7 +617,52 @@ class Session extends ChangeNotifier {
       final roomId = key.substring(key.indexOf(':') + 1);
       final room = _findRoom(roomId);
       if (room == null || room.isSecret) return;
-      offlineCache.saveMessages(roomId, raw);
+      unawaited(offlineCache.saveMessages(roomId, raw));
+    }
+  }
+
+  /// 이 기기 메시지 DB의 빠진 구간을 서버에서 메운다(기록 동기화) — 끊긴 동안·앱이 꺼져 있던 동안 온 메시지는 받아 본 적이 없어
+  /// DB에 없다(예전엔 열어 본 페이지만 쌓여 오프라인으로 보면 중간이 비었다). 끊길 때·DB를 열 때 적어 둔 방마다의 자리
+  /// (OfflineCache.markSyncPoints) 뒤로 활동이 있던 방만(방 목록의 마지막 활동 시각 — 서버 시각) 최근 페이지부터 거꾸로 받아 그
+  /// 자리까지 쌓는다(OfflineCache.fillGap). 방 목록을 서버에서 받은 뒤(로그인·다시 연결) 뒤에서 한 방씩 한다. 연결이 끊기면 멈추고
+  /// 다음 연결 때 이어서 한다(자리는 남는다). 비밀 대화·없어진 방의 자리는 버린다.
+  bool _historySyncRunning = false;
+  Future<void> _syncLocalHistory() async {
+    if (_historySyncRunning || !offlineCache.enabled) return;
+    _historySyncRunning = true;
+    try {
+      final points = await offlineCache.syncPoints();
+      for (final MapEntry(key: roomId, value: since) in points.entries) {
+        final client = api;
+        if (client == null || token == null) return;
+        final room = _findRoom(roomId);
+        if (room == null ||
+            room.isSecret ||
+            !room.lastActivityAt.isAfter(since)) {
+          // 없어졌거나 그 뒤로 아무 일도 없던 방 — 받을 것이 없다.
+          await offlineCache.clearSyncPoint(roomId);
+          continue;
+        }
+        try {
+          await offlineCache.fillGap(
+            roomId,
+            since,
+            (before, limit) => client.fetchRoomMessagesRaw(
+              roomId,
+              limit: limit,
+              before: before,
+            ),
+          );
+          await offlineCache.clearSyncPoint(roomId);
+        } catch (e) {
+          if (isConnectionError(e)) return; // 다음 연결 때 이어서.
+          await offlineCache.clearSyncPoint(
+            roomId,
+          ); // 더 볼 수 없는 방(403·404) 등 — 다시 해도 같다.
+        }
+      }
+    } finally {
+      _historySyncRunning = false;
     }
   }
 
@@ -618,6 +761,9 @@ class Session extends ChangeNotifier {
 
   void _onConnectionChanged(bool connected) {
     _connectionLostTimer?.cancel();
+    // 끊겼다 — 이 뒤로 오는 메시지는 놓칠 수 있다. 방마다 지금 저장된 데까지를 메울 자리로 적어 둔다(다시 연결되면
+    // _resyncAfterReconnect가 방 목록을 받은 뒤 _syncLocalHistory가 메운다).
+    if (!connected && token != null) unawaited(offlineCache.markSyncPoints());
     if (connected) {
       unawaited(outbox.drain());
       if (connectionLost) {
@@ -2070,6 +2216,8 @@ class Session extends ChangeNotifier {
     // 받은 목록·메시지를 오프라인 보기로 저장한다(서버·사람마다 — offline_cache.dart).
     if (serverUrl != null && userId != null) {
       await offlineCache.configure(serverUrl!, userId!);
+      // 앱이 꺼져 있던 동안 온 메시지는 DB에 없다 — 지금 저장된 데까지를 메울 자리로 적어 두고, 방 목록을 받으면 메운다.
+      await offlineCache.markSyncPoints();
     }
     api?.onCacheable = _cacheRaw;
     try {
@@ -2079,6 +2227,7 @@ class Session extends ChangeNotifier {
       // 고르므로 여기서 currentTeam을 정하지는 않는다.
       await _loadTeamsAndRooms();
       showingCachedData = false;
+      unawaited(_syncLocalHistory());
     } catch (e) {
       // 서버에 닿지 않으면 저장해 둔 목록으로 들어간다(다시 연결되면 _resyncAfterReconnect가 서버 것으로 맞춘다).
       if (!await _loadTeamsAndRoomsFromCache()) error = e.toString();
@@ -3240,6 +3389,8 @@ class Session extends ChangeNotifier {
       // 변경(scheduled:*)을 놓쳤을 수 있다.
       unawaited(loadTopicFolders());
       unawaited(_refreshScheduledMessages());
+      // 끊긴 동안 온 메시지를 이 기기 메시지 DB에도 채운다(받은 방 목록의 마지막 활동 시각으로 고른 방만).
+      unawaited(_syncLocalHistory());
     } catch (_) {
       // 재연결 직후 방 목록 갱신 실패는 조용히 넘어간다 — 다음 재연결 때 다시 시도됨.
     } finally {

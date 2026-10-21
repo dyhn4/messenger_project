@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -141,9 +140,6 @@ class ChatInputBarState extends State<ChatInputBar> {
   /// (사용자가 큰 파일을 올리는 동안 텍스트만 먼저 보내는 것도 헷갈릴 수 있어, 업로드가 다
   /// 끝날 때까지 통째로 막는 쪽을 택했다).
   bool get _uploading => _attachments.any((a) => a.result == null && !a.queued);
-
-  /// 올리지 못한 첨부를 대기열에 담을 수 있는지 — 비밀 대화(암호화한 파일)·웹(앱 폴더 없음)은 안 된다.
-  bool get _canQueueFiles => !widget.room.isSecret && !kIsWeb;
 
   /// 이모티콘 패널에서 하나를 고르면(chat_panel.dart의 _selectSticker) 부모가 GlobalKey로
   /// 이걸 불러 입력칸에 포커스를 되돌린다 — 안 그러면 이모티콘을 클릭한 뒤 곧바로 Enter를
@@ -657,7 +653,7 @@ class ChatInputBarState extends State<ChatInputBar> {
     setState(() => _attachments.add(attachment));
 
     // 서버와 끊겨 있으면 올려 보지 않고 바로 "연결되면 올립니다"로 둔다.
-    if (_canQueueFiles && widget.session.knownOffline) {
+    if (widget.session.knownOffline) {
       setState(() => attachment.queued = true);
       return;
     }
@@ -682,7 +678,7 @@ class ChatInputBarState extends State<ChatInputBar> {
       // 조용히 무시 — X 버튼으로 이미 목록에서 제거됨(_cancelAttachment 참고).
     } catch (e) {
       if (!mounted) return;
-      if (_canQueueFiles && isConnectionError(e)) {
+      if (isConnectionError(e)) {
         // 연결 문제 — 버리지 않고 두었다가 보낼 때 대기열에 넣는다.
         setState(() => attachment.queued = true);
         return;

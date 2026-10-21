@@ -16,7 +16,7 @@ import '../models/uploaded_attachment.dart';
 import 'api_client.dart' show ApiClient, ApiException, UploadCancelToken;
 import 'chat_draft_store.dart' show ChatDraft;
 import 'connection_errors.dart';
-import 'message_outbox.dart' show OutboxKind, newClientId;
+import 'message_outbox.dart' show OutboxFile, OutboxKind, newClientId;
 import 'file_type_utils.dart';
 import 'image_thumbnail.dart';
 import 'photo_quality.dart';
@@ -67,6 +67,68 @@ Future<UploadedAttachment> _uploadPlainAttachment(
     thumbnailUrl: thumbnailUrl,
   );
 }
+
+/// 비밀 대화 첨부 하나를 올린다 — 원본(과 [thumbBytes]가 있으면 버블 미리보기용 축소 썸네일)을 저마다의 랜덤 키/nonce로 암호화해
+/// 올린다(썸네일이 원본 키를 다시 쓰지 않는다). 서버에는 암호문만 가고, 복호화 키와 원래 이름([name])·형식은 돌려준 값에 담겨
+/// 메시지 봉투(암호문) 안으로 들어간다(Session.encryptAttachmentPayload). 썸네일이 없으면(이미지가 아니거나 만들지 못함) 썸네일
+/// 칸은 비고, 버블은 원본을 그대로 보여 준다. 입력칸(RoomChatController.uploadAttachment)과 보내기 대기열(연결되면 올리는 비밀
+/// 대화의 사진·파일 — Session._deliverOutbox)이 같이 쓴다. [onProgress]/[cancelToken]은 원본 업로드에만 건다.
+Future<UploadedAttachment> uploadSecretBytes(
+  ApiClient api,
+  Uint8List bytes, {
+  required bool isImage,
+  required String name,
+  String? mimeType,
+  Uint8List? thumbBytes,
+  void Function(int sent, int total)? onProgress,
+  UploadCancelToken? cancelToken,
+}) async {
+  String? thumbnailUrl;
+  String? thumbnailKey;
+  String? thumbnailNonce;
+  if (thumbBytes != null) {
+    final thumb = await secret_crypto.encryptAttachment(thumbBytes);
+    thumbnailUrl = (await api.uploadFile(
+      _uploadBytesFile(thumb.cipherBytes),
+    )).url;
+    thumbnailKey = thumb.keyBase64;
+    thumbnailNonce = thumb.nonceBase64;
+  }
+  final encrypted = await secret_crypto.encryptAttachment(bytes);
+  final result = await api.uploadFile(
+    _uploadBytesFile(encrypted.cipherBytes),
+    onProgress: onProgress,
+    cancelToken: cancelToken,
+  );
+  return UploadedAttachment(
+    isImage: isImage,
+    url: result.url,
+    // 봉투 안에 들어갈 원래 이름·형식 — 서버에 보내는 칸은 늘 'encrypted'·application/octet-stream이다(보내는 쪽이 채운다).
+    // 예전엔 여기에 'encrypted'를 담아 받는 사람에게도 파일 이름이 "encrypted"로 보였다.
+    fileName: name,
+    size: encrypted.cipherBytes.length,
+    mimeType: mimeType,
+    thumbnailUrl: thumbnailUrl,
+    attachmentKey: encrypted.keyBase64,
+    attachmentNonce: encrypted.nonceBase64,
+    thumbnailKey: thumbnailKey,
+    thumbnailNonce: thumbnailNonce,
+  );
+}
+
+/// 비밀 대화의 올린 첨부를 보내기 대기열 본문의 `secretAttachment`로 — 보낼 때 봉투로 암호화한다(Session._deliverOutbox). 평문
+/// 이름·키가 들어 있어 대기열은 이 일을 메모리에만 둔다(비밀 대화 — 저장하지 않음).
+Map<String, dynamic> secretAttachmentPayload(UploadedAttachment u) => {
+  'url': u.url,
+  'fileName': u.fileName,
+  'fileSize': u.size,
+  'mimeType': ?u.mimeType,
+  'thumbnailUrl': ?u.thumbnailUrl,
+  'attachmentKey': u.attachmentKey,
+  'attachmentNonce': u.attachmentNonce,
+  'thumbnailKey': ?u.thumbnailKey,
+  'thumbnailNonce': ?u.thumbnailNonce,
+};
 
 /// 방과 무관하게 로컬 파일 하나를 채팅 입력칸과 같은 방식(평문)으로 올린다 — 이미지면(안 주면
 /// 확장자로 판별) 축소 썸네일도 만들어 같이 올린다. 아직 보낼 방이 정해지지 않은 화면(예약
@@ -494,7 +556,7 @@ class RoomChatController extends ChangeNotifier {
 
   /// 댓글을 단다. 실제 목록 갱신은 이 요청이 성공하면 서버가 보내는 comment:new 브로드캐스트로
   /// 이뤄진다(보낸 사람도 그 방 소켓에 있으므로 자기 자신도 받는다 — sendText와 동일한 방식이라
-  /// 여기서 낙관적으로 먼저 추가할 필요가 없다).
+  /// 여기서 낙관적으로 먼저 추가할 필요가 없다). 서버에 닿지 않으면 보내기 대기열에 넣어 연결되면 단다([_postCommentOrQueue]).
   /// [format]은 [text]의 글자 서식 — [text]는 이미 앞뒤 공백을 뗀 것이어야 위치가 맞는다
   /// (RichTextEditingController.formatted). 비밀 대화는 서식 없이 보낸다.
   Future<void> postComment(
@@ -505,27 +567,48 @@ class RoomChatController extends ChangeNotifier {
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
-    final payload = await _session.encryptOutgoing(
-      room,
-      trimmed,
-      place: SecretTextPlace.comment(parentId: messageId),
-    );
-    await _session.api!.addComment(
-      messageId,
-      text: payload,
-      textFormat: room.isSecret || trimmed != text ? null : format,
-      mentions: room.isSecret || trimmed != text ? null : mentions,
-    );
+    final plain = !room.isSecret && trimmed == text;
+    await _postCommentOrQueue(messageId, {
+      'type': 'text',
+      'text': trimmed,
+      'textFormat': ?(plain ? textFormatToJson(format) : null),
+      'mentions': ?(plain ? mentionsToJson(mentions) : null),
+    }, preview: tr('댓글 · {text}', {'text': trimmed}));
   }
 
   /// 댓글로 이모티콘을 단다 — sendSticker와 동일한 방식(파일 업로드 없이 id만 전송).
-  Future<void> postCommentSticker(String messageId, String stickerId) async {
-    final payload = await _session.encryptOutgoing(
-      room,
-      stickerId,
-      place: SecretTextPlace.comment(parentId: messageId),
+  Future<void> postCommentSticker(String messageId, String stickerId) =>
+      _postCommentOrQueue(messageId, {
+        'type': 'sticker',
+        'text': stickerId,
+      }, preview: tr('댓글 · 이모티콘'));
+
+  /// 글·이모티콘 댓글을 임시 id를 붙여 단다(Session.sendCommentPayload — 비밀 대화면 거기서 암호화). 서버에 닿지 않는 것이
+  /// 확인됐거나(Session.knownOffline) 연결 문제로 실패하면 같은 임시 id로 보내기 대기열에 넣는다 — 응답만 못 받고 처음 것이
+  /// 들어갔어도 서버가 같은 임시 id면 새로 만들지 않는다(server/src/comments.js). 비밀 대화의 것은 메모리에만(평문).
+  Future<void> _postCommentOrQueue(
+    String messageId,
+    Map<String, dynamic> body, {
+    required String preview,
+  }) async {
+    final clientId = newClientId();
+    final payload = {...body, 'messageId': messageId, 'clientId': clientId};
+    void queue() => _session.outbox.submitAction(
+      roomId: room.id,
+      kind: OutboxKind.comment,
+      payload: payload,
+      preview: preview,
+      secret: room.isSecret,
+      clientId: clientId,
     );
-    await _session.api!.addComment(messageId, text: payload, type: 'sticker');
+
+    if (_session.knownOffline) return queue();
+    try {
+      await _session.sendCommentPayload(room, payload);
+    } catch (e) {
+      if (!isConnectionError(e)) rethrow;
+      queue();
+    }
   }
 
   /// 이미 업로드가 끝난 첨부(uploadAttachment 결과)로 댓글을 단다. [caption]을 같이 주면(첨부
@@ -747,6 +830,8 @@ class RoomChatController extends ChangeNotifier {
   /// 함께 고친다. 첨부를 **더하지는** 못 한다(잔디처럼 삭제만). 글 메시지와 달리 글이 비어도 보낸다 —
   /// 첨부를 다 지우는데 글도 없으면 서버가 거절한다(메시지를 삭제하라는 뜻, 화면이 먼저 묻는다). 비밀
   /// 대화의 사진·파일은 서버가 못 고쳐서 화면이 수정 자체를 막는다. 반영은 message:edited(applyEdit).
+  /// 서버에 닿지 않으면 글 메시지 고치기([editMessage])처럼 화면(과 이 기기 메시지 DB)에 먼저 고쳐 보이고(설명·지운 첨부) 보내기
+  /// 대기열에 넣어 연결되면 반영한다.
   Future<void> editMediaMessage(
     String messageId,
     String text, {
@@ -755,15 +840,82 @@ class RoomChatController extends ChangeNotifier {
     List<String> removeAttachmentIds = const [],
   }) async {
     final trimmed = text.trim();
-    await _session.api!.editMessage(
-      messageId,
-      trimmed,
-      textFormat: trimmed.isEmpty || trimmed != text ? null : format,
-      mentions: trimmed.isEmpty
-          ? const []
-          : (trimmed != text ? const [] : mentions),
-      removeAttachmentIds: removeAttachmentIds,
-    );
+    final sameText = trimmed.isNotEmpty && trimmed == text;
+    final formatJson = sameText ? textFormatToJson(format) : null;
+    void queue() {
+      _applyLocalMediaEdit(
+        messageId,
+        trimmed,
+        format: formatJson == null ? null : format,
+        removeAttachmentIds: removeAttachmentIds,
+      );
+      _session.outbox.submitAction(
+        roomId: room.id,
+        kind: OutboxKind.edit,
+        payload: {
+          'messageId': messageId,
+          'text': trimmed,
+          'textFormat': ?formatJson,
+          'mentions': (sameText ? mentionsToJson(mentions) : null) ?? const [],
+          if (removeAttachmentIds.isNotEmpty)
+            'removeAttachmentIds': removeAttachmentIds,
+        },
+        preview: trimmed.isEmpty
+            ? tr('사진·파일 메시지 수정')
+            : tr('메시지 수정 · {text}', {'text': trimmed}),
+      );
+    }
+
+    // 비밀 대화의 사진·파일은 고칠 수 없다(화면이 막는다) — 대기열에 넣지 않고 서버가 거절하게 둔다.
+    if (_session.knownOffline && !room.isSecret) return queue();
+    try {
+      await _session.api!.editMessage(
+        messageId,
+        trimmed,
+        textFormat: sameText ? format : null,
+        mentions: sameText ? mentions : const [],
+        removeAttachmentIds: removeAttachmentIds,
+      );
+    } catch (e) {
+      if (room.isSecret || !isConnectionError(e)) rethrow;
+      queue();
+    }
+  }
+
+  /// 사진·파일 메시지의 고친 설명과 지운 첨부를 화면(과 이 기기 메시지 DB)에 먼저 반영한다 — 대기열이 서버에 보내면 message:edited가
+  /// 다시 맞춘다(첨부 하나짜리 옛 메시지의 파일 칸처럼 서버가 바꾸는 모양도 그때 맞춰진다).
+  void _applyLocalMediaEdit(
+    String messageId,
+    String text, {
+    List<TextFormatRun>? format,
+    List<String> removeAttachmentIds = const [],
+  }) {
+    final removed = removeAttachmentIds.toSet();
+    for (final m in _instancesOf(messageId)) {
+      m.text = text.isEmpty ? null : text;
+      m.textFormat = format;
+      m.editedAt = DateTime.now();
+      if (removed.isNotEmpty) {
+        m.attachments = [
+          for (final a in m.attachments)
+            if (!removed.contains(a.id)) a,
+        ];
+      }
+    }
+    _session.offlineCache.updateMessage(messageId, (raw) {
+      final attachments = raw['attachments'];
+      return {
+        ...raw,
+        'text': text.isEmpty ? null : text,
+        'editedAt': DateTime.now().millisecondsSinceEpoch,
+        if (removed.isNotEmpty && attachments is List)
+          'attachments': [
+            for (final a in attachments)
+              if (a is! Map || !removed.contains(a['id'])) a,
+          ],
+      };
+    });
+    notifyListeners();
   }
 
   /// 메시지를 삭제한다(본인, 작성 5분 이내만 서버가 허용). 실제 반영은
@@ -1455,8 +1607,9 @@ class RoomChatController extends ChangeNotifier {
   }
 
   /// 첨부 일부를 아직 올리지 못한 채 보낸다(연결이 끊겨 올리지 못함 — chat_input_bar.dart) — 올린 것([uploaded])은 그대로, 올리지
-  /// 못한 것([pending] — 바이트)은 이 기기 앱 폴더에 복사해 보내기 대기열에 넣고, 연결되면 올려서 한 메시지로 보낸다
-  /// (Session._deliverOutbox). 사진만이면 사진 격자, 파일이 섞이면 파일 목록. 비밀 대화·웹은 담을 수 없어 false(부르는 쪽이 알린다).
+  /// 못한 것([pending] — 바이트)은 이 기기 앱 폴더(웹은 IndexedDB)에 복사해 보내기 대기열에 넣고, 연결되면 올려서 한 메시지로 보낸다
+  /// (Session._deliverOutbox). 사진만이면 사진 격자, 파일이 섞이면 파일 목록. 비밀 대화는 [_queueSecretAttachments]. 담지 못하면
+  /// false(부르는 쪽이 알린다).
   Future<bool> queueAttachmentMessage({
     required List<UploadedAttachment> uploaded,
     required List<
@@ -1467,7 +1620,10 @@ class RoomChatController extends ChangeNotifier {
     List<TextFormatRun>? captionFormat,
     List<Mention>? captionMentions,
   }) async {
-    if (room.isSecret) return false;
+    if (room.isSecret) {
+      await _queueSecretAttachments(uploaded, pending, caption: caption);
+      return true;
+    }
     final clientId = newClientId();
     final files = await _session.stashOutboxFiles(clientId, pending);
     if (files == null) return false;
@@ -1494,6 +1650,43 @@ class RoomChatController extends ChangeNotifier {
       files: files,
     );
     return true;
+  }
+
+  /// 비밀 대화의 첨부를 대기열로 — 첨부마다 봉투가 하나라 한 장씩 따로 보낸다(sendUploadedAttachments와 같다 — 설명은 첫 장에).
+  /// 올린 것은 그대로 보내고, 못 올린 것은 평문 바이트를 **메모리에만** 든 채 넣어(디스크에 남기지 않는다 — 앱을 끄면 사라짐)
+  /// 연결되면 암호화해 올려서 보낸다(Session._deliverOutbox).
+  Future<void> _queueSecretAttachments(
+    List<UploadedAttachment> uploaded,
+    List<({List<int> bytes, String name, String? mimeType, bool isImage})>
+    pending, {
+    String? caption,
+  }) async {
+    String? captionLeft = caption?.trim();
+    if (captionLeft?.isEmpty == true) captionLeft = null;
+    for (final u in uploaded) {
+      await sendUploadedAttachment(u, caption: captionLeft);
+      captionLeft = null;
+    }
+    for (final p in pending) {
+      _session.outbox.submit(
+        roomId: room.id,
+        payload: {'type': p.isImage ? 'image' : 'file', 'text': ?captionLeft},
+        files: [
+          OutboxFile(
+            path: '',
+            name: p.name,
+            size: p.bytes.length,
+            mimeType: p.mimeType,
+            isImage: p.isImage,
+            bytes: p.bytes is Uint8List
+                ? p.bytes as Uint8List
+                : Uint8List.fromList(p.bytes),
+          ),
+        ],
+        secret: true,
+      );
+      captionLeft = null;
+    }
   }
 
   /// 보드 뷰 게시글을 올린다 — 채팅 메시지와 같은 message:send 경로에 type 'post'와 제목을
@@ -1604,26 +1797,15 @@ class RoomChatController extends ChangeNotifier {
       );
     }
 
-    final (thumbnailUrl, thumbnailKey, thumbnailNonce) =
-        await _uploadEncryptedThumbnail(thumbBytes);
-    final encrypted = await secret_crypto.encryptAttachment(originalBytes);
-    final tempFile = _uploadBytesFile(encrypted.cipherBytes);
-    final result = await _session.api!.uploadFile(
-      tempFile,
+    return uploadSecretBytes(
+      _session.api!,
+      originalBytes,
+      isImage: isImage,
+      name: file.name,
+      mimeType: file.mimeType,
+      thumbBytes: thumbBytes,
       onProgress: onProgress,
       cancelToken: cancelToken,
-    );
-    return UploadedAttachment(
-      isImage: isImage,
-      url: result.url,
-      fileName: 'encrypted',
-      size: encrypted.cipherBytes.length,
-      mimeType: 'application/octet-stream',
-      thumbnailUrl: thumbnailUrl,
-      attachmentKey: encrypted.keyBase64,
-      attachmentNonce: encrypted.nonceBase64,
-      thumbnailKey: thumbnailKey,
-      thumbnailNonce: thumbnailNonce,
     );
   }
 
@@ -1679,7 +1861,8 @@ class RoomChatController extends ChangeNotifier {
   /// 이미 업로드가 끝난 첨부(uploadAttachment 결과)로 채팅 메시지를 보낸다. [caption]을 같이
   /// 주면(첨부 후 텍스트도 입력한 경우) 그 메시지 하나에 첨부와 텍스트가 함께 실린다. 비밀
   /// 대화면 파일 바이트 자체가 이미 암호화된 채로 올라가 있으므로(서버는 opaque한 바이트로만
-  /// 취급), 캡션+원본 파일정보+복호화 키를 메시지 암호문 봉투 안에 함께 넣어 보낸다.
+  /// 취급), 캡션+원본 파일정보+복호화 키를 메시지 암호문 봉투 안에 함께 넣어 보낸다 — 비밀 대화의 글처럼 평문으로 대기열에
+  /// 넣고(메모리에만) 보낼 때 봉투로 암호화한다(Session._deliverOutbox — 연결이 없으면 붙을 때).
   Future<void> sendUploadedAttachment(
     UploadedAttachment u, {
     String? caption,
@@ -1688,26 +1871,14 @@ class RoomChatController extends ChangeNotifier {
   }) async {
     final trimmedCaption = caption?.trim();
     if (room.isSecret) {
-      final envelope = await _session.encryptAttachmentPayload(
-        room,
-        caption: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
-        fileName: u.fileName,
-        fileSize: u.size,
-        mimeType: u.mimeType,
-        attachmentKey: u.attachmentKey!,
-        attachmentNonce: u.attachmentNonce!,
-        thumbnailKey: u.thumbnailKey,
-        thumbnailNonce: u.thumbnailNonce,
-      );
-      await _session.chatSocket.send(
+      _session.outbox.submit(
         roomId: room.id,
-        type: u.isImage ? 'image' : 'file',
-        text: envelope,
-        fileUrl: u.url,
-        fileName: 'encrypted',
-        fileSize: u.size,
-        mimeType: 'application/octet-stream',
-        thumbnailUrl: u.thumbnailUrl,
+        payload: {
+          'type': u.isImage ? 'image' : 'file',
+          'text': ?(trimmedCaption?.isNotEmpty == true ? trimmedCaption : null),
+          'secretAttachment': secretAttachmentPayload(u),
+        },
+        secret: true,
       );
       return;
     }
@@ -1778,20 +1949,6 @@ class RoomChatController extends ChangeNotifier {
         'attachments': [for (final u in items) u.toPayload()],
       },
     );
-  }
-
-  /// 비밀 대화의 이미지 첨부일 때만(=[thumbBytes]가 있을 때만) 채팅 버블 미리보기용 축소
-  /// 썸네일을 원본과 마찬가지로 자기만의 랜덤 키/nonce로 암호화해서 올린다(원본 키를 재사용하지
-  /// 않음). 이미지가 아니거나 썸네일 생성에 실패했으면([thumbBytes] == null) 전부 null — 버블은
-  /// 원본(fileUrl)을 그대로 보여주게 된다. 평문 방 썸네일은 _uploadPlainAttachment가 올린다.
-  Future<(String?, String?, String?)> _uploadEncryptedThumbnail(
-    Uint8List? thumbBytes,
-  ) async {
-    if (thumbBytes == null) return (null, null, null);
-    final encrypted = await secret_crypto.encryptAttachment(thumbBytes);
-    final tempFile = _uploadBytesFile(encrypted.cipherBytes);
-    final result = await _session.api!.uploadFile(tempFile);
-    return (result.url, encrypted.keyBase64, encrypted.nonceBase64);
   }
 
   @override

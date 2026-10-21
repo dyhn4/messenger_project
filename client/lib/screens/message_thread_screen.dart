@@ -20,6 +20,7 @@ import '../widgets/hover_toolbar.dart' show kHoverToolbarHeight;
 import '../widgets/message_bubble.dart';
 import '../widgets/message_comments_card.dart';
 import '../widgets/muted_scrollbar.dart';
+import '../widgets/outbox_strip.dart';
 import '../widgets/sticker_picker.dart';
 import '../widgets/sticker_preview_card.dart';
 import 'announcement_detail_screen.dart' show showAnnouncementReadersDialog;
@@ -461,6 +462,12 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                   ],
                 ),
               ),
+            ),
+            // 오프라인 중 단 댓글 — 연결되면 단다(보내기 대기열).
+            OutboxStrip(
+              session: widget.session,
+              roomId: widget.controller.room.id,
+              commentsOf: widget.message.id,
             ),
             const Divider(height: 1),
             CommentInputBar(

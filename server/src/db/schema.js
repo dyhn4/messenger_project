@@ -2009,6 +2009,9 @@ export const messageComments = pgTable(
     fileSize: integer('file_size'),
     mimeType: text('mime_type'),
     thumbnailUrl: text('thumbnail_url'), // messages.thumbnailUrl과 동일한 용도.
+    // 앱이 붙이는 임시 id(보내기 대기열 — messages.clientId와 같다). 오프라인 중 단 댓글을 연결되면 다시 보내도 같은 사람·같은
+    // id면 새로 만들지 않고 처음 것을 돌려준다(comments.js).
+    clientId: text('client_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     // messages와 동일한 규칙: 작성 후 5분 이내 본인만 수정/삭제 가능(comments.js 참고). 삭제는
     // 소프트 삭제 — 행은 남기고 deletedAt만 찍는다(text/첨부는 그대로 두되 응답에서 가린다).
@@ -2017,6 +2020,7 @@ export const messageComments = pgTable(
   },
   (t) => [
     index('message_comments_message_id_idx').on(t.messageId, t.createdAt),
+    uniqueIndex('message_comments_sender_client_id_idx').on(t.senderId, t.clientId).where(sql`client_id is not null`),
     // "내가 쓴 글 모아보기" — 댓글 작성자별 최신순/과거순 스캔.
     index('message_comments_sender_created_idx').on(t.senderId, t.createdAt.desc()),
   ],

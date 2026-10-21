@@ -1,13 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { tooMany } from './authGuard.js';
-import { findCommentById, insertComment, softDeleteComment, updateCommentText } from './db/queries/comments.js';
+import {
+  findCommentByClientId,
+  findCommentById,
+  insertComment,
+  softDeleteComment,
+  updateCommentText,
+} from './db/queries/comments.js';
 import { findMessageById } from './db/queries/messages.js';
 import { findRoomById, getDmHistoryFloor, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { isUuid } from './favoritesRules.js';
 import { checkFileRefs } from './fileRefs.js';
 import { commentCreateLimiter, fileFieldsDenial, messageTextDenial, sanitizeFileSize } from './messageLimits.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
+import { isClientIdConflict, parseClientId } from './outboxRules.js';
 import { unhideDmForOtherMembers } from './rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { mentionsOrEmpty, mentionsToStore, sanitizeMentions } from './notificationRules.js';
@@ -45,7 +52,23 @@ export function toCommentDto(c) {
     createdAt: new Date(c.createdAt).getTime(),
     editedAt: c.editedAt ? new Date(c.editedAt).getTime() : null,
     deleted,
+    clientId: c.clientId ?? null, // 보내기 대기열의 임시 id — 앱이 대기 중인 댓글을 지운다(messages.clientId와 같다).
   };
+}
+
+/**
+ * 같은 사람이 같은 임시 id로 이미 단 댓글이면 그 응답(다시 방송하지 않는다 — 처음 달 때 이미 갔다). 다른 메시지에 단 것이면 400
+ * (임시 id가 겹친 다른 댓글을 돌려주지 않는다). 없으면 false.
+ */
+async function replyDuplicateComment(res, senderId, clientId, messageId) {
+  const existing = await findCommentByClientId(senderId, clientId);
+  if (!existing) return false;
+  if (existing.messageId !== messageId) {
+    res.status(400).json({ error: '댓글을 달지 못했습니다. 다시 시도하세요.' });
+  } else {
+    res.status(200).json(toCommentDto(existing));
+  }
+  return true;
 }
 
 export function createCommentsRouter(io) {
@@ -58,6 +81,9 @@ export function createCommentsRouter(io) {
     if (!(await isRoomMember(message.roomId, req.user.sub))) {
       return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
     }
+    // 보내기 대기열이 다시 보낸 댓글(응답을 못 받았을 뿐 처음 것이 이미 들어갔을 수 있다) — 처음 것을 돌려준다(sendMessage.js와 같다).
+    const clientId = parseClientId(req.body?.clientId);
+    if (clientId && (await replyDuplicateComment(res, req.user.sub, clientId, message.id))) return;
 
     const type = ['image', 'file', 'sticker'].includes(req.body?.type) ? req.body.type : 'text';
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
@@ -101,22 +127,32 @@ export function createCommentsRouter(io) {
         }),
       );
     }
-    const comment = await insertComment({
-      id: randomUUID(),
-      messageId: message.id,
-      roomId: message.roomId,
-      senderId: req.user.sub,
-      senderName: sender?.name ?? sender?.username ?? '알 수 없음',
-      type,
-      text: text || null,
-      textFormat: room?.isSecret ? null : sanitizeTextFormat(req.body?.textFormat, text),
-      mentions,
-      fileUrl: rawFileUrl ? files.paths.get(rawFileUrl) : null,
-      fileName,
-      fileSize: sanitizeFileSize(req.body?.fileSize),
-      mimeType,
-      thumbnailUrl: rawThumbnailUrl ? files.paths.get(rawThumbnailUrl) : null,
-    });
+    let comment;
+    try {
+      comment = await insertComment({
+        id: randomUUID(),
+        messageId: message.id,
+        roomId: message.roomId,
+        senderId: req.user.sub,
+        senderName: sender?.name ?? sender?.username ?? '알 수 없음',
+        type,
+        text: text || null,
+        textFormat: room?.isSecret ? null : sanitizeTextFormat(req.body?.textFormat, text),
+        mentions,
+        fileUrl: rawFileUrl ? files.paths.get(rawFileUrl) : null,
+        fileName,
+        fileSize: sanitizeFileSize(req.body?.fileSize),
+        mimeType,
+        thumbnailUrl: rawThumbnailUrl ? files.paths.get(rawThumbnailUrl) : null,
+        clientId,
+      });
+    } catch (err) {
+      // 같은 임시 id가 거의 동시에 두 번 왔다 — 먼저 들어간 것을 돌려준다.
+      if (clientId && isClientIdConflict(err, 'message_comments_sender_client_id')) {
+        if (await replyDuplicateComment(res, req.user.sub, clientId, message.id)) return;
+      }
+      throw err;
+    }
 
     // 평문 DM에서 상대가 이 방을 숨겨뒀으면(hidden) 자동으로 다시 보이게 한다 — socket.js의
     // message:send와 동일한 이유(rooms.js unhideDmForOtherMembers 참고).

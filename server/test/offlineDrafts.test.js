@@ -20,6 +20,11 @@ test('중복 오류 — 그 unique 인덱스의 23505만', () => {
   assert.equal(isClientIdConflict({ code: '23505', constraint: 'messages_pkey' }), false);
   assert.equal(isClientIdConflict({ code: '23503', constraint: 'messages_sender_client_id_idx' }), false);
   assert.equal(isClientIdConflict(null), false);
+  // 댓글(오프라인 중 단 댓글도 같은 임시 id로 다시 온다) — 인덱스 이름으로 가린다(메시지 것과 섞이지 않는다).
+  const comment = { code: '23505', constraint: 'message_comments_sender_client_id_idx' };
+  assert.equal(isClientIdConflict(comment, 'message_comments_sender_client_id'), true);
+  assert.equal(isClientIdConflict(comment), false);
+  assert.equal(isClientIdConflict({ code: '23505', constraint: 'messages_sender_client_id_idx' }, 'message_comments_sender_client_id'), false);
 });
 
 test('임시 저장 입력 — 비면 지우기, 글자가 아니면 오류, 서식은 글에 맞게', () => {

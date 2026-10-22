@@ -388,6 +388,14 @@ class Session extends ChangeNotifier {
         if (item.secret && room == null) {
           throw const MessageSendException('대화방을 찾을 수 없습니다.');
         }
+        // 사진·파일 댓글의 아직 올리지 못한 첨부(하나) — 메시지와 같은 방법으로 올려(비밀 대화면 암호화해서) 이 댓글에 싣는다.
+        if (item.files.isNotEmpty) {
+          if (item.secret) {
+            await _uploadSecretOutboxFile(client, item);
+          } else {
+            await _uploadOutboxFiles(client, item);
+          }
+        }
         await sendCommentPayload(room, item.payload);
       case OutboxKind.edit:
         final id = item.targetId!;
@@ -513,8 +521,10 @@ class Session extends ChangeNotifier {
     };
   }
 
-  /// 글·이모티콘 댓글 하나를 단다 — [payload]는 `messageId`·`type`·`text`·`textFormat`·`mentions`·`clientId`(보내기 대기열이 그대로
-  /// 저장해 두는 모양). 비밀 대화면 글을 그 메시지의 댓글 자리로 암호화한다. 반영은 서버가 보내는 comment:new로.
+  /// 댓글 하나를 단다 — [payload]는 `messageId`·`type`·`text`·`textFormat`·`mentions`·`clientId`(보내기 대기열이 그대로 저장해 두는
+  /// 모양)에, 사진·파일 댓글이면 올린 첨부 하나(`attachments` — UploadedAttachment.toPayload 모양, 비밀 대화는 `secretAttachment`).
+  /// 비밀 대화면 글(첨부면 설명·원래 파일 정보·복호화 키를 담은 봉투)을 그 메시지의 댓글 자리로 암호화한다. 반영은 서버가 보내는
+  /// comment:new로.
   Future<void> sendCommentPayload(
     Room? room,
     Map<String, dynamic> payload,
@@ -524,26 +534,59 @@ class Session extends ChangeNotifier {
       throw const MessageSendException('서버와 연결되어 있지 않습니다.', transient: true);
     }
     final messageId = payload['messageId'] as String;
+    final place = SecretTextPlace.comment(parentId: messageId);
     var text = payload['text'] as String?;
-    if (room != null && room.isSecret) {
-      text = await encryptOutgoing(
+    final secretFile = payload['secretAttachment'];
+    if (room != null && room.isSecret && secretFile is Map) {
+      final envelope = await encryptAttachmentPayload(
         room,
-        text,
-        place: SecretTextPlace.comment(parentId: messageId),
+        caption: text,
+        fileName: secretFile['fileName'] as String? ?? '',
+        fileSize: (secretFile['fileSize'] as num?)?.toInt() ?? 0,
+        mimeType: secretFile['mimeType'] as String?,
+        attachmentKey: secretFile['attachmentKey'] as String,
+        attachmentNonce: secretFile['attachmentNonce'] as String,
+        thumbnailKey: secretFile['thumbnailKey'] as String?,
+        thumbnailNonce: secretFile['thumbnailNonce'] as String?,
+        place: place,
       );
+      await client.addCommentBody(messageId, {
+        'type': payload['type'] ?? 'file',
+        'text': envelope,
+        'fileUrl': secretFile['url'],
+        'fileName': 'encrypted',
+        'fileSize': secretFile['fileSize'],
+        'mimeType': 'application/octet-stream',
+        'thumbnailUrl': ?secretFile['thumbnailUrl'],
+        'clientId': ?payload['clientId'],
+      });
+      return;
     }
+    if (room != null && room.isSecret) {
+      text = await encryptOutgoing(room, text, place: place);
+    }
+    final attachments = payload['attachments'];
+    final file = attachments is List && attachments.isNotEmpty
+        ? attachments.first as Map
+        : null;
     await client.addCommentBody(messageId, {
       'type': payload['type'] ?? 'text',
       'text': ?text,
       'textFormat': ?payload['textFormat'],
       'mentions': ?payload['mentions'],
+      'fileUrl': ?file?['fileUrl'],
+      'fileName': ?file?['fileName'],
+      'fileSize': ?file?['fileSize'],
+      'mimeType': ?file?['mimeType'],
+      'thumbnailUrl': ?file?['thumbnailUrl'],
       'clientId': ?payload['clientId'],
     });
   }
 
   /// 대기열에서 하지 않고 버렸다 — 복사해 둔 첨부를 치우고, 화면에 먼저 보인 고치기·지우기는 서버 것으로 되돌린다.
   void _outboxDiscarded(OutboxItem item) {
-    if (item.isMessage) {
+    // 새 메시지, 아직 올리지 못한 첨부가 남은 사진·파일 댓글.
+    if (item.isMessage || item.files.isNotEmpty) {
       unawaited(deleteOutboxFiles(item.clientId));
       return;
     }
@@ -660,6 +703,19 @@ class Session extends ChangeNotifier {
             roomId,
           ); // 더 볼 수 없는 방(403·404) 등 — 다시 해도 같다.
         }
+      }
+      // 빠진 구간 밖에서 바뀐 것(옛 메시지의 수정·삭제·공감·댓글·투표·고정, 완전히 지운 메시지)도 서버의 "이후 바뀐 것"으로 맞춘다
+      // (OfflineCache.syncChanges). 이 기기의 고치기·지우기·공감이 대기열에서 기다리는 메시지는 먼저 반영해 둔 대로 둔다.
+      final client = api;
+      if (client == null || token == null) return;
+      try {
+        await offlineCache.syncChanges(
+          client.fetchMessageChanges,
+          keepLocal: (id) =>
+              outbox.items.any((i) => !i.isNew && i.targetId == id),
+        );
+      } catch (_) {
+        // 연결 오류면 커서가 남아 다음 연결 때 이어서 한다. 이 API가 없는 옛 서버(404)도 다음 연결 때 다시 본다.
       }
     } finally {
       _historySyncRunning = false;
@@ -2771,6 +2827,9 @@ class Session extends ChangeNotifier {
         unawaited(
           secretSessionManager?.forgetExpiredMessage(e.roomId, e.messageId),
         );
+      } else {
+        // 평문 방(아무도 안 읽은 메시지를 지움) — 이 기기 메시지 DB에서도.
+        unawaited(offlineCache.removeMessages([e.messageId]));
       }
       _controllers[e.roomId]?.applyExpire(e.messageId);
     });

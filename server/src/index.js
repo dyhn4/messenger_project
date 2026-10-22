@@ -66,6 +66,7 @@ import { createInvitesRouter } from './invites.js';
 import { createTeamInvitesRouter } from './teamInvites.js';
 import { createMessagesRouter } from './messages.js';
 import { createReactionsRouter } from './reactions.js';
+import { createMessageChangesRouter } from './messageChanges.js';
 import { createRemindersRouter, startReminderJob } from './reminders.js';
 import { createExternalCalendarsRouter, startExternalCalendarJob } from './externalCalendars.js';
 import { calendarFeedHandler, createCalendarFeedsRouter } from './calendarFeeds.js';
@@ -231,6 +232,8 @@ app.use('/api', requireAuth, createProjectsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
 // 메시지 공감(이모지 반응) — PUT /messages/:id/reaction(reactions.js).
 app.use('/api', requireAuth, createReactionsRouter(io));
+// 이 기기 메시지 DB를 맞추는 "이후 바뀐 것" — GET /message-changes(messageChanges.js).
+app.use('/api', requireAuth, createMessageChangesRouter());
 // 메시지 리마인더("나중에 알림") — POST /messages/:id/reminders, GET/DELETE /reminders(reminders.js).
 app.use('/api', requireAuth, createRemindersRouter(io));
 // 파일 삭제(업로드한 본인·팀 관리자) — 소프트 삭제라 댓글은 남는다(messageFiles.js).

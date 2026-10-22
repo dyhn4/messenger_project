@@ -300,7 +300,8 @@ class MessageOutbox extends ChangeNotifier {
 
   /// 내 메시지 고치기·지우기·공감, 댓글을 넣는다([kind] — [OutboxKind]). [payload]에는 `messageId`(댓글이면 달 메시지)와 바꿀 값.
   /// 공감은 같은 메시지에 기다리던 공감을 바꿔 끼운다. [secret]이면 비밀 대화의 고치기·댓글(평문 — 저장하지 않음). [clientId]를
-  /// 주면 그 임시 id로(댓글 — 처음 보낼 때 붙인 id라 서버가 같은 댓글을 두 번 만들지 않는다).
+  /// 주면 그 임시 id로(댓글 — 처음 보낼 때 붙인 id라 서버가 같은 댓글을 두 번 만들지 않는다). [files]는 사진·파일 댓글의 아직 올리지
+  /// 못한 첨부(댓글 하나에 하나 — 연결되면 [deliver]가 올려서 단다).
   OutboxItem submitAction({
     required String roomId,
     required String kind,
@@ -308,6 +309,7 @@ class MessageOutbox extends ChangeNotifier {
     required String preview,
     bool secret = false,
     String? clientId,
+    List<OutboxFile> files = const [],
   }) {
     if (kind == OutboxKind.reaction) {
       _items.removeWhere(
@@ -322,6 +324,7 @@ class MessageOutbox extends ChangeNotifier {
       roomId: roomId,
       kind: kind,
       payload: payload,
+      files: [...files],
       secret: secret,
       preview: preview,
       createdAt: DateTime.now(),

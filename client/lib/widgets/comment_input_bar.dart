@@ -10,6 +10,7 @@ import '../data/stickers.dart';
 import '../services/api_client.dart'
     show UploadCancelToken, UploadCancelledException;
 import '../services/app_platform.dart';
+import '../services/connection_errors.dart';
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
 import '../services/photo_quality.dart';
@@ -34,6 +35,13 @@ class _PendingAttachment {
   final UploadCancelToken cancelToken;
   int sentBytes = 0;
   UploadedAttachment? result;
+
+  /// 연결이 끊겨 올리지 못했다 — 달면 보내기 대기열에 넣어 연결되면 올린다(RoomChatController.queueCommentAttachment).
+  bool queued = false;
+
+  /// 대기열에 넣을 때 쓸 내용(읽어 둔 바이트)과 형식 — 다 올리면 놓는다.
+  Uint8List? bytes;
+  String? mimeType;
 
   _PendingAttachment({
     required this.file,
@@ -91,7 +99,7 @@ class CommentInputBarState extends State<CommentInputBar> {
   /// 서식 도구모음을 펼쳤는지(ChatInputBarState와 동일).
   bool _formatOpen = false;
 
-  bool get _uploading => _attachments.any((a) => a.result == null);
+  bool get _uploading => _attachments.any((a) => a.result == null && !a.queued);
 
   /// ChatInputBarState.focusInput과 같은 이유 — 이모티콘을 고른 직후 입력칸으로 포커스를
   /// 되돌려서, 곧바로 Enter를 눌러도 보내지도록 한다(message_thread_screen.dart의
@@ -233,8 +241,16 @@ class CommentInputBarState extends State<CommentInputBar> {
       thumbnailBytes: thumbBytes,
       cancelToken: UploadCancelToken(),
     );
+    attachment
+      ..bytes = bytes
+      ..mimeType = file.mimeType;
     setState(() => _attachments.add(attachment));
 
+    // 서버와 끊겨 있으면 올려 보지 않고 바로 "연결되면 올립니다"로 둔다(ChatInputBarState와 같다).
+    if (widget.controller.session.knownOffline) {
+      setState(() => attachment.queued = true);
+      return;
+    }
     try {
       final uploaded = await widget.controller.uploadAttachment(
         file,
@@ -248,11 +264,19 @@ class CommentInputBarState extends State<CommentInputBar> {
         cancelToken: attachment.cancelToken,
       );
       if (!mounted) return;
-      setState(() => attachment.result = uploaded);
+      setState(() {
+        attachment.result = uploaded;
+        attachment.bytes = null; // 다 올렸으니 들고 있지 않는다.
+      });
     } on UploadCancelledException {
       // 조용히 무시 — X 버튼으로 이미 목록에서 제거됨.
     } catch (e) {
       if (!mounted) return;
+      if (isConnectionError(e)) {
+        // 연결 문제 — 버리지 않고 두었다가 달 때 대기열에 넣는다.
+        setState(() => attachment.queued = true);
+        return;
+      }
       setState(() => _attachments.remove(attachment));
       ScaffoldMessenger.of(
         context,
@@ -305,16 +329,36 @@ class CommentInputBarState extends State<CommentInputBar> {
         );
       } else {
         // 첨부와 함께 입력한 댓글은 별도 댓글로 보내지 않고, 첫 번째 첨부의 캡션으로 붙인다.
-        // 업로드는 첨부하는 순간 이미 끝나 있으므로(_stageAndUpload) 여기선 그 결과로 댓글만 단다.
+        // 업로드는 첨부하는 순간 이미 끝나 있으므로(_stageAndUpload) 여기선 그 결과로 댓글만 단다. 연결이 끊겨 올리지
+        // 못한 첨부는 보내기 대기열에 넣어 연결되면 올려서 단다(쓴 순서대로).
         for (var i = 0; i < toSend.length; i++) {
           final a = toSend[i];
-          await widget.controller.postUploadedCommentAttachment(
+          final uploaded = a.result;
+          if (uploaded != null) {
+            await widget.controller.postUploadedCommentAttachment(
+              widget.messageId,
+              uploaded,
+              caption: i == 0 ? text : null,
+              captionFormat: i == 0 ? format : null,
+              captionMentions: i == 0 ? mentions : null,
+            );
+            continue;
+          }
+          final bytes = a.bytes;
+          if (!a.queued || bytes == null) continue;
+          final ok = await widget.controller.queueCommentAttachment(
             widget.messageId,
-            a.result!,
+            (
+              bytes: bytes,
+              name: a.displayName,
+              mimeType: a.mimeType,
+              isImage: a.isImage,
+            ),
             caption: i == 0 ? text : null,
             captionFormat: i == 0 ? format : null,
             captionMentions: i == 0 ? mentions : null,
           );
+          if (!ok) throw Exception(tr('첨부를 대기열에 넣지 못했습니다.'));
         }
       }
     } catch (e) {
@@ -365,6 +409,7 @@ class CommentInputBarState extends State<CommentInputBar> {
                             totalBytes: a.totalBytes,
                             sentBytes: a.sentBytes,
                             completed: a.result != null,
+                            queued: a.queued,
                             onCancel: () => _cancelAttachment(a),
                           ),
                         );

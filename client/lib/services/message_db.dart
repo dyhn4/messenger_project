@@ -28,6 +28,9 @@ abstract class MessageDb {
     Map<String, dynamic> Function(Map<String, dynamic>) change,
   );
 
+  /// 메시지들을 지운다(서버가 완전히 지운 것 — 아무도 안 읽은 메시지 지우기·보존 기간 파기). 없는 id는 넘어간다.
+  Future<void> remove(Iterable<String> messageIds);
+
   /// 그 방의 메시지를 모두 지운다.
   Future<void> forgetRoom(String roomId);
 

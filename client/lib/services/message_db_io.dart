@@ -49,6 +49,10 @@ class SqliteMessageDb implements MessageDb {
   ) async => store.update(messageId, change);
 
   @override
+  Future<void> remove(Iterable<String> messageIds) async =>
+      store.remove(messageIds);
+
+  @override
   Future<void> forgetRoom(String roomId) async => store.forgetRoom(roomId);
 
   @override

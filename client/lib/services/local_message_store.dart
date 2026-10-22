@@ -205,6 +205,23 @@ class LocalMessageStore {
     upsertAll(rows.first['room_id'] as String, [next]);
   }
 
+  /// 메시지들을 지운다(서버가 완전히 지운 것). 없는 id는 넘어간다.
+  void remove(Iterable<String> messageIds) {
+    if (_closed) return;
+    final ids = messageIds.toList();
+    if (ids.isEmpty) return;
+    _db.execute('BEGIN');
+    try {
+      for (final id in ids) {
+        _db.execute('DELETE FROM messages WHERE id = ?', [id]);
+        _db.execute('DELETE FROM messages_fts WHERE id = ?', [id]);
+      }
+      _db.execute('COMMIT');
+    } catch (_) {
+      _db.execute('ROLLBACK');
+    }
+  }
+
   /// 그 방의 메시지를 모두 지운다.
   void forgetRoom(String roomId) {
     if (_closed) return;

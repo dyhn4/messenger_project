@@ -85,6 +85,16 @@ void main() {
     expect(await db.count('R2'), 1);
   });
 
+  test('서버가 완전히 지운 메시지 — id로 지운다(없는 id는 넘어감)', () async {
+    await db.upsertAll('R1', [
+      _msg('a', 'R1', 1, text: '첫 글'),
+      _msg('b', 'R1', 2, text: '둘째 글'),
+    ]);
+    await db.remove(['a', '없는 id']);
+    expect((await db.latest('R1')).map((m) => m['id']), ['b']);
+    expect(await db.search('첫 글'), isEmpty);
+  });
+
   test('방마다 최근 5000통만', () async {
     await db.upsertAll('R1', [
       for (var i = 0; i < messageDbPerRoomMax + 20; i++) _msg('m$i', 'R1', i),

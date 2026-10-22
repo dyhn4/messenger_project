@@ -1168,9 +1168,14 @@ export const messages = pgTable(
     // 보드 게시글의 말머리(rooms.board_categories의 id — 없으면 null)와 필독(토픽 관리자가 지정 — 그 시각).
     postCategoryId: text('post_category_id'),
     mustReadAt: timestamp('must_read_at', { withTimezone: true }),
+    // 보낸 뒤에 바뀐 마지막 시각(밀리초까지 — 앱이 커서로 그대로 돌려준다) — 행이 고쳐지거나(수정·삭제·고정·링크 미리보기 등) 딸린
+    // 공감·댓글·첨부·투표가 바뀌면 DB 트리거가 찍는다(마이그레이션 0141 — 코드의 어느 경로로 고쳐도 빠지지 않게). 앱이 끊긴 동안
+    // 옛 메시지에 생긴 변화를 이 기기 메시지 DB에 맞출 때 "이후 바뀐 것"을 고른다(messageChanges.js). 보낸 뒤 바뀐 적 없으면 null.
+    changedAt: timestamp('changed_at', { withTimezone: true, precision: 3 }),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),
+    index('messages_changed_at_idx').on(t.changedAt, t.id).where(sql`changed_at is not null`),
     uniqueIndex('messages_sender_client_id_idx').on(t.senderId, t.clientId).where(sql`client_id is not null`),
     index('messages_album_id_idx').on(t.albumId),
     index('messages_todo_id_idx').on(t.todoId),
@@ -1179,6 +1184,20 @@ export const messages = pgTable(
     index('messages_sender_created_idx').on(t.senderId, t.createdAt.desc()),
     index('messages_expires_at_idx').on(t.expiresAt),
   ],
+);
+
+/** 완전히 지운 메시지의 흔적 — 행이 없어져 "이후 바뀐 것"(messages.changed_at)으로는 알릴 수 없어서, 아무도 안 읽은 메시지를
+ * 지우거나(messages.js) 보존 기간이 지나 파기할 때(retention.js) DB 트리거가 한 줄 남긴다(마이그레이션 0141). 앱은 끊긴 동안
+ * 이렇게 사라진 메시지를 이 기기 메시지 DB에서 지운다(messageChanges.js). 비밀 대화와 방째 지운 것(방이 먼저 없어진다)은 남기지
+ * 않는다. 방이 지워져도 흔적은 남아야 해서 외래 키를 걸지 않는다. */
+export const messageRemovals = pgTable(
+  'message_removals',
+  {
+    messageId: uuid('message_id').primaryKey(),
+    roomId: text('room_id').notNull(),
+    removedAt: timestamp('removed_at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),
+  },
+  (t) => [index('message_removals_removed_at_idx').on(t.removedAt, t.messageId)],
 );
 
 /** 메시지 하나에 딸린 첨부들. 예전에는 messages.fileUrl 한 칸에 첨부 하나만 넣었는데,

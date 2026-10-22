@@ -268,6 +268,21 @@ class IndexedDbMessageDb implements MessageDb {
   }
 
   @override
+  Future<void> remove(Iterable<String> messageIds) async {
+    if (_closed) return;
+    final ids = messageIds.toList();
+    if (ids.isEmpty) return;
+    try {
+      final tx = _tx(_messages, write: true);
+      final store = tx.objectStore(_messages);
+      for (final id in ids) {
+        store.delete(id.toJS);
+      }
+      await idbDone(tx);
+    } catch (_) {}
+  }
+
+  @override
   Future<void> forgetRoom(String roomId) => _deleteWhere(
     (s) => s.index('room').openCursor(web.IDBKeyRange.only(roomId.toJS)),
   );

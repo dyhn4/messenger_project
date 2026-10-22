@@ -16,7 +16,8 @@ import '../models/uploaded_attachment.dart';
 import 'api_client.dart' show ApiClient, ApiException, UploadCancelToken;
 import 'chat_draft_store.dart' show ChatDraft;
 import 'connection_errors.dart';
-import 'message_outbox.dart' show OutboxFile, OutboxKind, newClientId;
+import 'message_outbox.dart'
+    show OutboxFile, OutboxKind, newClientId, outboxPreviewOf;
 import 'file_type_utils.dart';
 import 'image_thumbnail.dart';
 import 'photo_quality.dart';
@@ -612,53 +613,96 @@ class RoomChatController extends ChangeNotifier {
   }
 
   /// 이미 업로드가 끝난 첨부(uploadAttachment 결과)로 댓글을 단다. [caption]을 같이 주면(첨부
-  /// 후 텍스트도 입력한 경우) 그 댓글 하나에 첨부와 텍스트가 함께 실린다.
+  /// 후 텍스트도 입력한 경우) 그 댓글 하나에 첨부와 텍스트가 함께 실린다. 글 댓글처럼 임시 id를 붙여 달고, 서버에 닿지 않으면
+  /// 대기열에 넣어 연결되면 단다([_postCommentOrQueue] — 비밀 대화는 보낼 때 봉투로 암호화, Session.sendCommentPayload).
   Future<void> postUploadedCommentAttachment(
     String messageId,
     UploadedAttachment u, {
     String? caption,
     List<TextFormatRun>? captionFormat,
     List<Mention>? captionMentions,
-  }) async {
-    final trimmedCaption = caption?.trim();
-    if (room.isSecret) {
-      final envelope = await _session.encryptAttachmentPayload(
-        room,
-        caption: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
-        fileName: u.fileName,
-        fileSize: u.size,
-        mimeType: u.mimeType,
-        attachmentKey: u.attachmentKey!,
-        attachmentNonce: u.attachmentNonce!,
-        thumbnailKey: u.thumbnailKey,
-        thumbnailNonce: u.thumbnailNonce,
-        place: SecretTextPlace.comment(parentId: messageId),
-      );
-      await _session.api!.addComment(
-        messageId,
-        text: envelope,
-        type: u.isImage ? 'image' : 'file',
-        fileUrl: u.url,
-        fileName: 'encrypted',
-        fileSize: u.size,
-        mimeType: 'application/octet-stream',
-        thumbnailUrl: u.thumbnailUrl,
-      );
-      return;
-    }
-
-    await _session.api!.addComment(
-      messageId,
-      text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
-      textFormat: trimmedCaption == caption ? captionFormat : null,
-      mentions: trimmedCaption == caption ? captionMentions : null,
-      type: u.isImage ? 'image' : 'file',
-      fileUrl: u.url,
-      fileName: u.fileName,
-      fileSize: u.size,
-      mimeType: u.mimeType,
-      thumbnailUrl: u.thumbnailUrl,
+  }) {
+    final body = _commentAttachmentBody(
+      isImage: u.isImage,
+      caption: caption,
+      captionFormat: captionFormat,
+      captionMentions: captionMentions,
     );
+    if (room.isSecret) {
+      body['secretAttachment'] = secretAttachmentPayload(u);
+    } else {
+      body['attachments'] = [u.toPayload()];
+    }
+    return _postCommentOrQueue(
+      messageId,
+      body,
+      preview: tr('댓글 · {text}', {'text': outboxPreviewOf(body)}),
+    );
+  }
+
+  /// 연결이 끊겨 올리지 못한 첨부 하나로 댓글을 단다(comment_input_bar.dart) — 이 기기 앱 폴더(웹은 IndexedDB)에 복사해 보내기
+  /// 대기열에 넣고, 연결되면 올려서 단다(Session._deliverOutbox). 비밀 대화는 평문 바이트를 메모리에만 든다(앱을 끄면 사라짐 —
+  /// 메시지 첨부와 같다). 담지 못하면 false(부르는 쪽이 알린다).
+  Future<bool> queueCommentAttachment(
+    String messageId,
+    ({List<int> bytes, String name, String? mimeType, bool isImage}) pending, {
+    String? caption,
+    List<TextFormatRun>? captionFormat,
+    List<Mention>? captionMentions,
+  }) async {
+    final clientId = newClientId();
+    final List<OutboxFile> files;
+    if (room.isSecret) {
+      files = [
+        OutboxFile(
+          path: '',
+          name: pending.name,
+          size: pending.bytes.length,
+          mimeType: pending.mimeType,
+          isImage: pending.isImage,
+          bytes: pending.bytes is Uint8List
+              ? pending.bytes as Uint8List
+              : Uint8List.fromList(pending.bytes),
+        ),
+      ];
+    } else {
+      final stashed = await _session.stashOutboxFiles(clientId, [pending]);
+      if (stashed == null) return false;
+      files = stashed;
+    }
+    final body = _commentAttachmentBody(
+      isImage: pending.isImage,
+      caption: caption,
+      captionFormat: captionFormat,
+      captionMentions: captionMentions,
+    );
+    _session.outbox.submitAction(
+      roomId: room.id,
+      kind: OutboxKind.comment,
+      payload: {...body, 'messageId': messageId, 'clientId': clientId},
+      preview: tr('댓글 · {text}', {'text': outboxPreviewOf(body, files)}),
+      secret: room.isSecret,
+      clientId: clientId,
+      files: files,
+    );
+    return true;
+  }
+
+  /// 사진·파일 댓글 본문 — 설명은 앞뒤 공백을 떼고, 서식·멘션은 뗀 것이 없을 때만(위치가 맞게 — 비밀 대화는 서식 없이).
+  Map<String, dynamic> _commentAttachmentBody({
+    required bool isImage,
+    String? caption,
+    List<TextFormatRun>? captionFormat,
+    List<Mention>? captionMentions,
+  }) {
+    final trimmed = caption?.trim();
+    final plain = !room.isSecret && trimmed == caption;
+    return {
+      'type': isImage ? 'image' : 'file',
+      'text': ?(trimmed?.isNotEmpty == true ? trimmed : null),
+      'textFormat': ?(plain ? textFormatToJson(captionFormat) : null),
+      'mentions': ?(plain ? mentionsToJson(captionMentions) : null),
+    };
   }
 
   /// 댓글을 수정한다(본인, 작성 5분 이내만 서버가 허용). 실제 반영은

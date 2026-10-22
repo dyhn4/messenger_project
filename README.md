@@ -254,7 +254,10 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
     확인된 동안(끊김 띠가 떴거나 앱을 오프라인으로 켬)은 서버에 보내 보지 않고 바로 대기열로 들어갑니다.
   - **오프라인 중 댓글** — 글·이모티콘 댓글은 임시 id를 붙여 달고, 서버에 닿지 않으면 같은 임시 id로 대기열에 넣어 연결되면 답니다(서버가
     같은 사람·같은 임시 id면 처음 댓글을 돌려줘 두 번 달리지 않음 — `message_comments.client_id`, 동시에 두 번 와도 하나만). 기다리는 댓글은
-    대화방 아래 대기 말풍선("댓글 · …")과 그 메시지의 댓글 화면 아래에 보입니다. 사진·파일 댓글은 예전처럼 올라가야 달 수 있습니다.
+    대화방 아래 대기 말풍선("댓글 · …")과 그 메시지의 댓글 화면 아래에 보입니다. **사진·파일 댓글**도 같습니다 — 끊겨 올리지 못한 첨부는
+    댓글 입력칸에 "대기 · 연결되면 올립니다"로 남고, 달면 메시지 첨부처럼 이 기기(웹은 IndexedDB)에 담아 대기열에 넣었다가 연결되면 올려서
+    같은 임시 id로 답니다(비밀 대화는 평문 바이트를 메모리에만 — 보낼 때 암호화해 올리고 봉투에 담음). 이미 올린 첨부로 다는 댓글도 서버에
+    닿지 않으면 대기열로 갑니다(`RoomChatController.queueCommentAttachment`·`postUploadedCommentAttachment`).
   - **비밀 대화의 대기열** — 비밀 대화의 글·이모티콘·글 고치기·댓글·**사진·파일**도 대기열을 씁니다. 평문을 이 기기에 남기지 않으려고
     **메모리에만** 두고(앱을 끄면 사라짐 — 대기 말풍선에 "비밀 대화 — 앱을 끄면 사라집니다"), 보낼 때마다 그때의 암호화 상태로 암호화합니다(같은
     임시 id라 서버에 두 번 들어가지 않음). 못 올린 사진·파일은 평문 바이트를 메모리에 든 채 기다렸다가 연결되면 암호화해 올리고(썸네일도 그때
@@ -269,17 +272,34 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   (`chat_image_cache.dart` — 1500장·60일)에 오래 보관해 오프라인에서도 보입니다(사진 주소는 한 시간마다 바뀌는 서명 링크라 예전엔 금방 못 찾았다).
   비밀 대화는 저장하지 않고, **로그아웃하면 그 사람의 저장분(DB·목록·사진 미리보기)을 지웁니다**(공용 PC). **웹 앱은 브라우저의 IndexedDB**
   (`tangotalk_messages_<서버·사람>` — `message_db_web.dart`)에 같은 모양으로 쌓습니다(팀·방 목록도 거기 — 웹은 폴더가 없음, 찾기는 전문 검색
-  색인 없이 새것부터 훑음, IndexedDB를 쓸 수 없는 브라우저면 예전처럼 저장하지 않음, 로그아웃하면 DB째 지움). 다만 웹 앱 자체는 서버가
-  내려 주므로 서버가 꺼진 채로 새로 열 수는 없고, 쓰는 중에 끊겼을 때 보여 줍니다.
+  색인 없이 새것부터 훑음, IndexedDB를 쓸 수 없는 브라우저면 예전처럼 저장하지 않음, 로그아웃하면 DB째 지움).
+  - **서버가 꺼져 있어도 웹 앱 열기** — 웹 앱 파일은 서버가 내려 주므로 예전엔 서버가 꺼지면 새로 열 수 없었습니다(대화는 IndexedDB에
+    있어도). 이제 서비스 워커(`client/web/sw.js` — 알림·웹 푸시와 같은 것)가 앱 파일(첫 페이지·`main.dart.js`·`flutter*.js`·`assets/`·
+    `canvaskit/`·`icons/` 등 — API·업로드 파일·다른 서버 페이지는 건드리지 않음)을 받을 때마다 보관해 두고, 서버에 닿지 않거나(앞에 둔
+    프록시가 5xx로 답해도) 4초 넘게 답이 없으면 보관한 것으로 엽니다. 늘 서버 것을 먼저 받으므로 새 판은 바로 보입니다. 처음 열 때는
+    서비스 워커가 페이지를 맡기 전에 받은 파일을 놓치므로, 첫 화면이 뜨면 페이지가 받은 파일 목록(브라우저마다 다른 CanvasKit 포함)을
+    넘겨 보관하게 합니다(`web/flutter_bootstrap.js`). 한 번 열어 본 브라우저에서, "로그인 상태 유지"로 로그인해 둔 경우 서버가 꺼진 채로
+    열면 저장해 둔 목록·대화로 들어갑니다. 시험은 `client`에서 `node --test test/web/sw_test.mjs`(서비스 워커 전역을 흉내 내 브라우저 없이).
   - **빠진 구간 메우기(기록 동기화)** — 예전엔 받아 본 페이지만 쌓여, 끊긴 동안·앱이 꺼져 있던 동안 온 메시지가 DB에 없어 오프라인으로 보면
     중간이 비었습니다. 이제 끊길 때와 로그인할 때 방마다 "여기까지는 빠짐없이 있다"는 자리(그 방에 저장된 가장 최근 메시지 시각)를 적어 두고,
     방 목록을 서버에서 받으면(로그인·다시 연결) **그 뒤로 활동이 있던 방만**(방 목록의 마지막 활동 시각) 최근 페이지부터 100통씩 거꾸로 받아
     그 자리까지 채웁니다(뒤에서 한 방씩 — 끊기면 멈추고 다음 연결 때 이어서, 자리는 다 메울 때까지 남음). 5000통 넘게 빠졌으면 이어 붙일 수
-    없는 옛 저장분을 지워 중간이 빈 기록이 남지 않게 합니다. 옛 메시지의 수정·댓글처럼 빠진 구간 밖의 변화는 그 페이지를 다시 받을 때 맞춰집니다.
+    없는 옛 저장분을 지워 중간이 빈 기록이 남지 않게 합니다.
+  - **빠진 구간 밖에서 바뀐 것 맞추기** — 옛 메시지에 끊긴 동안 생긴 변화(수정·삭제·공감·댓글·투표·고정·첨부 지우기 등)는 예전엔 그
+    페이지를 다시 받을 때까지 이 기기 DB에 옛 모양으로 남았습니다. 이제 서버가 메시지가 보낸 뒤 바뀐 시각(`messages.changed_at`)을 **DB
+    트리거로** 찍고(메시지 행을 고치거나 딸린 공감·댓글·첨부·투표가 바뀌면 — 코드의 어느 경로로 고쳐도 빠지지 않게), 아무도 안 읽은
+    메시지를 지우거나 보존 기간이 지나 파기해 행이 없어지면 흔적(`message_removals`)을 남깁니다. 앱은 빠진 구간을 메운 뒤 `GET
+    /api/message-changes?since=<커서>`로 내가 멤버인 평문 방 전체에서 커서 다음에 바뀐 것을 200개씩 받아 **저장해 둔 메시지만** 서버
+    것으로 바꾸고(저장 안 된 옛 메시지는 넣지 않음 — 오프라인으로 넘길 때 중간이 빈 채 이어 보이지 않게) 사라진 것은 지웁니다. 이 기기의
+    고치기·지우기·공감이 대기열에서 기다리는 메시지는 먼저 반영해 둔 대로 둡니다. 커서는 (바뀐 시각, id)라 같은 시각에 여럿 바뀌어도
+    건너뛰지 않고, 서버는 30초 전까지만 줘서 늦게 커밋된 변화를 앞지르지 않습니다(그 사이는 실시간 연결로 받음). 막 로그인했으면 지금
+    자리만 받고, 이 기능 전에 쌓인 저장분이 있으면 처음부터 받습니다. 실시간으로 받은 `message:expired`(아무도 안 읽은 메시지 지움)도
+    이제 이 기기 DB에서 지웁니다. 서버는 `server/src/messageChanges.js`(규칙 `messageChangeRules.js`, 마이그레이션 `0141`).
 
   앱은 `client/lib/services/message_outbox.dart`·`offline_cache.dart`·`message_db.dart`(앱 `local_message_store.dart`·`message_db_io.dart`, 웹
-  `message_db_web.dart`·`idb_web.dart`)·`outbox_files.dart`·`widgets/outbox_strip.dart`, 서버는 `server/src/sendMessage.js`·`comments.js`(규칙
-  `outboxRules.js`). 서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0120`·`0140` — 댓글 임시 id)가 필요합니다. 앱 빌드는 새 패키지
+  `message_db_web.dart`·`idb_web.dart`)·`outbox_files.dart`·`widgets/outbox_strip.dart`·`web/sw.js`, 서버는 `server/src/sendMessage.js`·
+  `comments.js`(규칙 `outboxRules.js`)·`messageChanges.js`. 서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0120`·`0140` — 댓글 임시 id,
+  `0141` — 바뀐 시각·지운 흔적과 트리거)가 필요합니다. 앱 빌드는 새 패키지
   `sqlite3`(3.6.0 — 빌드할 때 SQLite 라이브러리를 받아 함께 넣는다, 인터넷 필요)를 씁니다. 웹 IndexedDB 시험은 브라우저에서
   `flutter test --platform chrome test/web/message_db_web_test.dart`.
 - **다른 앱에서 공유하기·홈 화면 위젯·알림에서 바로 답장** — 안드로이드는 갤러리·파일·브라우저 등의 **"공유 → TangoTalk"**으로 글(링크)·
@@ -1882,8 +1902,10 @@ DKIM 서명), `mailFormatHtml.js`(서식 있는 메일 쓰기), 앱은 `client/l
   다른 기기에서 읽은 것을 꺼진 앱의 위젯에 바로 반영하기(지금은 앱을 열 때 맞춰짐), Windows 알림에서 바로 답장.
 - **오프라인 후속(남은 것)** — 이 기기 메시지 DB(전체 기록·찾기)·올리지 못한 첨부의 대기열·오프라인 중 고치기(사진·파일 메시지의 설명 포함)·
   지우기·공감·댓글·사진 미리보기 보관·비밀 대화의 대기열(사진·파일 포함)·웹 앱의 오프라인 저장(IndexedDB)·빠진 구간을 메우는 기록 동기화는
-  들어갔습니다(위 "보내기 대기열·오프라인 보기"). 남은 것: 오프라인 중 사진·파일 댓글(지금은 올라가야 달 수 있음), 서버가 꺼져 있어도 웹 앱을
-  여는 것(서비스 워커로 앱 파일 보관), 옛 메시지의 수정·댓글처럼 빠진 구간 밖에서 바뀐 것까지 맞추는 동기화(서버에 "이후 바뀐 것" API가 필요).
+  들어갔습니다(위 "보내기 대기열·오프라인 보기"). 오프라인 중 사진·파일 댓글, 서버가 꺼져 있어도 웹 앱을 여는 것(서비스 워커로 앱 파일 보관),
+  빠진 구간 밖에서 바뀐 것까지 맞추는 동기화(서버의 "이후 바뀐 것" — `GET /api/message-changes`)도 들어갔습니다.
+  남은 것: 받은 댓글을 실시간으로 이 기기 DB에 넣기(지금은 다음 동기화 때 맞춰짐), 한 번도 열어 본 적 없는 브라우저에서 서버 없이 열기(앱
+  파일이 없음), 오래 쓰면 쌓이는 `message_removals` 정리(지금은 지우지 않음 — 행이 작아 급하지 않음).
 - **자동 자리 비움** — 접속 상태가 접속/미접속뿐이라 한동안 손대지 않으면 "자리 비움"으로 바뀌는 것이 없습니다.
 - **통화 녹화·회의록 후속(남은 것)** — Egress 녹화·받아쓰기·요약 회의록·화이트보드 저장은 들어갔습니다(위 "화상회의 녹화·회의록").
   남은 것: Egress·Redis를 설치 프로그램이 함께 띄우기(지금은 관리자가 Docker로 — Windows 바이너리가 없음), 받아쓰기에서 말한 사람 나누기(지금은 섞인
@@ -2810,6 +2832,7 @@ Xcode로 직접 빌드할 때는 Signing & Capabilities에서 팀을 고르면 �
 | POST | `/api/rooms/:id/muted` | 알림 끄기 토글 |
 | GET | `/api/rooms/:id` | 방 정보 조회 |
 | GET | `/api/rooms/:id/messages` | 메시지 목록(`limit`, `before` 커서 페이지네이션) |
+| GET | `/api/message-changes` | 이 기기 메시지 DB를 맞출 "이후 바뀐 것" — `?since=<커서(ms 또는 ms:id)>&limit=(≤500, 기본 200)` → `{ messages: [방 메시지 목록과 같은 모양 — 댓글·공감·투표 포함], removed: [{ id, roomId }], cursor, more }`. 내가 멤버인 평문 방, 30초 전까지만. `since`가 없으면 지금 자리만 |
 | GET | `/api/drafts` | 내 임시 저장(입력칸에 쓰다 만 글 — 30일 안, 지금 멤버이고 비밀 대화가 아닌 방) `[{ roomId, text(지운 것은 null), format, mentions, updatedAt }]` |
 | PUT | `/api/rooms/:roomId/draft` | 임시 저장 넣기·바꾸기 `{ text(비우면 지움 — 지운 시각과 함께 남김), format?, mentions?, deviceId? }` → `{ updatedAt }`, 내 다른 기기에 소켓 `draft:changed`. 비밀 대화 400, 멤버가 아니면 404, 1분에 240번 |
 | GET | `/api/rooms/:id/export` | **대화 내보내기** — 그 방의 대화 내용을 엑셀(.xlsx)로 스트리밍 응답(`since`/`until` epoch ms로 기간 제한, 둘 다 생략하면 전체). 비밀 대화는 서버가 평문을 몰라 400 |
@@ -3325,7 +3348,8 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `topic_creators` | `topic_creation_policy`가 `designated`일 때만 의미가 있는, 콕 집어 지정된 토픽 생성자 목록(복합 PK: `team_id`+`user_id`). 정책을 다른 값으로 바꿔도 이 목록 자체는 지우지 않는다 — 나중에 다시 `designated`로 돌아오면 그대로 남아있다 |
 | `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(1:1 대화에서 한 사람이 빠졌을 때 — 비밀 대화를 혼자 나갔거나 팀에서 제외됐을 때 — 남은 쪽에 "OOO (나갔음)"으로 보여 줄 사람. 그 사람이 다시 들어오면 지움. 이름은 비밀 대화에만 쓰던 시절 그대로), `icon_type`/`icon_emoji`/`icon_color`/`icon_url`(그룹채팅 아이콘 — `initial`(그룹 이름 앞 2글자)\|`emoji`\|`photo`(`icon_url`, 미서명 `/uploads/` 경로), `null`이면 멤버 사진 겹침. `icon_color`는 이니셜·이모지의 배경색으로, 새 대화 창을 열 때 무작위로 정해진다) |
 | `room_members` | 방 멤버십(복합 PK). `last_read_at`, `favorite`, `muted`, `hidden`(1:1 대화 숨기기)를 멤버별로 보관 |
-| `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷), `album_id`/`album_share`(앨범 공유 메시지의 앨범 — 앨범을 지우면 `album_id`만 null, `album_share`는 `{ title, teamName }` 스냅샷. 인덱스 `messages (album_id)`), `call_card`(화상회의 카드 — 시스템 메시지에만, `{ status, startedAt, endedAt, durationMs, answered, events: [{ at, userId, name, kind }] }`), `reminder_card`(리마인더가 울릴 때 나와의 대화에 올리는 봇 메시지에만 — `{ messageId, roomId, roomName, senderName, preview, sentAt, secret }` 스냅샷), `integration_id`·`bot_emoji`·`bot_blocks`(웹훅·슬래시 명령·연동 앱이 올린 봇 메시지의 연동과 아이콘, 단추·선택지 블록 — 연동을 지우면 `integration_id`만 null, 봇 이름은 `sender_name`), `client_id`(앱이 보낼 때 붙인 임시 id — 보내기 대기열, unique (`sender_id`, `client_id`) partial) |
+| `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷), `album_id`/`album_share`(앨범 공유 메시지의 앨범 — 앨범을 지우면 `album_id`만 null, `album_share`는 `{ title, teamName }` 스냅샷. 인덱스 `messages (album_id)`), `call_card`(화상회의 카드 — 시스템 메시지에만, `{ status, startedAt, endedAt, durationMs, answered, events: [{ at, userId, name, kind }] }`), `reminder_card`(리마인더가 울릴 때 나와의 대화에 올리는 봇 메시지에만 — `{ messageId, roomId, roomName, senderName, preview, sentAt, secret }` 스냅샷), `integration_id`·`bot_emoji`·`bot_blocks`(웹훅·슬래시 명령·연동 앱이 올린 봇 메시지의 연동과 아이콘, 단추·선택지 블록 — 연동을 지우면 `integration_id`만 null, 봇 이름은 `sender_name`), `client_id`(앱이 보낼 때 붙인 임시 id — 보내기 대기열, unique (`sender_id`, `client_id`) partial), `changed_at`(보낸 뒤 바뀐 마지막 시각 — 트리거가 찍음: 행 수정, 딸린 공감·댓글·첨부·투표 변화. 인덱스 `(changed_at, id)` partial — "이후 바뀐 것") |
+| `message_removals` | 완전히 지운 메시지의 흔적(`message_id` PK, `room_id`, `removed_at`) — 평문 방의 메시지 행이 지워질 때 트리거가 남김(비밀 대화·방째 지운 것은 빼고, 방이 지워져도 남게 외래 키 없음). 앱의 "이후 바뀐 것" 동기화가 읽는다 |
 | `post_reads` | 보드 게시글 읽음 기록 — (`message_id`, `user_id`) PK에 처음 연 시각(`read_at`). 게시글의 말머리는 `messages.post_category_id`(방의 `rooms.board_categories` jsonb `[{ id, name, color }]` 중 하나), 필독은 `messages.must_read_at` |
 | `chat_drafts` | 임시 저장 동기화 — (`user_id`, `room_id`)마다 `text`(지운 것은 빈 글로 남김 — 꺼져 있던 기기가 알게)·`text_format`·`mentions`·`updated_at`(서버가 받은 시각 — 나중 것이 이김). 사람·방을 지우면 cascade, 30일 지난 것은 하루 한 번 지움. 비밀 대화의 글은 받지 않는다 |
 | `message_reminders` | 리마인더. 메시지 리마인더("나중에 알림")는 메시지·방(`message_id`·`room_id`), 직접 만든 리마인더는 글과 울릴 나와의 대화의 팀(`text`·`team_id`)만 둔다(마이그레이션 0107에서 `message_id`·`room_id`를 null 허용으로). 사람·메시지·방·팀 모두 cascade, `remind_at`, 울린 때 `fired_at`(울린 지 30일 지나면 지움). 인덱스: 울리기 전 것만의 `remind_at`(partial)·`(user_id, remind_at)` |

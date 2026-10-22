@@ -2777,6 +2777,15 @@ class ApiClient {
     return [for (final e in list) Map<String, dynamic>.from(e as Map)];
   }
 
+  /// "이후 바뀐 것" 한 페이지(서버 messageChanges.js) — 내가 멤버인 평문 방에서 커서 [since] 다음으로 바뀐 메시지(방 메시지 목록과
+  /// 같은 모양)와 완전히 지운 메시지. `{ messages, removed: [{ id, roomId }], cursor, more }`. [since]가 null이면 지금 자리만.
+  Future<Map<String, dynamic>> fetchMessageChanges(String? since) async {
+    final query = since == null ? '' : '?since=${Uri.encodeComponent(since)}';
+    return Map<String, dynamic>.from(
+      await _get('/api/message-changes$query') as Map,
+    );
+  }
+
   /// 내 임시 저장(입력칸에 쓰다 만 글 — 서버 drafts.js) — `[{ roomId, text(지웠으면 null), format, mentions, updatedAt }]`.
   Future<List<Map<String, dynamic>>> fetchDrafts() async => [
     for (final e in await _get('/api/drafts') as List)

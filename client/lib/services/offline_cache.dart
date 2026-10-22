@@ -12,6 +12,11 @@ import 'message_db_io.dart' if (dart.library.js_interop) 'message_db_web.dart';
 typedef RawMessagePageFetcher =
     Future<List<Map<String, dynamic>>> Function(DateTime? before, int limit);
 
+/// 서버의 "이후 바뀐 것" 한 페이지(GET /api/message-changes — `{ messages, removed: [{ id, roomId }], cursor, more }`). [since]가 null이면
+/// 지금 자리만 받는다.
+typedef MessageChangesFetcher =
+    Future<Map<String, dynamic>> Function(String? since);
+
 /// 오프라인 보기용 저장소 — 서버에서 받은 팀 목록·방 목록(팀마다)은 JSON 파일로, **메시지는 이 기기의 메시지 DB**(message_db.dart —
 /// 앱은 SQLite local_message_store.dart, 웹은 IndexedDB message_db_web.dart — 받은 페이지·실시간 메시지·수정·공감·삭제를 모두 쌓아
 /// 방마다 최근 5000통까지)에 서버가 준 모양(JSON) 그대로 둔다. 연결이 끊겼거나 서버에 닿지 않을 때 이걸로 목록과 대화(방을 열면 최근
@@ -20,7 +25,8 @@ typedef RawMessagePageFetcher =
 ///
 /// 끊긴 동안·앱이 꺼져 있던 동안 온 메시지는 DB에 없어 중간이 빈다 — 끊길 때(그리고 DB를 열 때) 방마다 "여기까지는 빠짐없이 있다"는
 /// 자리를 적어 두고([markSyncPoints]), 연결되면 Session이 그 뒤로 활동이 있던 방만 최근 페이지부터 거꾸로 받아 그 자리까지 메운다
-/// ([fillGap]).
+/// ([fillGap]). 빠진 구간 밖의 옛 메시지에 생긴 변화(수정·삭제·공감·댓글·투표·고정, 완전히 지움)는 서버의 "이후 바뀐 것"을 커서
+/// 다음부터 받아 저장해 둔 것을 바꾼다([syncChanges]).
 ///
 /// 비밀 대화는 넣지 않는다(부르는 쪽이 거른다 — 평문이 화면 밖에 남으면 안 된다). 서버·사람마다 폴더(웹은 IndexedDB DB)를 나누고,
 /// 로그아웃하면 그 사람의 것을 지운다(공용 PC). 웹은 폴더가 없어 팀·방 목록도 IndexedDB에 둔다. 쓰기는 잠깐 모았다가(0.5초) 한 번에.
@@ -39,12 +45,20 @@ class OfflineCache {
   static const syncMaxMessages = messageDbPerRoomMax;
 
   static const _syncPointsName = 'sync_points';
+  static const _changesCursorName = 'changes_cursor';
+
+  /// "이후 바뀐 것"을 한 번에 받는 최대 페이지 수(서버 한 페이지 200개) — 넘으면 커서를 적어 두고 다음 연결 때 이어서.
+  static const changesMaxPages = 50;
 
   final Future<Directory?> Function() _baseDir;
   final Future<MessageDb?> Function(String scope, Directory? dir) _openDb;
   Directory? _dir;
   String? _scope;
   MessageDb? _db;
+
+  /// DB를 열 때 이미 메시지가 있었는지 — 커서 없이 처음 맞출 때 지금 자리만 받을지(막 로그인 — 맞출 것이 없음), 처음부터 받을지(이
+  /// 기능 전에 쌓인 저장분) 고른다([syncChanges]).
+  bool _storedAtOpen = false;
 
   /// 메시지 DB(못 열었거나 저장하지 않으면 null).
   MessageDb? get db => _db;
@@ -77,6 +91,7 @@ class OfflineCache {
     final base = await _baseDir();
     _dir = base == null ? null : Directory('${base.path}/$scope');
     _db = await _openDb(scope, _dir);
+    _storedAtOpen = (await _db?.count() ?? 0) > 0;
   }
 
   bool get enabled => _dir != null || _db != null;
@@ -305,6 +320,78 @@ class OfflineCache {
     }
   }
 
+  // ── 이후 바뀐 것 맞추기 ──
+
+  /// 서버의 "이후 바뀐 것" 커서(여기까지는 맞췄다) — 아직 없으면 null.
+  Future<String?> changesCursor() async {
+    final v = await read(_changesCursorName);
+    return v is String ? v : null;
+  }
+
+  /// 서버가 완전히 지운 메시지를 이 기기 메시지 DB에서도 지운다(message:expired·"이후 바뀐 것"의 removed).
+  Future<void> removeMessages(Iterable<String> messageIds) async =>
+      _db?.remove(messageIds);
+
+  /// 바뀐 메시지([changed] — 서버가 준 모양 그대로, 댓글 포함)로 저장해 둔 것을 통째로 바꾸고, [removed]는 지운다. 저장해 두지 않은
+  /// 메시지는 넣지 않는다(빠진 구간 밖의 옛 메시지 하나만 끼면 오프라인으로 위로 넘길 때 그 사이가 빈 채 이어져 보인다 — 새 메시지는
+  /// 빠진 구간 메우기가 넣는다). [keepLocal]이 true인 메시지(대기열에 이 기기의 고치기·지우기·공감이 기다리는 것 — 화면과 DB에
+  /// 먼저 반영해 둔 것)는 건드리지 않는다.
+  Future<void> applyChanges(
+    List<Map<String, dynamic>> changed,
+    Iterable<String> removed, {
+    bool Function(String messageId)? keepLocal,
+  }) async {
+    final db = _db;
+    if (db == null) return;
+    for (final raw in changed) {
+      final id = raw['id'];
+      if (id is! String || id.isEmpty || (keepLocal?.call(id) ?? false)) {
+        continue;
+      }
+      await db.update(id, (_) => raw);
+    }
+    await db.remove([
+      for (final id in removed)
+        if (!(keepLocal?.call(id) ?? false)) id,
+    ]);
+  }
+
+  /// 빠진 구간 밖에서 바뀐 것을 맞춘다 — 적어 둔 커서 다음부터 [fetch]로 한 페이지씩 받아([applyChanges]) 서버가 "더 없다"고 할 때까지
+  /// (최대 [maxPages]쪽 — 넘으면 다음 연결 때 이어서). 커서는 페이지마다 적어 두어 중간에 끊겨도 받은 데부터 이어 한다(연결 오류는
+  /// 그대로 나간다). 커서가 없으면 — 막 로그인해 저장분이 없었으면 맞출 것이 없어 지금 자리만 받고, 이 기능 전에 쌓인 저장분이
+  /// 있었으면 처음부터('0' — 서버가 바뀐 시각을 찍기 시작한 뒤의 것) 받는다. 받은 페이지 수.
+  Future<int> syncChanges(
+    MessageChangesFetcher fetch, {
+    bool Function(String messageId)? keepLocal,
+    int maxPages = changesMaxPages,
+  }) async {
+    if (_db == null) return 0;
+    var cursor = await changesCursor();
+    if (cursor == null && _storedAtOpen) cursor = '0';
+    var pages = 0;
+    while (pages < maxPages) {
+      final res = await fetch(cursor);
+      pages++;
+      await applyChanges(
+        [
+          for (final m in res['messages'] as List? ?? const [])
+            if (m is Map) Map<String, dynamic>.from(m),
+        ],
+        [
+          for (final r in res['removed'] as List? ?? const [])
+            if (r is Map && r['id'] is String) r['id'] as String,
+        ],
+        keepLocal: keepLocal,
+      );
+      final next = res['cursor'];
+      if (next is! String || next.isEmpty) break;
+      cursor = next;
+      write(_changesCursorName, next);
+      if (res['more'] != true) break;
+    }
+    return pages;
+  }
+
   /// 메시지 DB를 닫는다(지우지 않음 — 앱을 끄거나 시험이 끝날 때).
   void close() {
     _db?.close();
@@ -318,6 +405,7 @@ class OfflineCache {
     }
     _pending.clear();
     _memory.clear();
+    _storedAtOpen = false;
     final db = _db;
     _db = null;
     await db?.destroy(); // 웹은 IndexedDB DB째 지운다(앱은 아래에서 폴더째).

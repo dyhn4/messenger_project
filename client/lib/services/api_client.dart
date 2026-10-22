@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../models/admin.dart';
 import '../models/announcement.dart';
 import '../models/call_recording.dart';
+import '../models/saved_whiteboard.dart';
 import '../models/drive.dart';
 import '../models/wiki.dart';
 import '../models/board_category.dart';
@@ -2027,9 +2028,17 @@ class ApiClient {
 
   /// 이 서버에서 화상회의를 쓸 수 있는지 + LiveKit 접속 주소(server/src/calls.js).
   /// LiveKit을 안 깐 서버면 enabled=false로 오고, 클라이언트는 통화 버튼 자체를 감춘다.
-  /// [recording]·[minutes]·[summary]는 녹화(LiveKit Egress)·회의록 받아쓰기·요약을 이 서버가 하는지(예전 서버면 false).
+  /// [recording]·[minutes]·[summary]는 녹화(LiveKit Egress)·회의록 받아쓰기·요약을, [captions]는 통화 중 실시간 자막을 이 서버가
+  /// 하는지(예전 서버면 false).
   Future<
-    ({bool enabled, String? url, bool recording, bool minutes, bool summary})
+    ({
+      bool enabled,
+      String? url,
+      bool recording,
+      bool minutes,
+      bool summary,
+      bool captions,
+    })
   >
   fetchCallsConfig() async {
     final body = await _get('/api/calls/config') as Map<String, dynamic>;
@@ -2039,7 +2048,18 @@ class ApiClient {
       recording: body['recording'] == true,
       minutes: body['minutes'] == true,
       summary: body['summary'] == true,
+      captions: body['captions'] == true,
     );
+  }
+
+  /// 통화 중 실시간 자막 켜기(진행자만 — 서버 callCaptions.js).
+  Future<void> startCallCaptions(String roomId) async {
+    await _post('/api/rooms/$roomId/call/captions', const {});
+  }
+
+  /// 실시간 자막 끄기(진행자·켠 사람).
+  Future<void> stopCallCaptions(String roomId) async {
+    await _delete('/api/rooms/$roomId/call/captions');
   }
 
   /// 통화 녹화 시작(진행자만 — 서버 callRecording.js). [audioOnly]면 음성만, [minutes]면 끝난 뒤 회의록을 만든다.
@@ -2067,6 +2087,71 @@ class ApiClient {
     final body = await _get('/api/call-recordings/$id') as Map<String, dynamic>;
     return CallRecording.fromJson(body['recording'] as Map<String, dynamic>);
   }
+
+  /// 그 방에 저장한 화상회의 화이트보드(새로 고친 순 — 데이터 없이).
+  Future<List<SavedWhiteboard>> fetchSavedWhiteboards(String roomId) async {
+    final body =
+        await _get('/api/rooms/${Uri.encodeComponent(roomId)}/whiteboards')
+            as Map;
+    return [
+      for (final w in body['whiteboards'] as List? ?? const [])
+        SavedWhiteboard.fromJson(Map<String, dynamic>.from(w as Map)),
+    ];
+  }
+
+  /// 저장한 화이트보드 하나(데이터 포함 — 불러오기).
+  Future<SavedWhiteboard> fetchSavedWhiteboard(String id) async {
+    final body = await _get('/api/call-whiteboards/$id') as Map;
+    return SavedWhiteboard.fromJson(
+      Map<String, dynamic>.from(body['whiteboard'] as Map),
+    );
+  }
+
+  /// 화이트보드를 서버에 저장한다 — [id]가 있으면 그 판을 고치고(이어 그린 판), 없으면 새로 만든다.
+  Future<SavedWhiteboard> saveWhiteboard(
+    String roomId,
+    Map<String, Object?> data, {
+    String? id,
+    String? title,
+  }) async {
+    final body = id == null
+        ? await _post('/api/rooms/${Uri.encodeComponent(roomId)}/whiteboards', {
+            'data': data,
+            'title': ?title,
+          })
+        : await requestJson(
+            'PUT',
+            '/api/call-whiteboards/$id',
+            body: {'data': data},
+          );
+    return SavedWhiteboard.fromJson(
+      Map<String, dynamic>.from((body as Map)['whiteboard'] as Map),
+    );
+  }
+
+  /// 저장한 화이트보드를 지운다(처음 저장한 사람·토픽 관리자).
+  Future<void> deleteSavedWhiteboard(String id) async {
+    await _delete('/api/call-whiteboards/$id');
+  }
+
+  /// 관리자 콘솔 — 화상회의 녹화 파일 보관 설정과 지금 남은 녹화 파일(서버 운영자만).
+  Future<CallRecordingRetention> fetchCallRecordingRetention() async =>
+      CallRecordingRetention.fromJson(
+        await _get('/api/admin/call-recordings') as Map<String, dynamic>,
+      );
+
+  /// 녹화 파일 보관 기간(일)·전체 용량(GB)을 바꾼다 — null이면 제한 없음. 줄였으면 서버가 바로 넘는 만큼 지운다.
+  Future<CallRecordingRetention> updateCallRecordingRetention({
+    required int? retentionDays,
+    required int? maxGb,
+  }) async => CallRecordingRetention.fromJson(
+    await requestJson(
+          'PATCH',
+          '/api/admin/call-recordings',
+          body: {'retentionDays': retentionDays, 'maxGb': maxGb},
+        )
+        as Map<String, dynamic>,
+  );
 
   /// 못 만든 회의록을 다시 만든다(녹화를 시작한 사람·토픽 관리자).
   Future<CallRecording> retryCallMinutes(String id) async {

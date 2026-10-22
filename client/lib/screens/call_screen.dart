@@ -195,17 +195,36 @@ class _CallScreenState extends State<CallScreen> {
     if (_whiteboardOpen) board.announceOpened();
   }
 
-  /// 화이트보드 [저장] — 지금 판을 그림으로 이 대화방에 올린다(보내기 대기열로 — 연결이 끊겨 있어도 이어서 보낸다).
+  /// 화이트보드 [저장] — 지금 판을 그림으로 이 대화방에 올리고(보내기 대기열로 — 연결이 끊겨 있어도 이어서 보낸다), 획도 서버에
+  /// 저장해 다음 통화에서 불러올 수 있게 한다.
   Future<void> _saveWhiteboard() async {
     try {
-      await widget.session.saveCallWhiteboard();
-      _showToast(tr('화이트보드를 대화방에 그림으로 올렸습니다'));
+      final kept = await widget.session.saveCallWhiteboard();
+      _showToast(
+        kept
+            ? tr('화이트보드를 대화방에 그림으로 올리고, 다음 통화에서 이어 그릴 수 있게 저장했습니다')
+            : tr('화이트보드를 대화방에 그림으로 올렸습니다(이어 그릴 수 있게 저장하지는 못했습니다)'),
+      );
     } catch (e) {
       _showToast(tr('화이트보드를 저장하지 못했습니다: {e}', {'e': e}));
     }
   }
 
   /// [녹화] — 녹화 중이 아니면 어떻게 녹화할지 묻고 시작, 녹화 중이면 멈춘다(진행자·시작한 사람만 — 서버가 확인한다).
+  /// [자막] — 켜기는 진행자, 끄기는 진행자·켠 사람(모두의 자막이 꺼진다). 그 밖의 사람은 내 화면에서만 가리거나 다시 보인다.
+  Future<void> _toggleCaptions() async {
+    final controller = widget.session.callController;
+    if (controller.captions != null && !controller.canStopCaptions) {
+      controller.setShowCaptions(!controller.showCaptions);
+      return;
+    }
+    try {
+      await widget.session.setCallCaptions(controller.captions == null);
+    } catch (e) {
+      _showToast(e is ApiException ? e.message : e.toString());
+    }
+  }
+
   Future<void> _toggleRecording() async {
     final session = widget.session;
     final controller = session.callController;
@@ -396,6 +415,26 @@ class _CallScreenState extends State<CallScreen> {
                   ),
                   onPressed: _toggleRecording,
                 ),
+              // 실시간 자막 — 서버가 자막을 하고, 켜기는 진행자만(켜진 뒤에는 모두 — 끄거나 내 화면에서 가리기).
+              if (ready &&
+                  session.callCaptionsEnabled &&
+                  (controller.captions != null || controller.isHost))
+                IconButton(
+                  key: const ValueKey('call-captions'),
+                  tooltip: controller.captions == null
+                      ? tr('실시간 자막 켜기')
+                      : controller.canStopCaptions
+                      ? tr('실시간 자막 끄기(모두)')
+                      : controller.showCaptions
+                      ? tr('자막 가리기(내 화면)')
+                      : tr('자막 보이기'),
+                  icon: Icon(
+                    controller.captions != null && controller.showCaptions
+                        ? Icons.closed_caption
+                        : Icons.closed_caption_off_outlined,
+                  ),
+                  onPressed: _toggleCaptions,
+                ),
               PopupMenuButton<CallViewMode>(
                 key: const ValueKey('call-view-menu'),
                 tooltip: tr('보기'),
@@ -453,6 +492,19 @@ class _CallScreenState extends State<CallScreen> {
                                     onSave: widget.room.isSecret
                                         ? null
                                         : _saveWhiteboard,
+                                    loader: widget.room.isSecret
+                                        ? null
+                                        : WhiteboardLoader(
+                                            list: widget
+                                                .session
+                                                .savedCallWhiteboards,
+                                            load: widget
+                                                .session
+                                                .loadSavedCallWhiteboard,
+                                            delete: widget
+                                                .session
+                                                .deleteSavedWhiteboard,
+                                          ),
                                   )
                                 : CallStage(
                                     tiles: tiles,
@@ -483,6 +535,22 @@ class _CallScreenState extends State<CallScreen> {
                                       controller.answerMicRequest(accept: true),
                                   onDecline: () => controller.answerMicRequest(
                                     accept: false,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (ready &&
+                              controller.captions != null &&
+                              controller.showCaptions &&
+                              controller.recentCaptions.isNotEmpty)
+                            Positioned(
+                              left: 16,
+                              right: 16,
+                              bottom: _toast != null ? 64 : 12,
+                              child: IgnorePointer(
+                                child: Center(
+                                  child: CallCaptionsOverlay(
+                                    lines: controller.recentCaptions,
                                   ),
                                 ),
                               ),

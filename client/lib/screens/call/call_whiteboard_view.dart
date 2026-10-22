@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../../models/saved_whiteboard.dart';
 import '../../services/call_whiteboard.dart';
 import 'call_stage.dart' show callTileColor;
 import '../../l10n/tr.dart';
@@ -20,19 +21,36 @@ const whiteboardWidths = <double>[0.002, 0.004, 0.008];
 
 enum _Tool { pen, eraser }
 
-/// 통화 중 화이트보드 — 위에 도구 줄(펜·지우개·색·굵기·되돌리기·모두 지우기·닫기), 가운데에 16:9 흰 판. 마우스·손가락·
-/// 펜으로 그린다(펜의 지우개 끝은 지우개). 판 내용은 통화 참가자 모두가 같이 보고 같이 그린다([CallWhiteboard]).
+/// 저장해 둔 화이트보드 불러오기에 쓰는 것들(Session.savedCallWhiteboards·loadSavedCallWhiteboard·deleteSavedWhiteboard).
+class WhiteboardLoader {
+  final Future<List<SavedWhiteboard>> Function() list;
+  final Future<void> Function(String id) load;
+  final Future<void> Function(String id) delete;
+  const WhiteboardLoader({
+    required this.list,
+    required this.load,
+    required this.delete,
+  });
+}
+
+/// 통화 중 화이트보드 — 위에 도구 줄(펜·지우개·색·굵기·되돌리기·이 쪽 지우기·쪽 넘기기·쪽 더하기/빼기·저장·불러오기·닫기),
+/// 가운데에 16:9 흰 판. 마우스·손가락·펜으로 그린다(펜의 지우개 끝은 지우개). 판 내용은 통화 참가자 모두가 같이 보고 같이
+/// 그리고, 어느 쪽을 볼지는 각자 고른다([CallWhiteboard]).
 class CallWhiteboardView extends StatefulWidget {
   final CallWhiteboard board;
   final VoidCallback onClose;
 
-  /// [저장] — 지금 판을 그림으로 대화방에 올린다(Session.saveCallWhiteboard). null이면 단추가 없다.
+  /// [저장] — 지금 판을 그림으로 대화방에 올리고 획을 서버에 둔다(Session.saveCallWhiteboard). null이면 단추가 없다.
   final Future<void> Function()? onSave;
+
+  /// [불러오기] — 저장해 둔 판을 골라 모두의 판에 편다. null이면 단추가 없다.
+  final WhiteboardLoader? loader;
   const CallWhiteboardView({
     super.key,
     required this.board,
     required this.onClose,
     this.onSave,
+    this.loader,
   });
 
   @override
@@ -116,12 +134,60 @@ class _CallWhiteboardViewState extends State<CallWhiteboardView> {
     }
   }
 
+  /// [불러오기] — 저장해 둔 판 목록에서 고르면(지금 판에 그림이 있으면 한 번 더 묻고) 모두의 판에 편다.
+  Future<void> _openLoader() async {
+    final loader = widget.loader!;
+    final picked = await showDialog<SavedWhiteboard>(
+      context: context,
+      builder: (_) => _SavedWhiteboardsDialog(loader: loader),
+    );
+    if (picked == null || !mounted) return;
+    if (!widget.board.book.isEmpty) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(tr('화이트보드 불러오기')),
+          content: Text(
+            tr('모든 참가자의 화이트보드를 지우고 "{title}"을(를) 펼칩니다. 지금 판을 남기려면 먼저 저장하세요.', {
+              'title': picked.title,
+            }),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(tr('취소')),
+            ),
+            TextButton(
+              key: const ValueKey('whiteboard-load-confirm'),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(tr('불러오기')),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    try {
+      await loader.load(picked.id);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(content: Text(tr('화이트보드를 불러오지 못했습니다: {e}', {'e': e}))),
+        );
+      }
+    }
+  }
+
   Future<void> _confirmClear() async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(tr('화이트보드 지우기')),
-        content: Text(tr('모든 참가자의 화이트보드에서 그린 내용을 모두 지웁니다.')),
+        content: Text(
+          widget.board.book.pageIds.length > 1
+              ? tr('모든 참가자의 화이트보드에서 이 쪽에 그린 내용을 모두 지웁니다.')
+              : tr('모든 참가자의 화이트보드에서 그린 내용을 모두 지웁니다.'),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -261,10 +327,16 @@ class _CallWhiteboardViewState extends State<CallWhiteboardView> {
               toolButton(
                 'whiteboard-clear',
                 Icons.delete_sweep_outlined,
-                tr('모두 지우기'),
+                widget.board.book.pageIds.length > 1
+                    ? tr('이 쪽 모두 지우기')
+                    : tr('모두 지우기'),
                 false,
-                widget.board.book.isEmpty ? null : _confirmClear,
+                widget.board.book.isPageEmpty(widget.board.currentPage)
+                    ? null
+                    : _confirmClear,
               ),
+              const SizedBox(width: 8),
+              ..._pageButtons(toolButton),
               if (widget.onSave != null)
                 toolButton(
                   'whiteboard-save',
@@ -272,6 +344,14 @@ class _CallWhiteboardViewState extends State<CallWhiteboardView> {
                   tr('대화방에 그림으로 저장'),
                   false,
                   widget.board.book.isEmpty || _saving ? null : _save,
+                ),
+              if (widget.loader != null)
+                toolButton(
+                  'whiteboard-load',
+                  Icons.folder_open_outlined,
+                  tr('저장해 둔 화이트보드 불러오기'),
+                  false,
+                  _openLoader,
                 ),
               const SizedBox(width: 8),
               toolButton(
@@ -285,6 +365,152 @@ class _CallWhiteboardViewState extends State<CallWhiteboardView> {
           ),
         ),
       ),
+    );
+  }
+}
+
+extension on _CallWhiteboardViewState {
+  /// 쪽 단추 — ‹ 2/3 › · 쪽 더하기 · 이 쪽 빼기(첫 쪽이 아닐 때).
+  List<Widget> _pageButtons(
+    Widget Function(String, IconData, String, bool, VoidCallback?) toolButton,
+  ) {
+    final board = widget.board;
+    final ids = board.book.pageIds;
+    final index = board.currentPageIndex;
+    return [
+      if (ids.length > 1) ...[
+        toolButton(
+          'whiteboard-page-prev',
+          Icons.chevron_left,
+          tr('앞 쪽'),
+          false,
+          index > 0 ? () => board.showPage(ids[index - 1]) : null,
+        ),
+        Text(
+          '${index + 1}/${ids.length}',
+          key: const ValueKey('whiteboard-page-label'),
+          style: const TextStyle(color: Colors.white),
+        ),
+        toolButton(
+          'whiteboard-page-next',
+          Icons.chevron_right,
+          tr('다음 쪽'),
+          false,
+          index < ids.length - 1 ? () => board.showPage(ids[index + 1]) : null,
+        ),
+      ],
+      toolButton(
+        'whiteboard-page-add',
+        Icons.note_add_outlined,
+        tr('쪽 더하기'),
+        false,
+        ids.length < whiteboardMaxPages ? board.addPage : null,
+      ),
+      if (board.canRemovePage)
+        toolButton(
+          'whiteboard-page-remove',
+          Icons.remove_circle_outline,
+          tr('이 쪽 빼기(모든 참가자의 판에서)'),
+          false,
+          board.removeCurrentPage,
+        ),
+    ];
+  }
+}
+
+/// 저장해 둔 화이트보드 목록 — 고르면 그 판을 돌려준다. 처음 저장한 사람·토픽 관리자는 지울 수 있다(서버가 확인).
+class _SavedWhiteboardsDialog extends StatefulWidget {
+  final WhiteboardLoader loader;
+  const _SavedWhiteboardsDialog({required this.loader});
+
+  @override
+  State<_SavedWhiteboardsDialog> createState() =>
+      _SavedWhiteboardsDialogState();
+}
+
+class _SavedWhiteboardsDialogState extends State<_SavedWhiteboardsDialog> {
+  List<SavedWhiteboard>? _items;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final items = await widget.loader.list();
+      if (mounted) setState(() => _items = items);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _delete(SavedWhiteboard w) async {
+    try {
+      await widget.loader.delete(w.id);
+      if (mounted) setState(() => _items?.remove(w));
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = _items;
+    String two(int n) => n.toString().padLeft(2, '0');
+    String when(DateTime d) =>
+        '${d.year}-${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
+    return AlertDialog(
+      title: Text(tr('저장해 둔 화이트보드')),
+      content: SizedBox(
+        width: 420,
+        child: _error != null
+            ? Text(_error!)
+            : items == null
+            ? const SizedBox(
+                height: 80,
+                child: Center(child: CircularProgressIndicator()),
+              )
+            : items.isEmpty
+            ? Text(
+                tr(
+                  '이 대화방에 저장해 둔 화이트보드가 없습니다. 화이트보드의 [저장]으로 남겨 두면 다음 통화에서 이어 그릴 수 있습니다.',
+                ),
+              )
+            : ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final w in items)
+                    ListTile(
+                      key: ValueKey('saved-whiteboard-${w.id}'),
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.draw_outlined),
+                      title: Text(w.title),
+                      subtitle: Text(
+                        tr('{n}쪽 · {name} · {when}', {
+                          'n': w.pageCount,
+                          'name': w.updatedByName,
+                          'when': when(w.updatedAt),
+                        }),
+                      ),
+                      onTap: () => Navigator.of(context).pop(w),
+                      trailing: IconButton(
+                        tooltip: tr('지우기'),
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => _delete(w),
+                      ),
+                    ),
+                ],
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(tr('닫기')),
+        ),
+      ],
     );
   }
 }
@@ -368,7 +594,7 @@ class WhiteboardPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) =>
-      paintWhiteboard(canvas, size, board.book.strokes);
+      paintWhiteboard(canvas, size, board.currentStrokes);
 
   @override
   bool shouldRepaint(WhiteboardPainter old) => old.board != board;

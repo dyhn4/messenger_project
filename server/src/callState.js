@@ -58,7 +58,17 @@ function toState(roomId) {
     // 지금 녹화 중이면 { id, byId, byName, startedAt, audioOnly, minutes } — 참가자 모두의 통화 화면에 "녹화 중"을 띄운다
     // (callRecording.js setCallRecording). 녹화하지 않으면 칸이 없다.
     ...(call.recording && { recording: call.recording }),
+    // 실시간 자막을 켰으면 { byId, byName, startedAt } — 앱이 자막 칸과 "자막 켜짐"을 보인다(callCaptions.js setCallCaptions).
+    ...(call.captions && { captions: call.captions }),
   };
+}
+
+/** 이 통화의 실시간 자막 표시를 바꾼다(켜면 정보, 끄면 null). 통화가 없으면 false. 바뀐 상태는 호출부가 call:state로 알린다. */
+export function setCallCaptions(roomId, captions) {
+  const call = activeCalls.get(roomId);
+  if (!call) return false;
+  call.captions = captions ?? null;
+  return true;
 }
 
 /**

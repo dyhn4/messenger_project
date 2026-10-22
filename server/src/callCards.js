@@ -120,6 +120,10 @@ export async function postCallLeft(io, state, userId, wasIn) {
   await stopCallRecording({ io, roomId: state.roomId, reason: 'call-ended' }).catch((err) =>
     console.error('[call] 통화가 끝나 녹화를 멈추지 못했습니다:', err?.message ?? err),
   );
+  // 실시간 자막도(callCaptions.js — 순환 참조를 피해 그때 불러온다).
+  await import('./callCaptions.js')
+    .then((m) => m.stopCallCaptions({ io, roomId: state.roomId }))
+    .catch((err) => console.error('[call] 통화가 끝나 자막을 끄지 못했습니다:', err?.message ?? err));
   if (await finishCallCard(io, state.roomId, state.ended)) return;
   if (state.ended.restored && !state.ended.answered) return;
   const room = await findRoomById(state.roomId);

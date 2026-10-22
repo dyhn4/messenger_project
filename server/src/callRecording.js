@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Router } from 'express';
-import { EgressClient, EncodedFileOutput, EncodedFileType, EncodingOptions } from 'livekit-server-sdk';
+import { DirectFileOutput, EgressClient, EncodedFileOutput, EncodedFileType, EncodingOptions } from 'livekit-server-sdk';
 import { topicAccess } from './access.js';
 import { callCardParticipantNames, liveCallCardMessageId, refreshCallCardRecordings } from './callCards.js';
 import { isRestrictedTopic } from './callAccess.js';
 import { minutesEnabled, runCallMinutes } from './callMinutes.js';
 import {
+  actionItemsFromSummary,
   egressOutcome,
   egressPathFor,
   localRecordingPath,
@@ -16,12 +17,16 @@ import {
   recordingMessageText,
   recordingStartDenial,
   recordingStopDenial,
+  newSpeakerTracks,
+  speakerTrackFileBase,
 } from './callRecordingRules.js';
+import { livekitRoomService } from './calls.js';
 import { callStateFor, setCallRecording } from './callState.js';
 import {
   CALL_RECORDING_DIR,
   CALL_RECORDING_EGRESS_DIR,
   CALL_RECORDING_MAX_MINUTES,
+  CALL_MINUTES_SPEAKERS,
   LIVEKIT_API_KEY,
   LIVEKIT_API_SECRET,
   LIVEKIT_PORT,
@@ -78,6 +83,15 @@ function livekitEgress() {
       });
       return { egressId: info.egressId };
     },
+    /**
+     * 참가자 트랙 하나를 옮겨 쓴다(트랙 녹음) — [target]이 'ws'로 시작하면 그 웹소켓으로 소리(PCM)를 흘려보내고(실시간 자막 —
+     * callCaptions.js), 아니면 그 경로(Egress 쪽)에 파일로(마이크는 Opus 그대로 ogg — 말한 사람 나누기). → { egressId }.
+     */
+    async startTrack(roomName, trackSid, target) {
+      const output = /^wss?:\/\//.test(target) ? target : new DirectFileOutput({ filepath: target });
+      const info = await client.startTrackEgress(roomName, output, trackSid);
+      return { egressId: info.egressId };
+    },
     async stop(egressId) {
       await client.stopEgress(egressId);
     },
@@ -89,8 +103,28 @@ function livekitEgress() {
   };
 }
 
+/** 지금 회의의 마이크 트랙들 — `[{ identity, name, trackSid }]`(Egress 같은 숨은 참가자는 트랙이 없다). LiveKit이 없으면 빈 목록. */
+export async function listMicTracks(roomId) {
+  const livekit = livekitRoomService();
+  if (!livekit) return [];
+  const out = [];
+  for (const p of await livekit.listParticipants(roomId)) {
+    for (const t of p.tracks ?? []) {
+      // TrackType.AUDIO = 0, TrackSource.MICROPHONE = 2(@livekit/protocol).
+      if (Number(t.type) === 0 && Number(t.source) === 2 && t.sid) {
+        out.push({ identity: p.identity, name: p.name || p.identity, trackSid: t.sid });
+      }
+    }
+  }
+  return out;
+}
+
 const defaultDeps = {
   egress: null,
+  // 말한 사람 나누기 — 회의록을 원한 녹화에서 마이크 트랙을 사람마다 따로 녹음한다(새로 들어온 사람은 [speakerPollMs]마다 살펴 더한다).
+  speakersEnabled: () => CALL_MINUTES_SPEAKERS,
+  micTracks: listMicTracks,
+  speakerPollMs: 8000,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref?.()),
   pollMs: 3000,
   // Egress가 파일을 마무리했다고 알려 줄 때까지 기다리는 최대 시간 — 긴 녹화도 보통 몇 초 안에 끝난다.
@@ -112,6 +146,11 @@ export function setCallRecordingDepsForTest(overrides) {
 function egress() {
   deps.egress ??= livekitEgress();
   return deps.egress;
+}
+
+/** 녹화와 같은 Egress 연결 — 실시간 자막(callCaptions.js)이 마이크 트랙을 웹소켓으로 흘려보낼 때도 쓴다(시험이 바꿔 끼운 것 그대로). */
+export function recordingEgress() {
+  return egress();
 }
 
 // ── 지금 녹화 중인 것(방마다 하나) ──
@@ -245,6 +284,7 @@ export async function startCallRecording({ io, room, userId, audioOnly = false, 
     };
     rec.timer.unref?.();
     active.set(room.id, rec);
+    if (rec.minutes && deps.speakersEnabled()) startSpeakerTracking(rec, room.id);
     // 그사이 통화가 끝났으면(모두 나감) 바로 멈춘다 — 통화 상태가 없어 "녹화 중"을 실을 곳도 없다.
     if (!setCallRecording(room.id, recordingStateOf(rec))) {
       await stopCallRecording({ io, roomId: room.id, reason: 'call-ended' });
@@ -256,6 +296,43 @@ export async function startCallRecording({ io, room, userId, audioOnly = false, 
   } finally {
     starting.delete(room.id);
   }
+}
+
+/**
+ * 회의록을 원한 녹화에서 마이크 트랙을 사람마다 따로 녹음하기 시작한다(말한 사람 나누기 — callMinutes.js가 사람마다 받아써 합친다).
+ * 지금 있는 사람 것을 바로, 그 뒤 들어오는 사람 것은 [deps.speakerPollMs]마다 살펴 더한다. 시작하지 못한 트랙도 적어 두어 같은
+ * 트랙을 계속 다시 시도하지 않는다. 다 받지 못해도 섞인 녹음은 그대로라 회의록은 만들어진다.
+ */
+function startSpeakerTracking(rec, roomId) {
+  rec.speakerTracks = [];
+  const sync = async () => {
+    if (rec.syncingSpeakers || active.get(roomId) !== rec) return;
+    rec.syncingSpeakers = true;
+    try {
+      const fresh = newSpeakerTracks(rec.speakerTracks, await deps.micTracks(roomId));
+      for (const t of fresh) {
+        const filePath = egressPathFor(deps.egressDir(), speakerTrackFileBase(rec.id, rec.speakerTracks.length + 1));
+        const entry = { egressId: null, identity: t.identity, name: t.name, trackSid: t.trackSid, filePath, startedAt: Date.now() };
+        try {
+          ({ egressId: entry.egressId } = await egress().startTrack(roomId, t.trackSid, filePath));
+        } catch (err) {
+          console.warn('[call] 사람마다 따로 녹음하지 못했습니다(Egress 트랙 녹음):', t.identity, err?.message ?? err);
+          entry.filePath = null;
+        }
+        rec.speakerTracks.push(entry);
+      }
+      if (fresh.length > 0 && active.get(roomId) === rec) {
+        await updateCallRecording(rec.id, { speakerTracks: rec.speakerTracks });
+      }
+    } catch (err) {
+      console.warn('[call] 회의 참가자의 마이크를 살피지 못했습니다:', err?.message ?? err);
+    } finally {
+      rec.syncingSpeakers = false;
+    }
+  };
+  rec.speakerTimer = setInterval(() => void sync(), deps.speakerPollMs);
+  rec.speakerTimer.unref?.();
+  void sync();
 }
 
 /**
@@ -271,6 +348,7 @@ export async function stopCallRecording({ io, roomId, userId = null, reason = 'u
   if (!rec) return { ok: true };
   active.delete(roomId);
   clearTimeout(rec.timer);
+  clearInterval(rec.speakerTimer);
   setCallRecording(roomId, null);
   emitCallState(io, roomId);
   const participantNames = await callCardParticipantNames(roomId, rec.callMessageId).catch(() => []);
@@ -278,6 +356,7 @@ export async function stopCallRecording({ io, roomId, userId = null, reason = 'u
     status: 'processing',
     endedAt: new Date(),
     participantNames,
+    ...(rec.speakerTracks && { speakerTracks: rec.speakerTracks }),
   });
   if (!row) return { ok: true };
   if (reason === 'limit') console.log(`[call] 녹화가 최대 길이(${CALL_RECORDING_MAX_MINUTES}분)가 되어 멈췄습니다:`, roomId);
@@ -288,7 +367,8 @@ export async function stopCallRecording({ io, roomId, userId = null, reason = 'u
 }
 
 async function stopEgresses(row) {
-  for (const id of [row.egressId, row.minutesEgressId]) {
+  const speakers = (row.speakerTracks ?? []).map((t) => t.egressId);
+  for (const id of [row.egressId, row.minutesEgressId, ...speakers]) {
     if (!id) continue;
     await egress()
       .stop(id)
@@ -406,13 +486,19 @@ async function publishRecording(io, row, local, outcome) {
     else error = `녹화 파일을 대화방에 올리지 못했습니다: ${sent.error}`;
   }
   if (error) console.warn('[call]', error, row.id);
-  return transitionCallRecording(row.id, 'processing', {
+  const done = await transitionCallRecording(row.id, 'processing', {
     status: 'done',
     filePath: fileUrl,
+    fileSize: size,
     durationMs: durationMs != null ? Math.round(durationMs) : null,
     messageId,
     error,
   });
+  // 새 파일로 녹화 전체 용량을 넘었을 수 있다 — 오래된 녹화 파일부터 지운다(설정이 있을 때만, callRecordingRetention.js).
+  import('./callRecordingRetention.js')
+    .then((m) => m.purgeCallRecordings(io))
+    .catch((err) => console.error('[call] 녹화 보관 정리 실패:', err?.message ?? err));
+  return done;
 }
 
 /**
@@ -459,7 +545,16 @@ export function recordingDto(row, { full = false, canRetry = false } = {}) {
     minutesStatus: row.minutesStatus,
     minutesError: row.minutesError,
     participantNames: row.participantNames ?? [],
-    ...(full && { transcript: row.transcript, summary: row.summary, canRetry }),
+    // 보관 기간·용량을 넘어 녹화 파일을 지웠으면 그 시각과 까닭('age' | 'size') — 회의록은 남는다.
+    purgedAt: row.purgedAt ? new Date(row.purgedAt).getTime() : null,
+    purgeReason: row.purgeReason ?? null,
+    ...(full && {
+      transcript: row.transcript,
+      summary: row.summary,
+      // 요약의 "할 일" — 회의록 화면이 한 줄씩 할 일로 만든다(callRecordingRules.js actionItemsFromSummary).
+      actionItems: actionItemsFromSummary(row.summary, { meetingAt: row.startedAt }),
+      canRetry,
+    }),
   };
 }
 

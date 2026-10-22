@@ -470,9 +470,13 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - **녹화·자동 회의록**(관리자가 녹화 서버를 켰을 때 — 아래 "화상회의 녹화·회의록") — 진행자가 통화 화면 위의 ● 단추로 **영상과 소리(mp4)** 또는
   **소리만(mp3)** 녹화를 시작하면 모두의 화면 왼쪽 위에 "녹화 중 12:34"가 뜨고, 멈추거나 통화가 끝나면 녹화 파일이 **시작한 사람 이름으로
   대화방에 올라갑니다**. "끝나면 회의록 만들기"를 고르면 녹음을 **받아쓰고 요약**해(요약·논의한 내용·결정 사항·할 일) 화상회의 카드의
-  **[회의록]**으로 보고, 복사하거나 **팀 위키에 새 페이지로 저장**합니다
-- **화이트보드 저장** — 화이트보드 도구 줄의 **저장**으로 지금 판을 그림(1920×1080 PNG)으로 대화방에 올리고, 저장하지 않은 그림이 있는 채
-  **마지막 사람이 통화를 나가면 저절로 올립니다**(보내기 대기열로 — 연결이 끊겨 있어도 잃지 않음)
+  **[회의록]**으로 보고, 복사하거나 **팀 위키에 새 페이지로 저장**합니다. 마이크를 사람마다 따로 녹음해 **누가 말했는지 나눠 받아쓰고**
+  (`[03:25] 홍길동: …`), 요약의 할 일은 한 줄씩 **[할 일로]** 담당자·기한을 채운 할 일로 만듭니다
+- **실시간 자막**(녹화 서버와 받아쓰기가 설정됐을 때) — 진행자가 통화 화면 위의 CC 단추로 켜면 말한 사람 이름과 함께 화면 아래에 자막이
+  뜹니다(최근 세 줄, 각자 내 화면에서 가릴 수 있음)
+- **화이트보드 저장·불러오기·여러 쪽** — 화이트보드 도구 줄의 **저장**으로 지금 판을 그림(1920×1080 PNG — 쪽마다 한 장)으로 대화방에 올리고
+  획도 서버에 남겨, 다음 통화에서 **불러오기**로 모두의 판에 펴고 이어 그립니다. **쪽**을 더해 여러 장에 그리고(쪽은 각자 넘김), 저장하지 않은
+  그림이 있는 채 **마지막 사람이 통화를 나가면 저절로 올립니다**(보내기 대기열로 — 연결이 끊겨 있어도 잃지 않음)
 - 사내망 밖(LTE/5G)에서도 됨(외부 접속을 설정한 서버 — [환경 변수 설정](#환경-변수-설정)의 "외부(LTE/5G)에서 접속하기")
 
 **알림**
@@ -1907,10 +1911,11 @@ DKIM 서명), `mailFormatHtml.js`(서식 있는 메일 쓰기), 앱은 `client/l
   남은 것: 받은 댓글을 실시간으로 이 기기 DB에 넣기(지금은 다음 동기화 때 맞춰짐), 한 번도 열어 본 적 없는 브라우저에서 서버 없이 열기(앱
   파일이 없음), 오래 쓰면 쌓이는 `message_removals` 정리(지금은 지우지 않음 — 행이 작아 급하지 않음).
 - **자동 자리 비움** — 접속 상태가 접속/미접속뿐이라 한동안 손대지 않으면 "자리 비움"으로 바뀌는 것이 없습니다.
-- **통화 녹화·회의록 후속(남은 것)** — Egress 녹화·받아쓰기·요약 회의록·화이트보드 저장은 들어갔습니다(위 "화상회의 녹화·회의록").
-  남은 것: Egress·Redis를 설치 프로그램이 함께 띄우기(지금은 관리자가 Docker로 — Windows 바이너리가 없음), 받아쓰기에서 말한 사람 나누기(지금은 섞인
-  소리 하나를 받아써서 누가 말했는지 모름 — 사람마다 따로 녹음해야 함), 회의록의 할 일을 바로 할 일로 만들기, 녹화 파일 보관 기간·용량 관리,
-  통화 중 실시간 자막, 저장한 화이트보드를 다음 통화에서 다시 불러와 이어 그리기·여러 장.
+- **통화 녹화·회의록 후속(남은 것)** — Egress 녹화·받아쓰기·요약 회의록·화이트보드 저장, 그리고 Egress·Redis를 Docker로 띄우는 시작 메뉴 항목("화상회의
+  녹화 서버(Docker)")·말한 사람 나누기(트랙 녹음)·회의록의 할 일을 할 일로·녹화 파일 보관 기간·용량·통화 중 실시간 자막·저장한 화이트보드 불러와 이어
+  그리기·여러 쪽은 들어갔습니다(위 "화상회의 녹화·회의록"). 남은 것: Docker 없이 Egress 띄우기(Windows용 Egress가 나오기 전에는 Docker Desktop이 필요),
+  실제 Egress로 끝까지 확인하기(트랙 녹음의 웹소켓 소리 형식·`host.docker.internal` 경로 — 지금은 가짜 Egress와 실제 웹소켓으로만 확인), 자막을
+  회의록에 함께 남기기, 화이트보드 쪽 순서 바꾸기.
 
 ### 4순위 — 협업 도구로서 부족한 것
 
@@ -2828,6 +2833,10 @@ Xcode로 직접 빌드할 때는 Signing & Capabilities에서 팀을 고르면 �
 | POST / DELETE | `/api/rooms/:id/call/recording` | **화상회의 녹화 시작/멈춤**(`callRecording.js`) — 시작 `{ audioOnly?, minutes? }`는 진행 중인 통화의 진행자만(409 `진행자만 녹화를 시작할 수 있습니다.`·`이미 녹화하고 있습니다.`, 녹화·받아쓰기가 설정 안 됐으면 503, Egress가 못 받으면 502, 같은 방 10분에 10번 넘으면 429) → 201 `{ recording }`. 멈춤은 진행자·시작한 사람(403). 녹화 중 표시는 소켓 `call:state`의 `recording`, 진행은 `call:card`의 `card.recordings` |
 | GET | `/api/call-recordings/:id` | 녹화 한 건과 **회의록** — 그 방 멤버만(아니면 404). `{ recording: { id, roomId, callMessageId, startedBy, startedByName, startedAt, endedAt, durationMs, audioOnly, status(recording·processing·done·failed), error, messageId, minutesStatus(none·pending·transcribing·summarizing·done·failed), minutesError, participantNames, transcript, summary, canRetry } }` |
 | POST | `/api/call-recordings/:id/minutes/retry` | 못 만든 회의록 다시 만들기 — 녹화를 시작한 사람·토픽 관리자, 받아쓴 글이나 녹음이 남아 있을 때(403), 이미 만드는 중이면 409 |
+| POST / DELETE | `/api/rooms/:id/call/captions` | **통화 중 실시간 자막 켜기/끄기**(`callCaptions.js`) — 켜기는 진행 중인 통화의 진행자만(409 `진행자만 자막을 켤 수 있습니다.`·`이미 자막을 켰습니다.`, 녹화·받아쓰기가 설정 안 됐으면 503) → 201. 끄기는 진행자·켠 사람(403). 켜짐은 소켓 `call:state`의 `captions { byId, byName, startedAt }`, 자막은 `call:caption { roomId, userId, name, text, at }` |
+| GET / POST | `/api/rooms/:id/whiteboards` | 그 방에 **저장한 화이트보드**(새로 고친 순 50개, 데이터 없이 `{ whiteboards: [{ id, roomId, title, pageCount, createdBy, createdByName, updatedByName, createdAt, updatedAt }] }`) / 새로 저장 `{ title?, data }` → 201 `{ whiteboard }`(데이터 모양이 틀리면 400, 읽기 전용·보관 토픽은 토픽 관리자만) — 방 멤버만(아니면 404), 비밀 대화는 400 |
+| GET / PUT / DELETE | `/api/call-whiteboards/:id` | 저장한 화이트보드 하나(데이터 포함 — 불러오기) / 다시 저장 `{ data, title? }`(이어 그린 판) / 지우기(처음 저장한 사람·토픽 관리자 — 아니면 403) |
+| GET / PATCH | `/api/admin/call-recordings` | (서버 운영자) **화상회의 녹화 보관** `{ enabled, retentionDays, maxGb, count, totalBytes, purgedCount }` / 바꾸기 `{ retentionDays?, maxGb? }`(null·빈 값은 제한 없음, 1~3650일·1~100000GB) — 바꾸면 바로 한 번 정리 |
 | POST | `/api/rooms/:id/favorite` | 즐겨찾기 토글 |
 | POST | `/api/rooms/:id/muted` | 알림 끄기 토글 |
 | GET | `/api/rooms/:id` | 방 정보 조회 |
@@ -3513,13 +3522,43 @@ LiveKit 데이터 채널(reliable, topic `call`)로 `{"type":"hand","raised":tru
   화상회의 카드에는 녹화마다 한 줄(녹화 중·파일 마무리 중·실패와 회의록 단계)이 붙습니다(`card.recordings`, 카드 하나에 20개까지).
 - **자동 회의록** — 녹음을 **OpenAI 호환 받아쓰기 API**(`/audio/transcriptions` — OpenAI Whisper나 사내에 띄운 faster-whisper·whisper.cpp 서버)로
   받아쓰고(구간마다 `[03:25]` 시각), **요약 서비스**(OpenAI 호환 `/chat/completions` — 사내 LLM 서버 — 또는 Claude)로 요약(요약·논의한 내용·결정 사항·할 일)
-  합니다. 영상 녹화에 회의록까지 고르면 받아쓰기용 소리만 녹음을 하나 더 돌리고 다 쓰면 지웁니다. 화상회의 카드의 **[회의록]**(받아쓰는 중·요약하는
+  합니다. 영상 녹화에 회의록까지 고르면 받아쓰기용 소리만 녹음을 하나 더 돌리고 다 쓰면 지웁니다.
+  - **말한 사람 나누기** — 회의록을 원한 녹화면 Egress의 **트랙 녹음**으로 마이크를 사람마다 따로(Opus 그대로 ogg, `<녹화 id>-spk-N.ogg`) 녹음하고
+    (늦게 들어온 사람은 8초마다 살펴 더함, 녹화 하나에 16개까지), 사람마다 받아써 실제 녹음이 시작된 시각(Egress가 알려 준 것)으로 맞춰
+    `[03:25] 홍길동: …` 한 줄씩 합칩니다(`callRecordingRules.js` `mergeSpeakerTranscripts`). 요약에도 그 이름이 말한 사람이라고 알려 결정·할 일의 담당자를
+    이름으로 적게 합니다. 사람마다 받은 것이 하나도 없으면 예전처럼 섞인 녹음 하나로, 다 쓴 사람별 음성은 지웁니다. `CALL_MINUTES_SPEAKERS=off`면 끕니다.
+  - **할 일로 만들기** — 요약의 "## 할 일" 글머리표(`담당자: 할 일 (기한)` — 요약에 그 꼴로 부탁함)를 서버가 나눠(`actionItemsFromSummary` — 담당자는
+    두 낱말까지의 이름, 기한은 `2026-10-30`·`10/30`·`11월 3일`처럼 날짜로 읽히는 것만 — 해가 없으면 회의한 해, 두 달 넘게 앞이면 다음 해) 회의록
+    화면에 한 줄씩 **[할 일로]**를 붙입니다. 누르면 그 방의 할 일 편집기가 제목·설명(어느 회의록인지)·담당자(이름이 같거나 품는 방 멤버가 딱 한 명일
+    때만 — 아니면 기본값 "나")·기한을 채워 열리고, 고쳐서 저장합니다.
+
+  화상회의 카드의 **[회의록]**(받아쓰는 중·요약하는
   중이면 그 단계)을 누르면 회의록 화면 — 회의 정보·참석자·요약·받아쓰기 전문, **복사**(마크다운)와 **팀 위키에 저장**(새 페이지). 못 만들었으면 이유와
   **다시 만들기**(시작한 사람·토픽 관리자 — 받아쓴 글이 있으면 요약부터). 요약 서비스가 없으면 받아쓰기만 남습니다. 녹음을 그 서비스로 보내므로,
   회사 밖으로 내보내기 어려우면 사내 서버 주소를 적으세요.
 - **진행 상태는 DB(`call_recordings`)에** 두어, 녹화 중이나 마무리 중에 서버가 다시 시작돼도 켜질 때 멈추고 이어서 마무리합니다(그 통화의 녹화는
   거기서 끝남 — 계속 녹화하려면 다시 시작).
-- **켜는 법**(Egress를 띄울 PC — Docker가 되는 리눅스 서버나 WSL2):
+- **녹화 파일 보관** — 관리자 콘솔 "운영 현황"의 **화상회의 녹화 보관**에서 보관 기간(일)과 녹화 파일 전체 용량(GB)을 정하면(비우면 제한 없음 — 기본),
+  하루에 한 번과 새 녹화가 올라올 때 기간이 지난 것부터, 그래도 넘으면 오래된 것부터 지웁니다(`callRecordingRetention.js`). 녹화 파일은 커서 다른 파일과
+  달리 **디스크에서도 지우고**, 그 파일을 가리키는 메시지(녹화 메시지와 그것을 전달한 메시지)는 "삭제된 파일"이 되며, 회의록은 남고 화상회의 카드의
+  녹화 줄에 "보관 기간이 지나 파일을 지움"/"용량을 넘어 파일을 지움"이 붙습니다. 콘솔에 지금 남은 녹화 파일 수·용량과 지금까지 지운 수가 보입니다
+  (`GET`·`PATCH /api/admin/call-recordings`, 바꾸면 감사 로그).
+- **실시간 자막** — 진행자가 CC 단추로 켜면(`POST /api/rooms/:id/call/captions`, 끄기는 진행자·켠 사람 `DELETE`) 서버가 Egress에 마이크 트랙마다
+  **웹소켓 출력**(트랙 녹음)을 시켜, Egress가 소리(16비트 PCM — 형식은 연결 요청의 Content-Type, 없으면 `CALL_CAPTION_SAMPLE_RATE`·
+  `CALL_CAPTION_CHANNELS`)를 이 서버의 자막용 포트(`CALL_CAPTION_WS_PORT` 기본 7891 — 평문, 주소 끝의 무작위 열쇠로만 받음)로 보냅니다. 서버는 20ms마다
+  소리 크기로 말을 끊어(0.7초 조용하면, 길면 10초에서 — 0.4초보다 짧은 소리는 버림, `callCaptionRules.js` `Utterancer`) 16kHz WAV로 받아쓰기
+  서비스에 보내고 `call:caption { roomId, userId, name, text, at }`을 그 방에 보냅니다(밀리면 새 마디를 버림 — 한 방에 동시에 4개). 앱은 화면 아래에
+  최근 세 줄을 8초씩 보이고, 진행자·켠 사람이 아니면 CC 단추가 내 화면에서 가리기/보이기입니다. `call:state`의 `captions`로 모두가 같이 알고, 통화가
+  끝나면 저절로 꺼집니다. 자막은 저장하지 않습니다(기록은 회의록으로). 녹화(Egress)와 받아쓰기가 둘 다 설정돼야 켜지고(`CALL_CAPTIONS=off`면 끔),
+  Egress가 이 서버에 닿는 주소는 `CALL_CAPTION_WS_URL`(기본 `ws://host.docker.internal:7891`).
+- **켜는 법 — 시작 메뉴 "화상회의 녹화 서버(Docker)"**(`Call-Recording.ps1`): Egress는 Windows용 실행 파일이 없어 설치 프로그램에 넣지 못하므로, 이
+  PC에 **Docker Desktop**(WSL2)을 깔고 이 항목을 누르면 녹화 폴더(기본 `<설치 폴더>\recordings`)를 정하고, `<설치 폴더>\call-recording\`에
+  `egress.yaml`(LiveKit 키·주소 — `livekit.yaml`에서 읽음)과 `docker-compose.yml`(Redis + Egress, 다시 켜면 저절로)을 쓰고, `livekit.yaml`에
+  Redis 주소를, `.env`에 `CALL_RECORDING_DIR`·`CALL_RECORDING_EGRESS_DIR`을 적고, 자막용 포트를 방화벽에서 열고(개인·도메인 네트워크),
+  `docker compose up -d`로 띄운 뒤 LiveKit·서버 서비스를 다시 시작합니다(처음에는 이미지를 받느라 인터넷이 필요). 끌 때는 `Call-Recording.ps1 -Off`
+  (컨테이너를 내리고 `CALL_RECORDING_DIR`을 비움 — 녹화 파일은 남김). 받아쓰기·요약은 아래 4번처럼 `.env`에 직접 적습니다. 시험은
+  `server\installer\tests\Call-Recording.Tests.ps1`.
+- **손으로 켜는 법**(Egress를 다른 PC — Docker가 되는 리눅스 서버나 WSL2 — 에 띄울 때):
   1. Redis를 띄웁니다(`docker run -d --name redis -p 6379:6379 redis:7`).
   2. LiveKit 설정(`livekit.yaml`, 설치 폴더)에 `redis: { address: <Redis 주소>:6379 }`를 더하고 `TangoTalkLiveKit` 서비스를 다시 시작합니다
      (Egress가 LiveKit과 Redis로 이야기합니다).
@@ -3529,13 +3568,24 @@ LiveKit 데이터 채널(reliable, topic `call`)로 `{"type":"hand","raised":tru
   4. `server/.env`에 `CALL_RECORDING_DIR=<녹화 폴더 — 이 서버에서 본 경로>`(컨테이너 안 경로가 `/out`이 아니면 `CALL_RECORDING_EGRESS_DIR`도),
      회의록을 쓰려면 `CALL_TRANSCRIBE_URL`(+`CALL_TRANSCRIBE_API_KEY`·`CALL_TRANSCRIBE_MODEL`·`CALL_TRANSCRIBE_LANGUAGE`)과 요약용
      `CALL_SUMMARY_URL`(+`CALL_SUMMARY_API_KEY`·`CALL_SUMMARY_MODEL`) 또는 `ANTHROPIC_API_KEY`(모델 기본 `claude-opus-5-5`)를 적고 서버를 다시
-     시작합니다(`.env.example` 참고). 앱은 `GET /api/calls/config`의 `recording`·`minutes`·`summary`로 단추를 보입니다.
-  5. 서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0134`)가 필요합니다.
+     시작합니다(`.env.example` 참고). 앱은 `GET /api/calls/config`의 `recording`·`minutes`·`summary`·`captions`로 단추를 보입니다. 다른 PC의 Egress가
+     자막 소리를 보내려면 `CALL_CAPTION_WS_URL`을 이 서버의 IP로 적고 그 포트를 엽니다.
+  5. 서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0134`, `0142` — 보관·말한 사람·저장한 화이트보드)가 필요합니다.
 
-**화이트보드 저장** — 화이트보드 판은 참가자 기기에만 있고(데이터 채널로 주고받음) 서버는 모릅니다. 그래서 도구 줄의 **저장**(⤓)이 지금 판을 그림
-(1920×1080 PNG, 화면과 같은 그리기 코드 — `services/call_whiteboard.dart` `paintWhiteboard`)으로 그 대화방에 올리고(`화상회의 화이트보드` — 보드 뷰
-토픽은 게시글), 저장하지 않은 그림이 남은 채 **마지막 사람이 통화를 나가면 저절로 올립니다**(`화상회의 화이트보드(통화가 끝나 저절로 저장)`). 둘 다 보내기
-대기열로 보내서 연결이 끊겨 있어도 이어서 올라갑니다. 비밀 대화는 통화가 없어 해당 없음. 대화에 **화상회의 카드**도 남습니다(아래).
+**화이트보드 저장·불러오기** — 화이트보드 판은 참가자 기기에만 있고(데이터 채널로 주고받음) 서버는 모릅니다. 그래서 도구 줄의 **저장**(⤓)이 지금 판을
+그림(1920×1080 PNG, 화면과 같은 그리기 코드 — `services/call_whiteboard.dart` `paintWhiteboard` — 그림이 있는 쪽마다 한 장, `(2쪽)`을 붙인 이름)으로 그
+대화방에 한 메시지로 올리고(`화상회의 화이트보드` — 보드 뷰 토픽은 게시글), 저장하지 않은 그림이 남은 채 **마지막 사람이 통화를 나가면 저절로
+올립니다**(`화상회의 화이트보드(통화가 끝나 저절로 저장)`). 둘 다 보내기 대기열로 보내서 연결이 끊겨 있어도 이어서 올라갑니다. 비밀 대화는 통화가
+없어 해당 없음. 대화에 **화상회의 카드**도 남습니다(아래).
+- **이어 그리기** — 저장할 때 그림과 함께 **획 자체**를 서버에 둡니다(`call_whiteboards` — `{ v: 1, pages: [{ id, strokes: [{ id, a, c, w, p }] }] }`,
+  점은 첫 점 다음부터 앞 점과의 차이로 줄인 정수, 서버는 모양·크기만 봄 — 20쪽·획 2만·좌표 40만 개까지, `callWhiteboards.js`). 도구 줄의
+  **불러오기**(📂)가 그 방에 저장한 판 목록(새로 고친 순 — 쪽 수·고친 사람·시각, 처음 저장한 사람·토픽 관리자는 지우기)을 보여 주고, 고르면(지금 판에
+  그림이 있으면 한 번 더 묻고) 모두의 판을 비우고 그 판을 펴서(`reset`·`board`·쪽·획을 데이터 채널로) 이어 그립니다. 불러온 판이나 한 번 저장한 판을
+  다시 저장하면 **같은 판을 고칩니다**(`board { id, title }` 메시지로 모두가 그 id를 알고, 늦게 들어온 사람에게도 같이 보냄 — 그사이 지워졌으면 새로).
+  획을 저장하지 못해도(연결 끊김) 그림은 대기열로 올라가고, 안내에 그렇게 적습니다.
+- **여러 쪽** — 도구 줄의 **쪽 더하기**로 쪽을 더하고(모두의 판에 — 20쪽까지) ‹ 2/3 ›로 넘깁니다. 어느 쪽을 볼지는 **각자** 고르고, 그리는 획·
+  지우개·되돌리기·"이 쪽 모두 지우기"는 보고 있는 쪽에만 합니다. **이 쪽 빼기**는 첫 쪽이 아닐 때 모두의 판에서 빼고, 보던 쪽이 빠진 사람은 앞 쪽으로
+  넘어갑니다. 쪽을 모르는 예전 앱은 쪽 표시(`pg`)·새 메시지를 무시하고 모든 획을 한 판에 그립니다(예전 앱의 "모두 지우기"는 판 전체).
 
 **수신·거절** — 통화가 시작되면 방 멤버 전원에게 `call:state`가 가고, 앱은 "진행 중 + 나는 참가자 아님 + 나는 통화
 중 아님"이면 **화상회의 요청** 창을 띄웁니다(앱이 꺼진 안드로이드는 FCM 전화 알림). 한 번 응답한 통화(참여·거절·나감,

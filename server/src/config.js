@@ -119,6 +119,32 @@ export const CALL_RECORDING_DIR = process.env.CALL_RECORDING_DIR || null;
 export const CALL_RECORDING_EGRESS_DIR = (process.env.CALL_RECORDING_EGRESS_DIR || '/out').replace(/[\\/]+$/, '');
 export const CALL_RECORDING_MAX_MINUTES = Math.max(1, Number(process.env.CALL_RECORDING_MAX_MINUTES) || 240);
 
+/** 'off'·'false'·'0'·'no'면 끈 것. */
+const isOff = (v) => /^(off|false|0|no)$/i.test(String(v ?? '').trim());
+
+/**
+ * 회의록에서 말한 사람 나누기 — 회의록을 원한 녹화면 Egress가 마이크 트랙을 사람마다 따로 녹음하고(트랙 녹음, ogg) 사람마다 받아써서
+ * "[03:25] 홍길동: …"으로 합친다(callRecording.js·callMinutes.js). 기본 켬 — CALL_MINUTES_SPEAKERS=off면 예전처럼 섞인 녹음 하나만.
+ */
+export const CALL_MINUTES_SPEAKERS = !isOff(process.env.CALL_MINUTES_SPEAKERS);
+
+/**
+ * 통화 중 실시간 자막(callCaptions.js) — 진행자가 켜면 Egress가 마이크 트랙마다 소리(PCM)를 이 서버의 웹소켓으로 흘려보내고, 서버가 말
+ * 한 마디씩 받아써(CALL_TRANSCRIBE_URL) 통화 화면에 자막으로 띄운다. 녹화(Egress)와 받아쓰기가 둘 다 설정돼 있어야 켜진다.
+ *  - CALL_CAPTION_WS_PORT: Egress가 소리를 보낼 이 서버의 포트(평문 ws — 기본 7891). 방화벽은 Egress가 있는 PC에서만 열면 된다.
+ *  - CALL_CAPTION_WS_URL: Egress에서 본 그 주소(기본 ws://host.docker.internal:<포트> — 같은 PC의 Docker). 다른 PC면 이 서버의 IP로.
+ *  - CALL_CAPTION_SAMPLE_RATE·CALL_CAPTION_CHANNELS: Egress가 보내는 PCM의 형식을 웹소켓 연결 요청이 알려 주지 않을 때 쓸 값(기본
+ *    48000Hz·1채널).
+ *  - CALL_CAPTIONS=off면 끈다.
+ */
+export const CALL_CAPTIONS = !isOff(process.env.CALL_CAPTIONS);
+export const CALL_CAPTION_WS_PORT = Number(process.env.CALL_CAPTION_WS_PORT) || 7891;
+export const CALL_CAPTION_WS_URL = (
+  process.env.CALL_CAPTION_WS_URL || `ws://host.docker.internal:${CALL_CAPTION_WS_PORT}`
+).replace(/\/+$/, '');
+export const CALL_CAPTION_SAMPLE_RATE = Number(process.env.CALL_CAPTION_SAMPLE_RATE) || 48000;
+export const CALL_CAPTION_CHANNELS = Number(process.env.CALL_CAPTION_CHANNELS) || 1;
+
 /**
  * 자동 회의록(callMinutes.js) — 녹음을 받아쓰고(음성 인식) 요약한다. 둘 다 바깥 서비스라 관리자가 정했을 때만 켜진다.
  *  - 받아쓰기: OpenAI 호환 `/audio/transcriptions` API. CALL_TRANSCRIBE_URL은 그 앞까지의 주소(예: https://api.openai.com/v1, 사내에

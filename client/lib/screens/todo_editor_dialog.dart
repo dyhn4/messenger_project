@@ -42,7 +42,8 @@ import '../l10n/tr.dart';
 /// - 새로 만들 때 담당자 기본값은 나다(지울 수 있다 — 나와의 대화도 같다). 고른 대화방을 다른 방으로 바꾸면 첨부와
 ///   담당자가 초기화된다(잔디와 같다 — 지울 게 있으면 먼저 묻는다).
 /// - [initialTitle]·[initialDescription]·[initialAttachments]·[sourceMessageId]·[sourceCommentId]는 메시지·댓글에서
-///   만들 때 미리 채우는 값이다(제목·설명은 고칠 수 있다).
+///   만들 때 미리 채우는 값이다(제목·설명은 고칠 수 있다). [initialAssignees]·[initialDue]는 회의록의 할 일에서 만들 때
+///   (담당자 — 주면 기본값 "나" 대신, 기한 — 그날 하루).
 /// - [api]는 테스트가 가짜를 끼우는 자리 — 안 주면 [SessionTodos.todoApi].
 Future<Todo?> showTodoEditor(
   BuildContext context, {
@@ -53,6 +54,8 @@ Future<Todo?> showTodoEditor(
   String? initialTitle,
   String? initialDescription,
   List<UploadedAttachment> initialAttachments = const [],
+  List<AppUser>? initialAssignees,
+  DateTime? initialDue,
   String? sourceMessageId,
   String? sourceCommentId,
   TodoApi? api,
@@ -72,6 +75,8 @@ Future<Todo?> showTodoEditor(
     initialTitle: initialTitle,
     initialDescription: initialDescription,
     initialAttachments: initialAttachments,
+    initialAssignees: initialAssignees,
+    initialDue: initialDue,
     sourceMessageId: sourceMessageId,
     sourceCommentId: sourceCommentId,
     api: api,
@@ -176,6 +181,8 @@ class TodoEditor extends StatefulWidget {
   final String? initialTitle;
   final String? initialDescription;
   final List<UploadedAttachment> initialAttachments;
+  final List<AppUser>? initialAssignees;
+  final DateTime? initialDue;
   final String? sourceMessageId;
   final String? sourceCommentId;
   final TodoApi? api;
@@ -195,6 +202,8 @@ class TodoEditor extends StatefulWidget {
     this.initialTitle,
     this.initialDescription,
     this.initialAttachments = const [],
+    this.initialAssignees,
+    this.initialDue,
     this.sourceMessageId,
     this.sourceCommentId,
     this.api,
@@ -298,8 +307,15 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     } else {
       _title.text = widget.initialTitle ?? '';
       _description.text = widget.initialDescription ?? '';
-      // 담당자 기본값은 나(잔디) — 지울 수 있다. 대화방이 아직 없으면 처음 고를 때 채운다.
-      _assignees = _defaultAssignees(_room);
+      // 담당자 기본값은 나(잔디) — 지울 수 있다. 대화방이 아직 없으면 처음 고를 때 채운다. 회의록의 할 일은 거기 적힌 담당자로.
+      _assignees = widget.initialAssignees != null
+          ? List.of(widget.initialAssignees!)
+          : _defaultAssignees(_room);
+      final due = widget.initialDue;
+      if (due != null) {
+        _start = DateTime(due.year, due.month, due.day);
+        _due = _start;
+      }
       for (final a in widget.initialAttachments.take(todoAttachmentsMaxCount)) {
         _files.add(_TodoFile.existing(a));
       }

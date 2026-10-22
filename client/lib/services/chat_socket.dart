@@ -361,6 +361,9 @@ class CallState {
   /// 지금 녹화 중이면 그 녹화(서버 callRecording.js) — 통화 화면에 "녹화 중"을 띄운다. 녹화하지 않거나 예전 서버면 null.
   final CallRecordingLive? recording;
 
+  /// 실시간 자막을 켰으면 켠 사람(서버 callCaptions.js) — 끄거나 예전 서버면 null.
+  final CallCaptionsLive? captions;
+
   const CallState({
     required this.roomId,
     required this.active,
@@ -371,6 +374,7 @@ class CallState {
     this.videoTier,
     this.restored = false,
     this.recording,
+    this.captions,
   });
 
   factory CallState.fromJson(Map<String, dynamic> json) => CallState(
@@ -388,6 +392,7 @@ class CallState {
     videoTier: json['videoTier'] as String?,
     restored: json['restored'] == true,
     recording: CallRecordingLive.fromJson(json['recording']),
+    captions: CallCaptionsLive.fromJson(json['captions']),
   );
 }
 
@@ -820,6 +825,10 @@ class ChatSocket {
 
   /// 진행자의 마이크 켜기/끄기 요청(call:mic).
   Stream<CallMicRequest> get callMicRequests => _callMicController.stream;
+
+  /// 통화 중 실시간 자막 한 줄(call:caption — 서버 callCaptions.js).
+  final _callCaptionController = StreamController<CallCaption>.broadcast();
+  Stream<CallCaption> get callCaptions => _callCaptionController.stream;
 
   /// 내가 들어가 있는 통화를 누가 거절했다는 알림(call:declined).
   Stream<CallDeclined> get callDeclined => _callDeclinedController.stream;
@@ -1319,6 +1328,10 @@ class ChatSocket {
       _callStateController.add(
         CallState.fromJson(Map<String, dynamic>.from(data as Map)),
       );
+    });
+    socket.on('call:caption', (data) {
+      final caption = CallCaption.fromJson(data);
+      if (caption != null) _callCaptionController.add(caption);
     });
     socket.on('call:mic', (data) {
       final m = Map<String, dynamic>.from(data as Map);

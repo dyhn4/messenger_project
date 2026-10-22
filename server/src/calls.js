@@ -18,6 +18,7 @@ import { findUserById } from './db/queries/users.js';
 import { LIVEKIT_PROXY_PREFIX } from './livekitProxy.js';
 import { minutesEnabled, summaryEnabled } from './callMinutes.js';
 import { recordingEnabled } from './callRecording.js';
+import { captionsEnabled } from './callCaptions.js';
 
 /**
  * 화상회의(LiveKit SFU) — 대화방 하나당 회의방 하나를 그대로 대응시킨다(LiveKit room 이름 =
@@ -127,6 +128,8 @@ export function createCallsRouter() {
       recording,
       minutes: recording && minutesEnabled(),
       summary: recording && minutesEnabled() && summaryEnabled(),
+      // 통화 중 실시간 자막(callCaptions.js) — 진행자가 켠다.
+      captions: enabled && captionsEnabled(),
     });
   });
 

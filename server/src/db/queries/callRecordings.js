@@ -92,3 +92,37 @@ export function findLatestCallCardMessage(roomId) {
     .limit(1)
     .then((rows) => rows[0]?.id ?? null);
 }
+
+/** 대화방에 올라가 있고 아직 지우지 않은 녹화 파일들 — 보관 기간·용량을 셀 때(callRecordingRetention.js). */
+export function listKeptRecordingFiles() {
+  return db
+    .select()
+    .from(callRecordings)
+    .where(
+      and(
+        eq(callRecordings.status, 'done'),
+        isNull(callRecordings.purgedAt),
+        sql`${callRecordings.filePath} like '/uploads/%'`,
+      ),
+    )
+    .orderBy(callRecordings.startedAt);
+}
+
+/** 보관 기간·용량 때문에 지운 녹화 수(관리자 콘솔). */
+export async function countPurgedRecordings() {
+  const [row] = await db
+    .select({ n: sql`count(*)`.mapWith(Number) })
+    .from(callRecordings)
+    .where(isNotNull(callRecordings.purgedAt));
+  return row?.n ?? 0;
+}
+
+/** 이 업로드 파일([fileUrl] — 미서명 /uploads/…)을 가리키는 메시지들(녹화 파일 메시지와 그것을 전달한 메시지) — 지울 때 모두 "삭제된 파일"로. */
+export function listMessagesWithFile(fileUrl) {
+  return db
+    .select()
+    .from(messages)
+    .where(
+      sql`${messages.deletedAt} is null and (${messages.fileUrl} = ${fileUrl} or ${messages.id} in (select message_id from message_attachments where file_url = ${fileUrl}))`,
+    );
+}

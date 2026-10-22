@@ -15,7 +15,9 @@ import 'package:url_launcher/url_launcher.dart' show LaunchMode, launchUrl;
 import '../data/stickers.dart';
 import '../models/app_notification.dart';
 import '../models/app_user.dart';
+import '../models/saved_whiteboard.dart';
 import '../models/board_category.dart';
+import '../models/call_recording.dart' show CallCaption;
 import '../models/comment.dart';
 import '../models/integration.dart';
 import '../models/invite_result.dart';
@@ -291,6 +293,9 @@ class Session extends ChangeNotifier {
   bool callRecordingEnabled = false;
   bool callMinutesEnabled = false;
   bool callSummaryEnabled = false;
+
+  /// 통화 중 실시간 자막을 이 서버가 하는지(server/src/callCaptions.js) — 진행자에게 [자막] 단추를 보인다.
+  bool callCaptionsEnabled = false;
   final Map<String, CallState> callStates = {};
 
   /// 내가 아직 받지 않은(참가자 목록에 내가 없는) 통화가 걸려온 방. 수신 화면을 띄우는 신호.
@@ -1030,6 +1035,7 @@ class Session extends ChangeNotifier {
   StreamSubscription? _presenceSub;
   StreamSubscription<UserStatusUpdate>? _userStatusSub;
   StreamSubscription<CallState>? _callStateSub;
+  StreamSubscription<CallCaption>? _callCaptionSub;
   StreamSubscription<CallMicRequest>? _callMicSub;
   StreamSubscription<CallDeclined>? _callDeclinedSub;
   StreamSubscription<CallCardUpdate>? _callCardSub;
@@ -2606,6 +2612,13 @@ class Session extends ChangeNotifier {
     unawaited(loadServerStickers(force: true));
     _callStateSub?.cancel();
     _callStateSub = chatSocket.callStates.listen(_applyCallState);
+    // 실시간 자막 — 지금 들어가 있는 통화의 것만 통화 화면에.
+    _callCaptionSub?.cancel();
+    _callCaptionSub = chatSocket.callCaptions.listen((caption) {
+      if (caption.roomId == callController.roomId) {
+        callController.addCaption(caption);
+      }
+    });
     _callCardSub?.cancel();
     _callCardSub = chatSocket.callCards.listen(
       // 그 방을 열어 본 적이 있어 메시지가 메모리에 있을 때만 그 자리에서 바꾼다(아니면 나중에 열 때 최신을 받는다).
@@ -3077,6 +3090,7 @@ class Session extends ChangeNotifier {
       callRecordingEnabled = config.recording;
       callMinutesEnabled = config.minutes;
       callSummaryEnabled = config.summary;
+      callCaptionsEnabled = config.captions;
       notifyListeners();
     } catch (_) {
       // 다음 로그인 때 다시 확인한다.
@@ -3224,7 +3238,20 @@ class Session extends ChangeNotifier {
       hostId: state.hostId,
       videoTier: callVideoTierFromWire(state.videoTier),
       recording: state.recording,
+      captions: state.captions,
     );
+  }
+
+  /// 지금 통화의 실시간 자막을 켜거나 끈다(켜기는 진행자, 끄기는 진행자·켠 사람 — 서버가 확인한다). 자막 표시는 서버의
+  /// call:state로 모두에게 같이 바뀐다. 실패하면 서버 문구로 ApiException.
+  Future<void> setCallCaptions(bool on) async {
+    final roomId = callController.roomId;
+    if (roomId == null) return;
+    if (on) {
+      await api!.startCallCaptions(roomId);
+    } else {
+      await api!.stopCallCaptions(roomId);
+    }
   }
 
   /// 지금 통화의 녹화를 시작한다(진행자만 — 서버가 확인한다). 실패하면 서버 문구로 ApiException. "녹화 중" 표시는 서버의
@@ -3249,28 +3276,84 @@ class Session extends ChangeNotifier {
     await api!.stopCallRecording(roomId);
   }
 
-  /// 지금 통화의 화이트보드를 그림(PNG)으로 그 대화방에 올린다 — 보내기 대기열로 보내서 연결이 끊겨 있어도 잃지 않는다. 보드 뷰
-  /// 토픽은 게시글로. [auto]면 마지막 사람이 나가며 저절로 저장한 것(글에 그렇게 적는다).
-  Future<void> saveCallWhiteboard({bool auto = false}) async {
+  /// 지금 통화의 화이트보드를 그림(PNG — 그림이 있는 쪽마다 한 장)으로 그 대화방에 올린다 — 보내기 대기열로 보내서 연결이 끊겨
+  /// 있어도 잃지 않는다. 보드 뷰 토픽은 게시글로. [auto]면 마지막 사람이 나가며 저절로 저장한 것(글에 그렇게 적는다). 획도 서버에
+  /// 저장해(callWhiteboards.js) 다음 통화에서 불러와 이어 그린다 — 불러온 판이면 그 판을 고친다. 그림은 올렸는데 획을 저장하지
+  /// 못했으면(연결이 끊김 등) false.
+  Future<bool> saveCallWhiteboard({bool auto = false}) async {
     final roomId = callController.roomId;
     final board = callController.whiteboard;
-    if (roomId == null || board == null || board.book.isEmpty) return;
-    final png = await board.renderPng();
-    await postWhiteboardImage(roomId, png, auto: auto);
+    if (roomId == null || board == null || board.book.isEmpty) return true;
+    final data = board.savedJson();
+    final pngs = await board.renderPngs();
+    await postWhiteboardImages(roomId, pngs, auto: auto);
+    final client = api;
+    if (client == null) return false;
+    try {
+      SavedWhiteboard saved;
+      try {
+        saved = await client.saveWhiteboard(
+          roomId,
+          data,
+          id: board.savedBoardId,
+        );
+      } on ApiException catch (e) {
+        // 저장해 둔 판을 그사이 누가 지웠으면 새로 저장한다.
+        if (e.statusCode != 404 || board.savedBoardId == null) rethrow;
+        saved = await client.saveWhiteboard(roomId, data);
+      }
+      board.markSaved(saved.id, saved.title);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
-  /// 화이트보드 그림 [png]를 [roomId] 대화방에 올린다([saveCallWhiteboard]).
+  /// 지금 통화의 방에 저장해 둔 화이트보드(새로 고친 순) — 화이트보드 [불러오기] 목록.
+  Future<List<SavedWhiteboard>> savedCallWhiteboards() async {
+    final roomId = callController.roomId;
+    if (roomId == null) return const [];
+    return api!.fetchSavedWhiteboards(roomId);
+  }
+
+  /// 저장해 둔 화이트보드를 받아 지금 통화의 판에 편다(모두의 판에 — 지금 판은 비운다).
+  Future<void> loadSavedCallWhiteboard(String id) async {
+    final board = callController.whiteboard;
+    if (board == null) return;
+    final saved = await api!.fetchSavedWhiteboard(id);
+    await board.loadSaved(id: saved.id, title: saved.title, data: saved.data);
+  }
+
+  /// 저장해 둔 화이트보드를 지운다(처음 저장한 사람·토픽 관리자 — 서버가 확인한다).
+  Future<void> deleteSavedWhiteboard(String id) =>
+      api!.deleteSavedWhiteboard(id);
+
+  /// 화이트보드 그림 [png]를 [roomId] 대화방에 올린다([postWhiteboardImages]의 한 장짜리).
   @visibleForTesting
   Future<void> postWhiteboardImage(
     String roomId,
     Uint8List png, {
     bool auto = false,
     DateTime? now,
+  }) => postWhiteboardImages(roomId, [png], auto: auto, now: now);
+
+  /// 화이트보드 그림들([pngs] — 쪽 순서)을 [roomId] 대화방에 한 메시지로 올린다([saveCallWhiteboard]).
+  @visibleForTesting
+  Future<void> postWhiteboardImages(
+    String roomId,
+    List<Uint8List> pngs, {
+    bool auto = false,
+    DateTime? now,
   }) async {
+    if (pngs.isEmpty) return;
     final at = now ?? DateTime.now();
     String two(int n) => n.toString().padLeft(2, '0');
-    final name =
-        '${tr('화이트보드')} ${at.year}-${two(at.month)}-${two(at.day)} ${two(at.hour)}.${two(at.minute)}.png';
+    final base =
+        '${tr('화이트보드')} ${at.year}-${two(at.month)}-${two(at.day)} ${two(at.hour)}.${two(at.minute)}';
+    // 쪽이 여럿이면 "(2쪽)"처럼 붙인다.
+    String nameOf(int i) => pngs.length == 1
+        ? '$base.png'
+        : '$base ${tr('({n}쪽)', {'n': i + 1})}.png';
     final text = auto ? tr('화상회의 화이트보드(통화가 끝나 저절로 저장)') : tr('화상회의 화이트보드');
     final board = _findRoom(roomId)?.isBoard ?? false;
     final payload = <String, dynamic>{
@@ -3281,16 +3364,19 @@ class Session extends ChangeNotifier {
     };
     final clientId = newClientId();
     final files = await stashOutboxFiles(clientId, [
-      (bytes: png, name: name, mimeType: 'image/png', isImage: true),
+      for (final (i, png) in pngs.indexed)
+        (bytes: png, name: nameOf(i), mimeType: 'image/png', isImage: true),
     ]);
     if (files == null) {
-      // 웹 — 앱 폴더가 없어 바로 올린다.
-      final uploaded = await uploadPlainFile(
-        api!,
-        XFile.fromData(png, name: name, mimeType: 'image/png'),
-        isImage: true,
-      );
-      payload['attachments'] = [uploaded.toPayload()];
+      // 담지 못했으면(저장 공간 등) 바로 올린다.
+      payload['attachments'] = [
+        for (final (i, png) in pngs.indexed)
+          (await uploadPlainFile(
+            api!,
+            XFile.fromData(png, name: nameOf(i), mimeType: 'image/png'),
+            isImage: true,
+          )).toPayload(),
+      ];
       outbox.submit(roomId: roomId, clientId: clientId, payload: payload);
       return;
     }

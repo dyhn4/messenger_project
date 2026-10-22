@@ -607,6 +607,10 @@ export const serverSettings = pgTable('server_settings', {
   // 그룹웨어(전자결재·연차·출퇴근 — groupware.js)를 어떤 범위로 둘지 — 'org'(부서·직책 설정 orgScope를 따름: 계정 단위면 회사 전체,
   // 팀 단위면 팀마다, 기본) | 'team'(팀마다 따로) | 'server'(서버 전체 하나). 바꾸면 이전 범위의 결재·근태 기록은 그 범위에 남는다.
   groupwareScope: text('groupware_scope').notNull().default('org'),
+  // 화상회의 녹화 파일 보관(관리자 콘솔 "운영 현황" — callRecordingRetention.js) — 보관 기간(일)과 녹화 파일 전체 용량(GB). 넘으면
+  // 오래된 녹화 파일부터 지운다(대화방의 파일 메시지는 "삭제된 파일", 회의록은 남김). null은 제한 없음(기본).
+  callRecordingRetentionDays: integer('call_recording_retention_days'),
+  callRecordingMaxGb: integer('call_recording_max_gb'),
   // 회사 전체 범위의 근무 시간(하루 중 분) — 팀 범위에서 팀이 정하지 않았을 때도 이 값.
   workStartMinutes: integer('work_start_minutes').notNull().default(540),
   workEndMinutes: integer('work_end_minutes').notNull().default(1080),
@@ -3811,10 +3815,43 @@ export const callRecordings = pgTable(
     minutesError: text('minutes_error'),
     // 통화에 함께한 사람 이름(요약할 때 알려 준다 — 녹화를 멈출 때의 화상회의 카드에서).
     participantNames: jsonb('participant_names').notNull().default([]),
+    // 대화방에 올린 녹화 파일의 크기(바이트) — 보관 용량을 셀 때(callRecordingRetention.js).
+    fileSize: bigint('file_size', { mode: 'number' }),
+    // 보관 기간·용량을 넘어 녹화 파일을 지운 시각과 까닭('age' | 'size') — 회의록(받아쓰기·요약)은 남는다.
+    purgedAt: timestamp('purged_at', { withTimezone: true }),
+    purgeReason: text('purge_reason'),
+    // 말한 사람을 나누려고 사람마다 따로 받은 음성(Egress 트랙 녹음) — [{ egressId, identity, name, trackSid, filePath, startedAt }].
+    // 회의록을 다 만들면 파일은 지운다(callMinutes.js). 비어 있으면 섞인 녹음 하나로 받아쓴다.
+    speakerTracks: jsonb('speaker_tracks').notNull().default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('call_recordings_room_idx').on(t.roomId, t.startedAt), index('call_recordings_status_idx').on(t.status)],
+);
+
+/**
+ * 저장한 화상회의 화이트보드(callWhiteboards.js) — 판은 참가자 기기에만 있어서(데이터 채널), 저장할 때 그림(PNG)을 대화방에 올리는 것과
+ * 함께 획 자체도 여기 둔다. 다음 통화의 화이트보드 [불러오기]가 이것을 받아 모두의 판에 펴고 이어 그린다. 이어 그린 판을 다시 저장하면
+ * 같은 줄을 고친다. [data]는 앱이 만든 `{ v, pages: [{ id, strokes: [{ id, a, c, w, p }] }] }`(점은 앞 점과의 차이로 줄인 정수 —
+ * call_whiteboard.dart) — 서버는 크기만 본다. 방을 지우면 cascade.
+ */
+export const callWhiteboards = pgTable(
+  'call_whiteboards',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    data: jsonb('data').notNull(),
+    pageCount: integer('page_count').notNull().default(1),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdByName: text('created_by_name').notNull(),
+    updatedByName: text('updated_by_name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('call_whiteboards_room_idx').on(t.roomId, t.updatedAt.desc())],
 );
 
 /**

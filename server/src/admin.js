@@ -87,6 +87,9 @@ import {
 import { db } from './db/client.js';
 import { teams as teamsTable } from './db/schema.js';
 import { isOnline } from './presence.js';
+import { recordingEnabled } from './callRecording.js';
+import { purgeCallRecordings, recordingRetentionView } from './callRecordingRetention.js';
+import { parseRecordingRetention } from './callRecordingRules.js';
 import { accountRole, ACCOUNT_ROLES, roleLabel, TEAM_CREATION_LEVELS } from './permissions.js';
 import {
   addRoomMembers,
@@ -848,6 +851,28 @@ export function createAdminRouter(io) {
       backups: (await localBackupList()).slice(0, KEEP_MAX),
     };
   }
+
+  // ─────────────────────────── 화상회의 녹화 보관 ───────────────────────────
+
+  /** 녹화 파일 보관 설정과 지금 남은 녹화 파일 — `{ enabled, retentionDays, maxGb, count, totalBytes, purgedCount }`. */
+  router.get('/admin/call-recordings', async (req, res) => {
+    res.json({ enabled: recordingEnabled(), ...(await recordingRetentionView()) });
+  });
+
+  /** 보관 기간(일)·전체 용량(GB) — 넘긴 것만, 비우면 제한 없음. 바꾸면 바로 한 번 정리한다(줄였으면 그만큼 지운다). */
+  router.patch('/admin/call-recordings', async (req, res) => {
+    const parsed = parseRecordingRetention(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    await updateServerSettings(parsed.fields);
+    const { callRecordingRetentionDays: days, callRecordingMaxGb: gb } = parsed.fields;
+    const detail = [
+      ...('callRecordingRetentionDays' in parsed.fields ? [days == null ? '보관 기간 제한 없음' : `보관 기간 ${days}일`] : []),
+      ...('callRecordingMaxGb' in parsed.fields ? [gb == null ? '용량 제한 없음' : `전체 용량 ${gb}GB`] : []),
+    ];
+    recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: `화상회의 녹화 보관: ${detail.join(', ')}` });
+    await purgeCallRecordings(io);
+    res.json({ enabled: recordingEnabled(), ...(await recordingRetentionView()) });
+  });
 
   router.get('/admin/backup', async (req, res) => {
     res.json(await backupView(req));

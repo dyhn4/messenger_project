@@ -81,7 +81,7 @@ test('Egress 상태 — 끝날 때까지 기다리고, 파일 결과를 읽는�
     status: EGRESS_STATUS.COMPLETE,
     fileResults: [{ filename: '/out/a.mp4', size: 1234n, duration: 90_000_000_000n }],
   });
-  assert.deepEqual(done, { done: true, ok: true, filename: '/out/a.mp4', size: 1234, durationMs: 90_000 });
+  assert.deepEqual(done, { done: true, ok: true, filename: '/out/a.mp4', size: 1234, durationMs: 90_000, startedAtMs: null });
   // 최대 길이에 걸려 멈춘 것도 그때까지의 파일은 쓴다.
   assert.equal(egressOutcome({ status: EGRESS_STATUS.LIMIT_REACHED, fileResults: [{ filename: '/out/a.mp4' }] }).ok, true);
   const failed = egressOutcome({ status: EGRESS_STATUS.FAILED, error: 'no chrome' });

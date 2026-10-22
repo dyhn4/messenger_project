@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { refreshCallCardRecordings } from './callCards.js';
 import { recordingLocalPath, waitForEgress } from './callRecording.js';
-import { minutesPrompt, transcriptFromResponse } from './callRecordingRules.js';
+import { mergeSpeakerTranscripts, minutesPrompt, transcriptFromResponse } from './callRecordingRules.js';
 import {
   ANTHROPIC_API_KEY,
   CALL_SUMMARY_API_KEY,
@@ -48,7 +48,14 @@ async function serviceError(what, res) {
 async function transcribeWithService(buffer, fileName) {
   const send = async (format) => {
     const form = new FormData();
-    form.append('file', new Blob([buffer], { type: fileName.endsWith('.mp4') ? 'video/mp4' : 'audio/mpeg' }), fileName);
+    const type = fileName.endsWith('.mp4')
+      ? 'video/mp4'
+      : fileName.endsWith('.ogg')
+        ? 'audio/ogg'
+        : fileName.endsWith('.wav')
+          ? 'audio/wav'
+          : 'audio/mpeg';
+    form.append('file', new Blob([buffer], { type }), fileName);
     form.append('model', CALL_TRANSCRIBE_MODEL);
     if (CALL_TRANSCRIBE_LANGUAGE) form.append('language', CALL_TRANSCRIBE_LANGUAGE);
     form.append('response_format', format);
@@ -113,6 +120,11 @@ async function summarizeWithService({ system, user }) {
     .trim();
 }
 
+/** 소리 한 토막을 받아쓴다(실시간 자막 — callCaptions.js). 회의록과 같은 서비스·설정. */
+export function transcribeAudio(buffer, fileName) {
+  return deps.transcribe(buffer, fileName);
+}
+
 const defaultDeps = {
   transcribeConfigured: () => !!CALL_TRANSCRIBE_URL,
   summaryConfigured: () => !!(CALL_SUMMARY_URL || ANTHROPIC_API_KEY),
@@ -141,6 +153,46 @@ async function audioSourceOf(row) {
 }
 
 /**
+ * 사람마다 따로 받은 음성(speakerTracks — callRecording.js)을 하나씩 받아써 "[03:25] 홍길동: …"으로 합친다 → `{ text, files }`(files는
+ * 다 쓰면 지울 파일들). 받아쓸 파일이 하나도 없으면 null — 그때는 섞인 녹음으로 받아쓴다. 한 사람 것이 실패해도 나머지는 하고, 모두
+ * 실패하면 그 오류를 던진다.
+ */
+async function transcribeBySpeaker(row) {
+  const tracks = (row.speakerTracks ?? []).filter((t) => t.egressId && t.filePath);
+  if (tracks.length === 0) return null;
+  const startMs = new Date(row.startedAt).getTime();
+  const parts = [];
+  const files = [];
+  let lastError = null;
+  for (const t of tracks) {
+    const outcome = await waitForEgress(t.egressId);
+    const local = recordingLocalPath(t.filePath, outcome?.ok ? outcome.filename : null);
+    if (!local) continue;
+    let buffer;
+    try {
+      buffer = await fs.readFile(local);
+    } catch {
+      continue;
+    }
+    files.push(local);
+    if (buffer.length === 0) continue;
+    try {
+      const response = await deps.transcribe(buffer, path.basename(local));
+      const begin = outcome?.startedAtMs ?? t.startedAt ?? startMs;
+      parts.push({ name: t.name || '알 수 없음', offsetSeconds: Math.max(0, (begin - startMs) / 1000), response });
+    } catch (err) {
+      lastError = err;
+      console.warn('[call] 한 사람의 음성을 받아쓰지 못했습니다:', t.identity, err?.message ?? err);
+    }
+  }
+  if (parts.length === 0) {
+    if (lastError) throw lastError;
+    return null;
+  }
+  return { text: mergeSpeakerTranscripts(parts), files };
+}
+
+/**
  * 녹화 [id]의 회의록을 만든다 — 'pending'일 때만(다시 만들기는 라우터가 failed → pending으로 바꾼 뒤 부른다). 단계마다 카드를 고친다.
  */
 export async function runCallMinutes(io, id) {
@@ -155,18 +207,26 @@ export async function runCallMinutes(io, id) {
   };
   try {
     let source = null;
+    let speakerFiles = [];
     let transcript = row.transcript;
     if (!transcript) {
-      source = await audioSourceOf(row);
-      let buffer = null;
-      try {
-        if (source) buffer = await fs.readFile(source.localPath);
-      } catch {
-        buffer = null;
+      // 사람마다 따로 받은 음성이 있으면 그것으로(누가 말했는지 나뉜다), 없으면 섞인 녹음 하나로.
+      const bySpeaker = await transcribeBySpeaker(row);
+      if (bySpeaker) {
+        transcript = bySpeaker.text;
+        speakerFiles = bySpeaker.files;
+      } else {
+        source = await audioSourceOf(row);
+        let buffer = null;
+        try {
+          if (source) buffer = await fs.readFile(source.localPath);
+        } catch {
+          buffer = null;
+        }
+        if (!buffer || buffer.length === 0) return fail('받아쓸 녹음 파일을 찾지 못했습니다.');
+        const response = await deps.transcribe(buffer, path.basename(source.localPath));
+        transcript = transcriptFromResponse(response);
       }
-      if (!buffer || buffer.length === 0) return fail('받아쓸 녹음 파일을 찾지 못했습니다.');
-      const response = await deps.transcribe(buffer, path.basename(source.localPath));
-      transcript = transcriptFromResponse(response);
       if (!transcript) transcript = '(받아쓴 말이 없습니다 — 녹음에 말소리가 없었을 수 있습니다.)';
       row = (await updateCallRecording(id, { transcript })) ?? row;
     }
@@ -189,6 +249,11 @@ export async function runCallMinutes(io, id) {
     // 회의록용으로 따로 받은 음성은 다 썼으니 지운다(영상 녹화가 대화방에 올라가 있다). 실패하면 남겨 두어 다시 만들 수 있게.
     const temporary = source?.temporary ? source.localPath : !row.audioOnly ? recordingLocalPath(row.minutesFilePath) : null;
     if (temporary) await fs.unlink(temporary).catch(() => {});
+    // 사람마다 받은 음성도(받아쓴 글이 남았다). 다시 만들기로 받아쓴 글에서 시작했으면 남은 파일을 찾아 지운다.
+    const leftovers = speakerFiles.length > 0
+      ? speakerFiles
+      : (row.speakerTracks ?? []).map((t) => recordingLocalPath(t.filePath)).filter(Boolean);
+    for (const f of leftovers) await fs.unlink(f).catch(() => {});
     await card();
   } catch (err) {
     await fail(err?.message ?? String(err));

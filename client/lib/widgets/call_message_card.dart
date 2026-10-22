@@ -274,6 +274,11 @@ class _RecordingRow extends StatelessWidget {
         tr('파일 마무리 중'),
         scheme.onSurfaceVariant,
       ),
+      // 보관 기간·용량을 넘어 파일을 지운 녹화 — 회의록은 그대로 열린다.
+      CallRecordingStatus.done when entry.purged != null => (
+        entry.purged == 'size' ? tr('용량을 넘어 파일을 지움') : tr('보관 기간이 지나 파일을 지움'),
+        scheme.onSurfaceVariant,
+      ),
       CallRecordingStatus.done => ('', scheme.onSurfaceVariant),
       CallRecordingStatus.failed => (tr('실패'), scheme.error),
     };

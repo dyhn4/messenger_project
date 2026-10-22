@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/app_user.dart';
 import '../models/call_card.dart' show formatCallDuration;
 import '../models/call_recording.dart';
 import '../models/room.dart';
@@ -10,6 +11,7 @@ import '../services/api_client.dart' show ApiException;
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
 import 'project/note_markdown.dart' show NoteBody;
+import 'todo_editor_dialog.dart' show showTodoEditor;
 import '../l10n/tr.dart';
 
 /// 회의록 화면 열기 — 화상회의 카드의 [회의록](call_message_card.dart).
@@ -53,6 +55,34 @@ String callMinutesMarkdown(CallRecording r, {required String roomName}) {
     ],
   ];
   return '${lines.join('\n').trimRight()}\n';
+}
+
+/// 회의록 할 일의 담당자 글("김민수", "박지영님", "김민수, 이수진")을 방 멤버로 — 이름이 같거나(님·공백을 떼고) 한쪽이 다른 쪽을
+/// 품는 사람이 딱 한 명일 때만 고른다(모르면 넣지 않는다 — 엉뚱한 사람에게 할 일이 가지 않게).
+List<AppUser> callActionItemOwners(String? owner, List<AppUser> members) {
+  if (owner == null) return const [];
+  String norm(String s) => s.replaceAll(RegExp(r'\s+|님$'), '');
+  final found = <AppUser>[];
+  for (final part in owner.split(RegExp(r'[,，/·&]|\s와\s|\s및\s'))) {
+    final want = norm(part.trim());
+    if (want.length < 2) continue;
+    var hits = [
+      for (final m in members)
+        if (norm(m.name) == want) m,
+    ];
+    if (hits.isEmpty) {
+      hits = [
+        for (final m in members)
+          if (norm(m.name).length >= 2 &&
+              (want.contains(norm(m.name)) || norm(m.name).contains(want)))
+            m,
+      ];
+    }
+    if (hits.length == 1 && !found.any((f) => f.id == hits.single.id)) {
+      found.add(hits.single);
+    }
+  }
+  return found;
 }
 
 /// 회의록 — 화상회의 녹화 한 번의 받아쓰기·요약(서버 callMinutes.js). 만드는 중이면 몇 초마다 다시 읽고, 다 되면 복사하거나 팀
@@ -295,6 +325,10 @@ class _CallMinutesScreenState extends State<CallMinutesScreen> {
           NoteBody(rec.summary!),
           const SizedBox(height: 16),
         ],
+        if (rec.actionItems.isNotEmpty) ...[
+          _actionItems(context, rec),
+          const SizedBox(height: 16),
+        ],
         if (rec.transcript?.isNotEmpty == true) ...[
           const Divider(),
           InkWell(
@@ -323,6 +357,94 @@ class _CallMinutesScreenState extends State<CallMinutesScreen> {
         ],
       ],
     );
+  }
+
+  /// 요약의 할 일 — 한 줄씩 [할 일로 만들기](이 방의 할 일로, 담당자·기한을 채워 편집기를 연다 — 고치고 저장).
+  Widget _actionItems(BuildContext context, CallRecording rec) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    return Card(
+      key: const ValueKey('minutes-action-items'),
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(tr('할 일로 만들기'), style: theme.textTheme.titleSmall),
+            const SizedBox(height: 4),
+            for (final (i, item) in rec.actionItems.indexed)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(item.text),
+                          if (item.owner != null || item.dueText != null)
+                            Text(
+                              [
+                                if (item.owner != null)
+                                  tr('담당: {name}', {'name': item.owner!}),
+                                if (item.dueText != null)
+                                  tr('기한: {due}', {'due': item.dueText!}),
+                              ].join(' · '),
+                              style: muted,
+                            ),
+                        ],
+                      ),
+                    ),
+                    _made.contains(i)
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: Icon(
+                              Icons.check_circle,
+                              color: theme.colorScheme.primary,
+                              semanticLabel: tr('만듦'),
+                            ),
+                          )
+                        : TextButton(
+                            key: ValueKey('minutes-make-todo-$i'),
+                            onPressed: () => _makeTodo(rec, i),
+                            child: Text(tr('할 일로')),
+                          ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 할 일로 만든 줄(이 화면에서) — 다시 누르지 않게 표시한다.
+  final _made = <int>{};
+
+  Future<void> _makeTodo(CallRecording rec, int index) async {
+    final item = rec.actionItems[index];
+    final owners = callActionItemOwners(item.owner, widget.room.members);
+    final todo = await showTodoEditor(
+      context,
+      session: widget.session,
+      room: widget.room,
+      initialTitle: item.text,
+      initialDescription: [
+        tr('회의록 {room} {when}에서', {
+          'room': _roomName(widget.room),
+          'when': _stamp(rec.startedAt),
+        }),
+        if (item.owner != null) tr('담당: {name}', {'name': item.owner!}),
+        if (item.dueText != null) tr('기한: {due}', {'due': item.dueText!}),
+      ].join('\n'),
+      // 담당자를 방 멤버에서 찾지 못했으면 기본값(나)으로 — 편집기에서 고른다.
+      initialAssignees: owners.isEmpty ? null : owners,
+      initialDue: item.due,
+    );
+    if (todo != null && mounted) setState(() => _made.add(index));
   }
 
   Widget _notice(

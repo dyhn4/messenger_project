@@ -21,6 +21,7 @@ import '../widgets/team_avatar.dart';
 import '../widgets/grab_cursors.dart';
 import 'admin_apps_tab.dart';
 import 'admin_backup_tab.dart';
+import 'admin_call_recordings_section.dart';
 import 'admin_ddns_tab.dart';
 import 'admin_commands_tab.dart';
 import 'admin_login_security_tab.dart';
@@ -398,6 +399,8 @@ class _StatsTabState extends State<_StatsTab> {
           ),
           const SizedBox(height: 8),
           _PositionOptionsEditor(session: widget.session),
+          // 화상회의 녹화 보관 기간·용량 — 녹화가 켜진 서버에서만 보인다.
+          AdminCallRecordingsSection(session: widget.session),
         ],
       ),
     );

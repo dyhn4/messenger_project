@@ -86,6 +86,9 @@ class CallRecordingEntry {
   final CallRecordingStatus status;
   final CallMinutesStage minutes;
   final String? messageId;
+
+  /// 보관 기간·용량을 넘어 녹화 파일을 지웠으면 그 까닭('age' | 'size') — 회의록은 남는다.
+  final String? purged;
   const CallRecordingEntry({
     required this.id,
     required this.at,
@@ -95,6 +98,7 @@ class CallRecordingEntry {
     required this.status,
     this.minutes = CallMinutesStage.none,
     this.messageId,
+    this.purged,
   });
 
   static CallRecordingEntry? fromJson(Object? raw) {
@@ -108,6 +112,35 @@ class CallRecordingEntry {
       status: _statusOf(raw['status']),
       minutes: _minutesOf(raw['minutes']),
       messageId: raw['messageId'] as String?,
+      purged: raw['purged'] as String?,
+    );
+  }
+}
+
+/// 회의록 요약의 할 일 한 줄(서버 callRecordingRules.js actionItemsFromSummary) — "담당자: 할 일 (기한)"을 나눈 것. 회의록 화면이
+/// 한 줄씩 할 일로 만든다(담당자는 이름으로 방 멤버에서 찾는다).
+class CallActionItem {
+  final String text;
+  final String? owner;
+
+  /// 요약에 적힌 기한 글 그대로("10/30"·"다음 주") — 날짜로 읽혔으면 [due].
+  final String? dueText;
+  final DateTime? due;
+  const CallActionItem({
+    required this.text,
+    this.owner,
+    this.dueText,
+    this.due,
+  });
+
+  static CallActionItem? fromJson(Object? raw) {
+    if (raw is! Map || raw['text'] is! String) return null;
+    final due = raw['due'];
+    return CallActionItem(
+      text: raw['text'] as String,
+      owner: raw['owner'] as String?,
+      dueText: raw['dueText'] as String?,
+      due: due is String ? DateTime.tryParse(due) : null,
     );
   }
 }
@@ -132,6 +165,9 @@ class CallRecording {
   final String? transcript;
   final String? summary;
 
+  /// 요약의 할 일들(없으면 빈 목록).
+  final List<CallActionItem> actionItems;
+
   /// 내가 못 만든 회의록을 다시 만들 수 있는지(시작한 사람·토픽 관리자, 녹음이 남아 있을 때).
   final bool canRetry;
 
@@ -153,6 +189,7 @@ class CallRecording {
     this.participantNames = const [],
     this.transcript,
     this.summary,
+    this.actionItems = const [],
     this.canRetry = false,
   });
 
@@ -181,7 +218,90 @@ class CallRecording {
       ],
       transcript: json['transcript'] as String?,
       summary: json['summary'] as String?,
+      actionItems: [
+        for (final a in (json['actionItems'] as List? ?? const []))
+          ?CallActionItem.fromJson(a),
+      ],
       canRetry: json['canRetry'] == true,
+    );
+  }
+}
+
+/// 관리자 콘솔의 녹화 파일 보관(GET/PATCH /api/admin/call-recordings) — 설정(null은 제한 없음)과 지금 남은 녹화 파일.
+class CallRecordingRetention {
+  /// 이 서버에 녹화가 켜져 있는지(꺼져 있으면 콘솔에 칸을 보이지 않는다).
+  final bool enabled;
+  final int? retentionDays;
+  final int? maxGb;
+  final int count;
+  final int totalBytes;
+  final int purgedCount;
+  const CallRecordingRetention({
+    this.enabled = false,
+    this.retentionDays,
+    this.maxGb,
+    this.count = 0,
+    this.totalBytes = 0,
+    this.purgedCount = 0,
+  });
+
+  factory CallRecordingRetention.fromJson(Map<String, dynamic> json) =>
+      CallRecordingRetention(
+        enabled: json['enabled'] == true,
+        retentionDays: (json['retentionDays'] as num?)?.toInt(),
+        maxGb: (json['maxGb'] as num?)?.toInt(),
+        count: (json['count'] as num?)?.toInt() ?? 0,
+        totalBytes: (json['totalBytes'] as num?)?.toInt() ?? 0,
+        purgedCount: (json['purgedCount'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// 실시간 자막을 켰는지(call:state의 captions — 서버 callCaptions.js) — 켠 사람과 시각.
+class CallCaptionsLive {
+  final String byId;
+  final String byName;
+  final DateTime startedAt;
+  const CallCaptionsLive({
+    required this.byId,
+    required this.byName,
+    required this.startedAt,
+  });
+
+  static CallCaptionsLive? fromJson(Object? raw) {
+    if (raw is! Map || raw['byId'] is! String) return null;
+    return CallCaptionsLive(
+      byId: raw['byId'] as String,
+      byName: raw['byName'] as String? ?? tr('알 수 없음'),
+      startedAt: _time(raw['startedAt']) ?? DateTime.now(),
+    );
+  }
+}
+
+/// 자막 한 줄(call:caption) — 누가 무엇을 말했는지(사람마다 따로 받아써서 안다).
+class CallCaption {
+  final String roomId;
+  final String userId;
+  final String name;
+  final String text;
+  final DateTime at;
+  const CallCaption({
+    required this.roomId,
+    required this.userId,
+    required this.name,
+    required this.text,
+    required this.at,
+  });
+
+  static CallCaption? fromJson(Object? raw) {
+    if (raw is! Map || raw['roomId'] is! String || raw['text'] is! String) {
+      return null;
+    }
+    return CallCaption(
+      roomId: raw['roomId'] as String,
+      userId: raw['userId'] as String? ?? '',
+      name: raw['name'] as String? ?? tr('알 수 없음'),
+      text: raw['text'] as String,
+      at: _time(raw['at']) ?? DateTime.now(),
     );
   }
 }

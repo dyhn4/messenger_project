@@ -57,6 +57,8 @@ import { createBookmarksRouter } from './bookmarks.js';
 import { closeStaleCallCards } from './callCards.js';
 import { callsEnabled, createCallsRouter } from './calls.js';
 import { createCallRecordingRouter, resumeCallRecordings } from './callRecording.js';
+import { createCallWhiteboardsRouter } from './callWhiteboards.js';
+import { createCallCaptionsRouter } from './callCaptions.js';
 import { createCalendarsRouter } from './calendars.js';
 import { createCommentsRouter } from './comments.js';
 import { createFavoritesRouter } from './favorites.js';
@@ -76,6 +78,7 @@ import { createNotificationsRouter } from './notifications.js';
 import { checkPendingMigrations } from './migrationCheck.js';
 import { createPairHandler, generatePairingCode, startPairingServer } from './pairing.js';
 import { startRetentionJob } from './retention.js';
+import { startCallRecordingRetentionJob } from './callRecordingRetention.js';
 import { ddnsUpdater } from './ddnsService.js';
 import { backupScheduler } from './backupService.js';
 import { createAdminRouter } from './admin.js';
@@ -269,6 +272,10 @@ app.use('/api', requireAuth, createOrgTreeRouter(io));
 app.use('/api', requireAuth, createCallsRouter());
 // 화상회의 녹화(LiveKit Egress)·자동 회의록 — CALL_RECORDING_DIR이 없으면 시작이 503으로 알려 준다(callRecording.js·callMinutes.js).
 app.use('/api', requireAuth, createCallRecordingRouter(io));
+// 저장한 화상회의 화이트보드 — 다음 통화에서 불러와 이어 그린다(callWhiteboards.js).
+app.use('/api', requireAuth, createCallWhiteboardsRouter());
+// 통화 중 실시간 자막 — Egress가 마이크 소리를 자막용 웹소켓으로 보내고 서버가 받아쓴다(callCaptions.js).
+app.use('/api', requireAuth, createCallCaptionsRouter(io));
 app.use('/api', requireAuth, createSecretChatsRouter(io));
 app.use('/api', requireAuth, searchRouter);
 app.use('/api', requireAuth, attachmentsRouter);
@@ -382,6 +389,8 @@ app.use((err, req, res, next) => {
 registerSocket(io);
 watchForVersionChanges(io);
 startRetentionJob();
+// 화상회의 녹화 파일 보관 기간·용량(관리자 콘솔 — callRecordingRetention.js).
+startCallRecordingRetentionJob(io);
 // 법인카드·홈택스 자동 가져오기(CODEF)와 보관 기한 지난 영수증 지우기(financeTools.js) — 켠 범위만, 하루에 한 번.
 startFinanceJobs(io);
 // 오래 접속하지 않은 사람에게 안 읽은 멘션 요약 메일 — 메일이 켜져 있을 때만 실제로 보낸다(mentionDigest.js).

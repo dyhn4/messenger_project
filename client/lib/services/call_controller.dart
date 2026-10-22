@@ -245,6 +245,10 @@ class CallController extends ChangeNotifier {
     _whiteboard = null;
     _hostId = null;
     _recording = null;
+    _captions = null;
+    _recentCaptions.clear();
+    _captionTimer?.cancel();
+    showCaptions = true;
     _serverStateSeen = false;
     _micRequested = false;
     _serverTier = null;
@@ -340,6 +344,7 @@ class CallController extends ChangeNotifier {
     String? hostId,
     CallVideoTier? videoTier,
     CallRecordingLive? recording,
+    CallCaptionsLive? captions,
   }) {
     final before = this.videoTier;
     final hostChanged = hostId != _hostId;
@@ -348,10 +353,87 @@ class CallController extends ChangeNotifier {
     final recordingChanged = recording?.id != _recording?.id;
     if (recordingChanged) _announceRecording(_recording, recording);
     _recording = recording;
+    final captionsChanged =
+        captions?.startedAt != _captions?.startedAt ||
+        captions?.byId != _captions?.byId;
+    if (captionsChanged) _announceCaptions(_captions, captions);
+    _captions = captions;
+    if (captions == null) _recentCaptions.clear();
     _serverStateSeen = true;
     if (this.videoTier != before) unawaited(_applyVideoCaps());
-    if (hostChanged || recordingChanged || this.videoTier != before) {
+    if (hostChanged ||
+        recordingChanged ||
+        captionsChanged ||
+        this.videoTier != before) {
       notifyListeners();
+    }
+  }
+
+  // ───────────── 실시간 자막 ─────────────
+  //
+  // 진행자가 켜면 서버가 마이크마다 받아써 call:caption으로 보낸다(server/src/callCaptions.js). 화면은 최근 몇 줄만 잠깐 보인다.
+
+  CallCaptionsLive? _captions;
+
+  /// 자막을 켰는지(켠 사람) — 없으면 null.
+  CallCaptionsLive? get captions => _captions;
+
+  /// 내 화면에 자막을 보일지 — 켜져 있어도 각자 가릴 수 있다.
+  bool showCaptions = true;
+
+  /// 화면에 남기는 자막 줄 수와 한 줄이 남는 시간.
+  static const captionLines = 3;
+  static const captionLife = Duration(seconds: 8);
+
+  final List<CallCaption> _recentCaptions = [];
+  Timer? _captionTimer;
+
+  /// 지금 보일 자막(오래된 것부터 — 최근 [captionLines]줄, [captionLife]가 지난 것은 뺀다).
+  List<CallCaption> get recentCaptions => List.unmodifiable(_recentCaptions);
+
+  /// 내가 자막을 끌 수 있는지 — 켠 사람이나 진행자(서버 callCaptions.js stopCallCaptions).
+  bool get canStopCaptions {
+    final me = _room?.localParticipant?.identity;
+    final c = _captions;
+    return c != null && me != null && (me == c.byId || me == _hostId);
+  }
+
+  /// 서버가 보낸 자막 한 줄 — 이 통화의 것만(Session이 거른다).
+  void addCaption(CallCaption caption, {DateTime? now}) {
+    _recentCaptions.add(caption);
+    while (_recentCaptions.length > captionLines) {
+      _recentCaptions.removeAt(0);
+    }
+    _scheduleCaptionExpiry(now ?? DateTime.now());
+    if (showCaptions) notifyListeners();
+  }
+
+  void _scheduleCaptionExpiry(DateTime now) {
+    _captionTimer?.cancel();
+    if (_recentCaptions.isEmpty) return;
+    final oldest = _recentCaptions.first.at;
+    var wait = oldest.add(captionLife).difference(now);
+    if (wait.isNegative) wait = Duration.zero;
+    _captionTimer = Timer(wait, () {
+      final at = DateTime.now();
+      final before = _recentCaptions.length;
+      _recentCaptions.removeWhere((c) => at.difference(c.at) >= captionLife);
+      if (_recentCaptions.length != before && showCaptions) notifyListeners();
+      _scheduleCaptionExpiry(at);
+    });
+  }
+
+  void setShowCaptions(bool show) {
+    if (showCaptions == show) return;
+    showCaptions = show;
+    notifyListeners();
+  }
+
+  void _announceCaptions(CallCaptionsLive? before, CallCaptionsLive? after) {
+    if (after != null) {
+      _notices.add(tr('{name}님이 실시간 자막을 켰습니다', {'name': after.byName}));
+    } else if (before != null) {
+      _notices.add(tr('실시간 자막을 껐습니다'));
     }
   }
 
@@ -681,6 +763,7 @@ class CallController extends ChangeNotifier {
     unawaited(leave());
     unawaited(_handRaisedNames.close());
     unawaited(_notices.close());
+    _captionTimer?.cancel();
     super.dispose();
   }
 }

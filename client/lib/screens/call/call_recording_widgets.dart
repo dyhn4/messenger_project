@@ -218,3 +218,52 @@ class _StartDialogState extends State<_StartDialog> {
     );
   }
 }
+
+/// 통화 화면 아래쪽의 실시간 자막 — 최근 몇 줄을 "이름  말" 꼴로(서버 callCaptions.js가 사람마다 받아쓴다). 반투명 검은 바탕.
+class CallCaptionsOverlay extends StatelessWidget {
+  final List<CallCaption> lines;
+  const CallCaptionsOverlay({super.key, required this.lines});
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      key: const ValueKey('call-captions-overlay'),
+      constraints: const BoxConstraints(maxWidth: 760),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final line in lines)
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '${line.name}  ',
+                        style: const TextStyle(
+                          color: Color(0xFFFFD54F),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      TextSpan(text: line.text),
+                    ],
+                  ),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    height: 1.35,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

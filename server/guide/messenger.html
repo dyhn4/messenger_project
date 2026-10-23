@@ -7,8 +7,8 @@
   CDN·웹폰트는 쓰지 않는다(사내망 서버는 인터넷이 안 될 수 있다). 인라인 style 대신 아래
   클래스만 쓴다. 그림은 images/<이름>.png — client/tool/guide_capture/의 캡처 테스트로 만든다
   (예: flutter test tool/guide_capture/messenger_capture_test.dart — 메신저 그림은 이 파일과
-  messenger_topic_capture_test.dart(토픽 · 보드 · 폴더), messenger_login_capture_test.dart(로그인 · 가입)가
-  나눠 찍는다. sample_capture_test.dart는 따라 만들 예시라 그림을 임시 폴더에만 쓴다).
+  messenger_topic_capture_test.dart(토픽 · 보드 · 폴더), messenger_login_capture_test.dart(로그인 · 가입),
+  messenger_new_features_capture_test.dart(계정 보안 · 공유하기 · 말머리 · 녹화 · 웹훅 · 언어)가 나눠 찍는다. sample_capture_test.dart는 따라 만들 예시라 그림을 임시 폴더에만 쓴다).
 
   ▸ 장(큰 주제) — 목차의 1단계 항목과 id를 맞춘다
     <section class="chapter" id="start">
@@ -63,7 +63,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>메신저 이용법 — TangoTalk 도움말</title>
-  <meta name="description" content="TangoTalk 메신저를 처음 쓰는 분을 위한 그림 설명서: 로그인, 화면 구성, 대화 시작, 토픽 만들기와 멤버 초대, 메시지·파일·이모티콘 보내기, 댓글, 알림, 토픽 폴더, 검색, 공지, 토픽 관리, 보드 뷰, 환경설정, 안드로이드, 아이폰 웹 앱">
+  <meta name="description" content="TangoTalk 메신저를 처음 쓰는 분을 위한 그림 설명서: 로그인, 화면 구성, 대화 시작, 토픽 만들기와 멤버 초대, 메시지·파일·이모티콘 보내기, 댓글, 알림, 토픽 폴더, 검색, 공지, 토픽 관리, 보드 뷰, 화상회의 녹화·회의록, 2단계 인증·보안 키, 오프라인에서 보내기, 다른 앱에서 공유하기, 환경설정, 안드로이드, 아이폰 웹 앱">
   <meta name="color-scheme" content="light dark">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233f51b5'/%3E%3Ctext x='16' y='22' font-size='17' font-family='Arial' font-weight='700' fill='white' text-anchor='middle'%3E%3F%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="guide.css">
@@ -78,6 +78,7 @@
         <a href="index.html">처음</a>
         <a href="messenger.html" aria-current="page">메신저<span class="nav-long"> 이용법</span></a>
         <a href="project.html">프로젝트<span class="nav-long"> 이용법</span></a>
+        <a href="groupware.html">그룹웨어<span class="nav-long"> · 업무 도구</span></a>
         <a href="server.html">서버<span class="nav-long"> 관리</span></a>
       </nav>
     </div>
@@ -94,6 +95,7 @@
               <li><a href="#start-invite">초대 링크를 받았다면</a></li>
               <li><a href="#start-iphone">아이폰에서는 웹 앱으로</a></li>
               <li><a href="#start-login">로그인</a></li>
+              <li><a href="#start-login-other">회사 계정 · 보안 키 · 2단계 인증</a></li>
               <li><a href="#start-signup">회원가입</a></li>
               <li><a href="#start-team">팀 고르기</a></li>
             </ol>
@@ -130,6 +132,9 @@
               <li><a href="#send-format">글자 꾸미기</a></li>
               <li><a href="#send-capture">화면 캡처해서 보내기</a></li>
               <li><a href="#send-schedule">메시지 예약해서 보내기</a></li>
+              <li><a href="#send-draft">쓰다 만 글(임시 저장)</a></li>
+              <li><a href="#send-offline">연결이 끊겼을 때</a></li>
+              <li><a href="#send-share">다른 앱에서 보내기(공유하기)</a></li>
             </ol>
           </li>
           <li><a href="#message">메시지 활용하기</a>
@@ -157,6 +162,7 @@
               <li><a href="#room-menu">목록에서 오른쪽 클릭</a></li>
               <li><a href="#room-options">대화방 위쪽 버튼과 ⋮ 메뉴</a></li>
               <li><a href="#room-folders">토픽 폴더</a></li>
+              <li><a href="#room-integrations">웹훅 · 봇 · 슬래시 명령</a></li>
             </ol>
           </li>
           <li><a href="#search">검색과 파일</a>
@@ -173,6 +179,7 @@
               <li><a href="#notice-write">공지 쓰기</a></li>
               <li><a href="#notice-comments">공지에 댓글 달기</a></li>
               <li><a href="#notice-from-message">메시지를 공지로 올리기</a></li>
+              <li><a href="#notice-readers">공지 읽음 확인</a></li>
             </ol>
           </li>
           <li><a href="#topic">토픽 관리하기</a>
@@ -190,6 +197,7 @@
               <li><a href="#board-write">게시글 쓰기</a></li>
               <li><a href="#board-menu">고정 · 수정 · 삭제</a></li>
               <li><a href="#board-detail">게시글 보기와 댓글</a></li>
+              <li><a href="#board-extras">말머리 · 필독 · 읽음 확인</a></li>
             </ol>
           </li>
           <li><a href="#poll">투표</a>
@@ -251,6 +259,8 @@
               <li><a href="#call-chat">통화 중 채팅과 보기 바꾸기</a></li>
               <li><a href="#call-share">화면 공유와 손들기</a></li>
               <li><a href="#call-whiteboard">화이트보드</a></li>
+              <li><a href="#call-record">녹화와 회의록</a></li>
+              <li><a href="#call-caption">실시간 자막</a></li>
               <li><a href="#call-leave">다른 화면 보기와 회의 나가기</a></li>
               <li><a href="#call-phone">휴대폰 통화 화면</a></li>
               <li><a href="#call-card">대화방의 화상회의 기록</a></li>
@@ -260,6 +270,7 @@
             <ol>
               <li><a href="#people-members">동료 찾기와 프로필</a></li>
               <li><a href="#people-me">내 프로필 바꾸기</a></li>
+              <li><a href="#people-security">2단계 인증 · 보안 키 · 로그인한 기기</a></li>
               <li><a href="#people-character">캐릭터로 프로필 사진 꾸미기</a></li>
               <li><a href="#people-myposts">내가 쓴 글 모아 보기</a></li>
               <li><a href="#people-more">조직도 · 팀장 문의 · 화상회의</a></li>
@@ -287,6 +298,7 @@
               <li><a href="#mobile-home">첫 화면</a></li>
               <li><a href="#mobile-topic">토픽 탭과 폴더</a></li>
               <li><a href="#mobile-message">메시지 길게 누르기</a></li>
+              <li><a href="#mobile-widget">홈 화면 위젯 · 알림에서 답장</a></li>
               <li><a href="#mobile-diff">PC와 다른 점</a></li>
             </ol>
           </li>
@@ -422,8 +434,35 @@
         <aside class="box tip">
           <p class="box-title">아이디나 비밀번호가 기억나지 않으면</p>
           <p>로그인 화면의 <span class="ui">아이디 찾기</span> 또는 <span class="ui">비밀번호 찾기</span>를 누르세요.
-            가입할 때 등록한 이메일과 본인 확인 질문으로 찾을 수 있습니다.</p>
+            가입할 때 등록한 이메일과 본인 확인 질문으로 찾을 수 있습니다. 서버에 메일 기능이 켜져 있으면 본인 확인 질문 대신
+            <b>이메일로 받은 6자리 코드</b>로 확인하고, 아이디는 화면 대신 그 이메일로 보내 줍니다.</p>
         </aside>
+
+        <h3 id="start-login-other">회사 계정 · 보안 키 · 2단계 인증</h3>
+        <p>관리자가 켜 둔 서버에서는 아이디 · 비밀번호 말고도 아래 방법으로 로그인합니다. 로그인 화면에 보이는 단추만 쓸 수 있습니다.</p>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-login-other.png">
+            <img src="images/messenger-login-other.png" alt="다른 로그인 방법이 켜진 로그인 화면: 1 회사(Windows) 계정 안내, 2 Google · Microsoft 회사 계정으로 로그인, 3 보안 키·패스키로 로그인" width="492" height="679" loading="lazy"></a>
+          <figcaption>회사 계정 · 보안 키 로그인이 켜진 서버의 로그인 화면</figcaption>
+        </figure>
+        <div class="table-wrap">
+          <table class="simple">
+            <thead><tr><th>번호</th><th>로그인 화면에 보이는 것</th><th>이렇게 합니다</th></tr></thead>
+            <tbody>
+              <tr><td><span class="mark">1</span></td><td><b>회사(Windows) 계정 아이디·비밀번호로도 로그인할 수 있습니다.</b></td>
+                <td>사내 Windows 로그인에 쓰는 아이디 · 비밀번호를 그대로 아이디 · 비밀번호 칸에 넣습니다. 이런 계정은 비밀번호를 이 앱에서 바꾸지 않고 회사 계정에서 바꿉니다.</td></tr>
+              <tr><td><span class="mark">2</span></td><td><span class="ui">Google 회사 계정으로 로그인</span> · <span class="ui">Microsoft 회사 계정으로 로그인</span>(또는 관리자가 정한 이름의 로그인 단추)</td>
+                <td>누르면 브라우저가 열립니다. 회사 계정으로 로그인하고 나면 앱이 <b>저절로 이어서</b> 들어갑니다. 회사 계정의 2단계 인증을 거치므로 이 앱의 2단계 인증은 묻지 않습니다.
+                  같은 이메일의 계정이 이미 있으면 처음 한 번 그 이메일로 받은 확인 코드를 넣어 연결합니다.</td></tr>
+              <tr><td><span class="mark">3</span></td><td><span class="ui">보안 키·패스키로 로그인</span></td>
+                <td>미리 등록해 둔 보안 키(USB · NFC)나 패스키(지문 · 얼굴 · PIN)로 <b>비밀번호 없이</b> 로그인합니다. 브라우저 창에서 확인하면 앱이 이어서 들어갑니다.
+                  등록은 <a href="#people-security">내 프로필</a>에서 합니다.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><b>2단계 인증</b>을 켜 둔 계정은 비밀번호 다음에 휴대폰 인증 앱(Google Authenticator 등)의 <b>6자리 코드</b>를 넣거나 <span class="ui">보안 키로 확인</span>을 누릅니다.
+          휴대폰이 없으면 <span class="ui">휴대폰이 없나요? 복구 코드 사용</span>으로 적어 둔 복구 코드를 넣으세요(한 번 쓴 코드는 다시 못 씁니다).
+          관리자가 2단계 인증을 꼭 쓰게 정했는데 아직 안 켰다면, 로그인할 때 그 자리에서 켜야 들어갑니다(<a href="#people-security">2단계 인증 켜기</a>).</p>
 
         <h3 id="start-signup">회원가입</h3>
         <p>계정이 없다면 로그인 화면 아래의 <span class="ui">계정이 없으신가요? 회원가입</span>(위 그림의 <span class="mark">5</span>)을
@@ -440,7 +479,8 @@
           <li><p>동료에게 보일 <b>이름</b>을 입력합니다.</p></li>
           <li><p>이메일 주소를 입력합니다. <b>@</b> 뒤는 목록에서 고르거나 <b>직접 입력</b>을 골라 씁니다.</p></li>
           <li><p><b>본인 확인용 질문</b>을 정하고 답을 적습니다. <span class="ui">목록에서 선택</span>으로 고르거나
-            <span class="ui">직접 작성</span>으로 질문을 직접 만들 수 있습니다.</p></li>
+            <span class="ui">직접 작성</span>으로 질문을 직접 만들 수 있습니다.
+            서버에 메일 기능이 켜져 있으면 질문 대신 <b>이메일 인증 코드</b>(6자리, 10분 동안 유효)를 받아 넣습니다.</p></li>
           <li><p><span class="ui">가입하기</span>를 누릅니다.</p></li>
         </ol>
         <aside class="box note">
@@ -532,7 +572,10 @@
               <tr><td><span class="mark">3</span></td><td>검색</td><td>메시지를 검색합니다.</td></tr>
               <tr><td><span class="mark">4</span></td><td>메뉴</td><td>점 아홉 개 모양입니다. 누르면 기능 단추가 세 묶음으로 펼쳐집니다 —
                 <b>생성</b>(메시지 예약 · 할 일 · 투표 · <a href="#message-reminder">리마인더</a>), <b>리스트</b>(<a href="#search-files">파일</a> · 즐겨찾기 · 북마크 · <a href="#search-links">링크</a> · 내가 쓴 글 · 앨범 · <a href="#people-more">문의함</a>),
-                <b>툴</b>(캘린더 · 프로젝트). <span class="ui">프로젝트</span>는 업무를 관리하는 프로젝트 창을 엽니다(정회원 이상, <a href="project.html">프로젝트 이용법</a>).</td></tr>
+                <b>툴</b>(캘린더 · 그룹웨어 · 드라이브 · 위키 · 메일 · 프로젝트). <span class="ui">그룹웨어</span>는 전자결재 · 휴가 · 출퇴근 · 급여명세서 등을,
+                <span class="ui">드라이브</span> · <span class="ui">위키</span> · <span class="ui">메일</span>은 팀 공용 파일 · 문서와 메일을 엽니다(<a href="groupware.html">그룹웨어 · 업무 도구</a>).
+                <span class="ui">프로젝트</span>는 업무를 관리하는 프로젝트 창을 엽니다(정회원 이상, <a href="project.html">프로젝트 이용법</a>).
+                <span class="ui">그룹웨어</span> · <span class="ui">메일</span> 타일의 숫자는 내가 결재할 문서 수 · 안 읽은 메일 수입니다.</td></tr>
               <tr><td><span class="mark">5</span></td><td>내 메뉴(☰)</td><td>내 프로필, 환경설정, 도움말, 로그아웃이 있습니다.</td></tr>
             </tbody>
           </table>
@@ -1142,6 +1185,48 @@
             <span class="ui">예약 취소</span>를 할 수 있습니다. 취소한 예약은 되돌릴 수 없습니다.</p></li>
         </ol>
         <p>예약한 메시지가 보내지면 목록에서 사라지고, 화면 아래에 잠깐 보냈다는 안내가 뜹니다. 보내지 못했을 때도 안내가 뜹니다.</p>
+
+        <h3 id="send-draft">쓰다 만 글(임시 저장)</h3>
+        <p>입력칸에 쓰다 만 글은 방마다 저절로 남습니다. 다른 방에 갔다 오거나 앱을 껐다 켜도 그대로 돌아오고, 보내면 지워집니다.</p>
+        <ul>
+          <li>쓰다 만 글이 있는 방은 목록에서 이름 옆에 <b>✏️</b>가 붙습니다.</li>
+          <li>쓰다 만 글은 <b>내 다른 기기와도 맞춰집니다</b> — PC에서 쓰다 멈춘 글을 휴대폰에서 이어 쓸 수 있습니다. 양쪽에서 고쳤다면 나중에 고친 쪽이 남습니다.</li>
+          <li><a href="#chat-secret">비밀 대화</a>의 글은 이 기기 메모리에만 두고 서버에 보내지 않으므로, 앱을 끄면 사라집니다.</li>
+        </ul>
+
+        <h3 id="send-offline">연결이 끊겼을 때</h3>
+        <p>서버와 연결이 끊기면 대화 목록 · 대화방 위에 <b>서버와 연결이 끊겼습니다</b> 띠가 뜹니다. 그래도 쓴 메시지는 잃지 않습니다.</p>
+        <ul>
+          <li>보낸 글 · 이모티콘 · 사진 · 파일은 입력칸 위에 <b>연결되면 보냅니다</b> 말풍선으로 기다렸다가, 다시 연결되면 쓴 순서대로 보내집니다. 기다리는 동안 <span class="ui">취소</span>할 수 있습니다.
+            앱을 다시 켜도 기다리던 것은 남아 있습니다.</li>
+          <li>내 메시지 고치기 · 지우기, 공감, 댓글도 화면에 먼저 반영되고 연결되면 서버에 보내집니다(<b>연결되면 반영합니다</b>).</li>
+          <li>응답이 늦어 다시 보내져도 같은 메시지가 두 번 올라가지 않습니다.</li>
+          <li>서버가 받지 않은 것(읽기 전용 토픽이 됨, 수정 가능 시간이 지남 등)은 빨간 테두리에 이유와 <span class="ui">다시 보내기</span> · <span class="ui">지우기</span>가 붙습니다.</li>
+          <li>연결이 끊겨 있어도 이 기기에 저장해 둔 대화(방마다 최근 5000통)와 사진 미리보기를 보고, <b>검색</b>도 저장된 메시지에서 합니다.
+            다시 연결되면 그사이 온 메시지와 바뀐 내용을 저절로 채웁니다.</li>
+          <li>비밀 대화의 기다리는 메시지는 이 기기 메모리에만 있어서 앱을 끄면 사라집니다("비밀 대화 — 앱을 끄면 사라집니다").</li>
+          <li>로그아웃하면 이 기기에 저장해 둔 대화를 지웁니다(공용 PC에서도 안심하세요).</li>
+        </ul>
+
+        <h3 id="send-share">다른 앱에서 보내기(공유하기)</h3>
+        <p>다른 앱의 사진 · 파일 · 링크를 TangoTalk을 먼저 열지 않고 바로 대화방에 보냅니다.</p>
+        <ul>
+          <li><span class="badge mobile">안드로이드</span> 갤러리 · 파일 · 브라우저 등에서 <b>공유</b> › <b>TangoTalk</b>을 고릅니다.</li>
+          <li><span class="badge pc">PC</span> 탐색기에서 파일을 오른쪽 클릭 › <b>보내기</b> › <b>TangoTalk</b>을 고릅니다(파일 20개까지 — 앱을 설치할 때
+            "보내기" 메뉴에 넣는 칸을 꺼 두었다면 메뉴에 없습니다. Windows 11은 <b>더 많은 옵션 표시</b>를 누르면 보내기 메뉴가 나옵니다).</li>
+        </ul>
+        <p>그러면 <b>공유하기</b> 화면이 뜹니다.</p>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-share.png">
+            <img src="images/messenger-share.png" alt="공유하기 화면: 1 대화방 더하기 칸, 2 고른 대화방(마케팅팀 · 주간회의), 3 2곳에 보내기" width="720" height="440" loading="lazy"></a>
+          <figcaption>공유하기 — 사진 두 장을 두 대화방에 보내는 모습</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>위쪽 칸을 눌러 보낼 대화방을 고릅니다. <b>10곳까지</b> 골라 한꺼번에 보낼 수 있고, 비밀 대화도 고를 수 있습니다.</p></li>
+          <li><p>고른 방은 칩으로 보입니다. ✕로 뺍니다. 그 아래에서 글을 고치거나 파일을 뺄 수 있습니다.</p></li>
+          <li><p><span class="ui">N곳에 보내기</span>를 누릅니다. 한 곳이면 보낸 뒤 그 방이 열립니다.
+            일부 방에 못 보냈으면 그 방만 남고 이유가 보이니 다시 보내세요.</p></li>
+        </ol>
       </section>
 
       <!-- ─────────────────────────── 5. 메시지 활용하기 ─────────────────────────── -->
@@ -1313,13 +1398,18 @@
         </figure>
         <ol class="steps">
           <li><p>오른쪽 위 <span class="ui">알림 센터</span>(종 모양)를 누릅니다. 빨간 점이 있으면 새 알림이 있다는 뜻입니다.</p></li>
-          <li><p>오른쪽에 알림 센터가 열립니다. 위쪽 탭으로 <b>전체 · 멘션 · 메시지 · 보드·공지 · 프로젝트</b> 알림을 나눠 봅니다(탭 옆 빨간 숫자는 안 읽은 수).
+          <li><p>오른쪽에 알림 센터가 열립니다. 위쪽 탭으로 <b>전체 · 멘션 · 메시지 · 보드·공지 · 프로젝트 · 결재</b> 알림을 나눠 봅니다(탭 옆 빨간 숫자는 안 읽은 수).
+            <b>결재</b> 탭에는 결재 요청 · 승인 · 반려 소식이 모이고, 누르면 그 결재 문서가 열립니다(<a href="groupware.html#approval">전자결재</a>).
             안 읽은 메시지가 있는 방은 최근 순으로 모여 있고, 누르면 바로 열립니다.
             <span class="ui">모두 읽음</span>은 안 읽은 대화를 한꺼번에 읽음으로 표시합니다. 톱니(<span class="ui">알림 설정</span>)에서는 탭마다 안 읽은 알림만 보일지 등을 정합니다.</p></li>
           <li><p>왼쪽에 팀 아이콘과 이름이 있어 <b>다른 팀</b>의 방도 구분됩니다. 다른 팀 방을 누르면 그 팀으로 옮겨 가며 방이 열립니다.
             안 읽은 <a href="#notice">공지</a>가 있는 토픽은 📢 표시와 함께 공지 내용이 보입니다.</p></li>
         </ol>
-
+        <aside class="box tip">
+          <p class="box-title">한동안 앱을 못 열 때는 메일로</p>
+          <p>서버에 메일 기능이 켜져 있고 내 이메일을 확인해 두었다면, 며칠 동안 접속하지 않은 사이 쌓인 안 읽은 멘션을 아침에 이메일로 모아 보내 줍니다.
+            받기 싫으면 알림 센터의 톱니(<span class="ui">알림 설정</span>)에서 <span class="ui">멘션 요약 메일 받기</span>를 끄세요.</p>
+        </aside>
 
         <h3 id="alert-mention">멘션 · 보드 알림 모아 보기</h3>
         <p>알림 센터 위쪽 탭에서 알림을 종류별로 나눠 봅니다. 나를 부른 <a href="#send-mention">멘션</a>과 보드 게시글 소식은 읽기 전까지 여기에 남아 있어서,
@@ -1478,6 +1568,8 @@
                 확인해 두면 옆에 <b>확인함</b>이 붙습니다.</td></tr>
               <tr><td><span class="ui">대화 내보내기</span></td><td>대화 내용을 엑셀 파일(.xlsx)로 받습니다. 기간을 고르지 않으면 전체 대화를 받습니다.</td></tr>
               <tr><td><span class="ui">정보 변경하기</span></td><td>토픽의 <b>토픽 관리자</b>와 팀 관리자에게만 보입니다(<a href="#topic-settings">토픽 정보 변경하기</a>).</td></tr>
+              <tr><td><span class="ui">말머리 관리</span></td><td>보드 뷰 토픽에서 토픽 관리자와 팀 관리자에게 보입니다(<a href="#board-extras">말머리</a>).</td></tr>
+              <tr><td><span class="ui">웹훅·앱</span></td><td>챗 뷰 토픽(토픽 관리자 · 팀 관리자)과 그룹채팅(정회원 이상)에 있습니다(<a href="#room-integrations">웹훅 · 봇 · 슬래시 명령</a>).</td></tr>
               <tr><td><span class="ui">정보 변경</span> · <span class="ui">나에게만 이름 변경</span></td><td>그룹채팅에만 있습니다. <span class="ui">정보 변경</span>은 그룹 이름 · 설명 · 아이콘을 모두에게 바꿉니다(정회원 이상 멤버).
                 <span class="ui">나에게만 이름 변경</span>은 <a href="#room-menu">목록 오른쪽 클릭 메뉴</a>와 같습니다.</td></tr>
               <tr><td><span class="ui">토픽 나가기</span> · <span class="ui">채팅방 나가기</span> · <span class="ui">채팅방 숨기기</span></td><td>방에서 나가거나(1:1은) 목록에서 숨깁니다.</td></tr>
@@ -1530,6 +1622,29 @@
             <span class="ui">새 폴더…</span>를 눌러 이름을 정하면 새 폴더를 만들면서 바로 넣습니다.</p></li>
           <li><p>폴더 안의 토픽이면 <span class="ui">폴더에서 빼기</span>로 폴더 밖 목록에 꺼냅니다.</p></li>
         </ol>
+
+        <h3 id="room-integrations">웹훅 · 봇 · 슬래시 명령</h3>
+        <p>서버 모니터링, 배포 결과, 설문 응답 같은 바깥 서비스의 소식을 대화방에 <b>봇 메시지</b>로 받거나, 대화방의 일을 바깥 서비스로 보낼 수 있습니다.
+          주로 개발 · 운영 담당자가 설정합니다.</p>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-webhooks.png">
+            <img src="images/messenger-webhooks.png" alt="웹훅·앱 창: 1 들어오는 웹훅 · 나가는 웹훅 · 앱 탭, 2 만들어 둔 웹훅, 3 웹훅 만들기" width="584" height="551" loading="lazy"></a>
+          <figcaption>대화방 ⋮ › 웹훅·앱</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>대화방 <span class="ui">⋮</span> › <span class="ui">웹훅·앱</span>을 엽니다(챗 뷰 토픽은 토픽 관리자 · 팀 관리자, 그룹채팅은 정회원 이상 멤버).
+            위쪽 탭에서 <b>들어오는 웹훅</b> · <b>나가는 웹훅</b> · <b>앱</b>을 고릅니다.</p></li>
+          <li><p>만들어 둔 웹훅이 이름 · 마지막 사용 시각 · 사용 횟수와 함께 보입니다. 오른쪽 <span class="ui">⋮</span>에서 고치거나 새 주소를 만들거나 지웁니다.</p></li>
+          <li><p><span class="ui">웹훅 만들기</span>로 만들면 주소가 나옵니다. 바깥 서비스의 Webhook URL 칸에 그 주소를 넣으면 그 서비스의 알림이 이 방에 올라옵니다.</p></li>
+        </ol>
+        <ul>
+          <li><b>나가는 웹훅 · 앱</b> — <b>나가는 웹훅</b>은 이 방의 새 메시지 같은 일을 정한 주소로 보냅니다. <b>앱</b>은 서버 운영자가 만든 연동 앱(봇)을 이 방에 더합니다.</li>
+          <li><b>봇 메시지</b> — 웹훅 · 명령이 올린 글은 보낸 사람 자리에 봇 아이콘 · 이름과 <b>봇</b> 표시가 붙습니다. 단추가 달린 봇 메시지는 단추를 눌러 답할 수 있습니다.</li>
+          <li><b>슬래시 명령</b> — 입력칸에서 <kbd>/</kbd>를 치면 이 팀에 등록된 명령이 설명과 함께 뜹니다(예: <code>/deploy</code>). 명령은 서버 운영자가 관리자 콘솔에서 등록합니다.</li>
+          <li><b>API 토큰 · 연결된 앱</b> — 스크립트로 내 이름의 메시지를 읽고 보내려면 <a href="#people-security">개인정보 설정</a>의 <span class="ui">API 토큰</span>에서 토큰을 만듭니다(권한 · 만료 선택, 만들 때 한 번만 보임).
+            다른 프로그램에 허락해 준 접근은 <span class="ui">연결된 앱</span>에서 보고 끊습니다.</li>
+        </ul>
+        <p>비밀 대화에는 웹훅을 달 수 없습니다.</p>
       </section>
 
       <!-- ─────────────────────────── 8. 검색과 파일 ─────────────────────────── -->
@@ -1648,6 +1763,21 @@
           <p><b>글 메시지와 사진 메시지</b>만 공지로 올릴 수 있습니다(파일 · 이모티콘 · 투표 · 게시글 · 댓글은 안 됩니다). 토픽에서만 되고,
             공지를 쓸 수 있는 사람(<a href="#notice-write">공지 쓰기</a> 참고)에게만 메뉴가 보입니다.</p>
         </aside>
+
+        <h3 id="notice-readers">공지 읽음 확인</h3>
+        <p>공지를 모두가 읽었는지 확인할 수 있습니다. 공지 상세 화면의 <b>읽음 N · 안 읽음 M</b>을 누르면 <b>공지 읽음 확인</b> 창이 열립니다.
+          그 토픽 멤버라면 누구나 볼 수 있습니다.</p>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-readers.png">
+            <img src="images/messenger-readers.png" alt="공지 읽음 확인 창: 1 읽음 탭(읽은 사람과 읽은 시각), 2 안 읽음 탭" width="408" height="591" loading="lazy"></a>
+          <figcaption>공지 읽음 확인</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p><b>읽음</b> 탭에는 읽은 사람과 읽은 시각이 보입니다.</p></li>
+          <li><p><b>안 읽음</b> 탭에는 아직 안 읽은 사람이 보입니다.</p></li>
+        </ol>
+        <p>공지 목록이나 공지 상세를 열면 읽은 것으로 칩니다. 공지를 쓴 사람은 늘 읽은 쪽입니다.
+          보드 뷰 게시글의 읽음 확인도 같은 창입니다(<a href="#board-extras">말머리 · 필독 · 읽음 확인</a>).</p>
       </section>
 
       <!-- ─────────────────────────── 10. 토픽 관리하기 ─────────────────────────── -->
@@ -1864,6 +1994,27 @@
             (보관된 보드는 <b>보관된 토픽입니다. …</b>) 안내가 보입니다. 이때도 게시글에 댓글은 달 수 있습니다.
             보드 뷰 토픽은 메시지 공유 · 전달 대상 목록에 나오지 않습니다.</p>
         </aside>
+
+        <h3 id="board-extras">말머리 · 필독 · 읽음 확인</h3>
+        <figure class="shot">
+          <a class="shot-frame" href="images/messenger-board-extras.png">
+            <img src="images/messenger-board-extras.png" alt="보드 뷰 토픽: 1 말머리 칩(전체 · 공지 · 회의록 · 질문), 2 말머리 관리, 3 읽지 않은 필독, 4 필독 표시, 5 제목 앞 말머리" width="900" height="530" loading="lazy"></a>
+          <figcaption>말머리와 필독이 있는 보드(마케팅 자료실)</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>보드 맨 위의 <b>전체 / 말머리</b> 칩을 누르면 그 말머리의 글만 모아 봅니다.</p></li>
+          <li><p>토픽 관리자 · 팀 관리자는 칩 줄 끝의 <span class="ui">말머리 관리</span>(또는 토픽 <span class="ui">⋮</span> › <span class="ui">말머리 관리</span>)에서
+            "회의록" · "공지"처럼 이름과 색을 정합니다(20개까지, 끌어서 순서 바꾸기).</p></li>
+          <li><p><b>읽지 않은 필독 N</b>에 내가 아직 안 읽은 필독 글이 모입니다. 누르면 그 글이 열립니다.</p></li>
+          <li><p>필독 글은 쓴 사람 이름 옆에 빨간 <b>필독</b> 표시가 붙습니다.</p></li>
+          <li><p>말머리를 붙인 글은 제목 앞에 색 알약으로 보입니다. 글을 쓸 때 제목 위에서 말머리를 고릅니다.</p></li>
+        </ol>
+        <ul>
+          <li><b>필독 지정</b> — 토픽을 관리하는 사람이 글을 쓸 때 <span class="ui">필독으로 올리기</span>를 켜거나, 게시글 <span class="ui">⋯</span> › <span class="ui">필독으로 지정</span>을 누릅니다.
+            멤버에게 <b>[필독] 제목</b> 알림이 갑니다.</li>
+          <li><b>읽음 확인</b> — 게시글 상세의 <b>읽음 N · 안 읽음 M</b>을 누르면 누가 읽었고 누가 아직인지 봅니다(<a href="#notice-readers">공지 읽음 확인</a>과 같은 창).
+            아직 안 연 남의 게시글은 카드 제목 앞에 <b>파란 점</b>이 붙고, 열면 사라집니다.</li>
+        </ul>
       </section>
 
       <!-- ─────────────────────────── 12. 투표 ─────────────────────────── -->
@@ -2343,6 +2494,8 @@
               <tr><td><b>공유 캘린더</b></td><td>내가 새로 만든 캘린더입니다. 멤버를 넣어 부서나 프로젝트 일정을 함께 씁니다(<a href="#calendar-manage">아래</a>).</td><td>관리자 · 쓰기 권한 멤버</td></tr>
               <tr><td><b>국가 공휴일</b></td><td>법정 공휴일과 대체공휴일이 저절로 보입니다.</td><td>—</td></tr>
               <tr><td><b>멤버 생일</b></td><td>팀원이 프로필에 넣은 생일이 보입니다(정회원 이상). <a href="#calendar-birthday">내 생일 등록</a>을 보세요.</td><td>—</td></tr>
+              <tr><td><b>팀 휴가</b> · <b>출장</b> · <b>회의실 예약</b></td><td><a href="groupware.html">그룹웨어</a>에서 승인된 휴가 · 출장과, 예약 탭에서 잡은 내 회의실 예약이 저절로 보입니다(정회원 이상, 숨길 수 있음).
+                바꾸거나 취소하는 것은 그룹웨어에서 합니다.</td><td>—</td></tr>
               <tr><td>구독한 캘린더</td><td>다른 팀원이 공개한 캘린더를 구독하면 <b>구독 캘린더</b> 칸에 보입니다. 보기만 할 수 있습니다.</td><td>—</td></tr>
             </tbody>
           </table>
@@ -2369,7 +2522,9 @@
           <figcaption>일정 만들기 창(아래로 내린 모습)</figcaption>
         </figure>
         <ol class="steps" start="5">
-          <li><p>창을 아래로 내려 <b>장소</b>를 쓰고, <b>반복</b>을 고릅니다: 반복 안 함 · 매일 · 매주 · 매월 · 매년 · 사용자 정의.
+          <li><p>창을 아래로 내려 <b>장소</b>를 씁니다. 회의실을 함께 잡으려면 그 아래 <b>회의실·자원</b>에서 고릅니다 — 일정 시간에 비어 있는지 보이고,
+            저장하면 예약도 함께 생깁니다(<a href="groupware.html#resource-calendar">회의실 · 자원 예약</a>, 반복 일정에는 붙일 수 없음).
+            그리고 <b>반복</b>을 고릅니다: 반복 안 함 · 매일 · 매주 · 매월 · 매년 · 사용자 정의.
             매주를 고르면 반복할 요일을 고를 수 있고, 아래에 "매주 수요일 반복"처럼 요약이 보입니다.
             사용자 정의에서는 반복 주기(예: 2주마다)와 종료(종료 없음 · 날짜 · 횟수)를 정합니다. 그 아래 <b>설명</b> 칸도 있습니다.</p></li>
           <li><p><b>공개 설정</b>: <span class="ui">공개</span>는 캘린더를 볼 수 있는 사람 모두가 자세한 내용을 봅니다.
@@ -2755,8 +2910,54 @@
           <li><p><b>닫기(X)</b>: 내 화면에서만 판을 닫고 영상으로 돌아갑니다. 그린 내용은 그대로 남습니다.</p></li>
         </ol>
         <p>누가 화이트보드를 열면 다른 사람 화면에 <b>"○○님이 화이트보드를 열었습니다"</b> 알림이 뜹니다. 판은 각자 열어서 봅니다.
-          늦게 들어온 사람에게도 지금까지 그린 내용이 보입니다. 화이트보드는 저장되지 않아서 회의에서 나가면 내 화면의 판이 비워집니다.
-          남겨야 하면 나가기 전에 따로 캡처해 두세요.</p>
+          늦게 들어온 사람에게도 지금까지 그린 내용이 보입니다.</p>
+        <ul>
+          <li><b>여러 쪽</b> — 도구 줄의 <span class="ui">쪽 더하기</span>로 새 쪽을 만들고 <span class="ui">앞 쪽</span> · <span class="ui">다음 쪽</span>으로 넘깁니다. 쪽은 각자 넘겨 봅니다.
+            여러 쪽일 때 지우기는 <span class="ui">이 쪽 모두 지우기</span>가 됩니다.</li>
+          <li><b>저장</b> — 도구 줄의 <span class="ui">대화방에 그림으로 저장</span>을 누르면 지금 판을 그림(쪽마다 한 장)으로 대화방에 올립니다.
+            저장하지 않은 그림이 있는 채로 마지막 사람이 회의를 나가면 저절로 올라갑니다.</li>
+          <li><b>불러오기</b> — 다음 회의에서 <span class="ui">불러오기</span>로 저장해 둔 화이트보드를 모두의 판에 펴고 이어서 그립니다. 지금 판은 지워지니 남기려면 먼저 저장하세요.</li>
+        </ul>
+
+        <h3 id="call-record">녹화와 회의록</h3>
+        <p>서버에 녹화가 설정되어 있으면 진행자가 회의를 녹화하고, 녹음을 받아써서 <b>회의록</b>을 저절로 만들 수 있습니다. 설정이 안 된 서버에서는 녹화 단추가 보이지 않습니다.</p>
+        <p>진행자가 통화 화면 위쪽의 빨간 <b>●</b>(<span class="ui">녹화 시작</span>)을 누르면 <b>녹화 시작</b> 창이 뜹니다.</p>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-call-record.png">
+            <img src="images/messenger-call-record.png" alt="녹화 시작 창: 1 영상과 소리(mp4) · 소리만(mp3), 2 끝나면 회의록 만들기, 3 녹화 시작" width="701" height="413" loading="lazy"></a>
+          <figcaption>녹화 시작 창</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p><b>영상과 소리(mp4)</b> 또는 <b>소리만(mp3)</b>을 고릅니다.</p></li>
+          <li><p>회의록이 필요하면 <span class="ui">끝나면 회의록 만들기</span>를 켭니다. 회의록을 만들려고 녹음을 서버에 설정된 받아쓰기 · 요약 서비스로 보낸다는 안내가 함께 보입니다.</p></li>
+          <li><p><span class="ui">녹화 시작</span>을 누릅니다. 모든 참가자 화면 왼쪽 위에 <b>녹화 중</b>과 시간이 뜹니다.
+            같은 단추(<span class="ui">녹화 멈추기</span>)로 멈추거나 회의가 끝나면 녹화가 끝납니다.</p></li>
+        </ol>
+        <p>녹화 파일은 시작한 사람 이름으로 <b>대화방에 올라가고</b>, 화상회의 카드에 녹화 줄이 붙습니다.
+          회의록을 켰다면 카드의 회의록 단추로 회의록 화면을 엽니다(만드는 동안은 그 단계가 보입니다).</p>
+        <figure class="shot">
+          <a class="shot-frame" href="images/messenger-call-minutes.png">
+            <img src="images/messenger-call-minutes.png" alt="회의록 화면: 1 요약 · 논의한 내용 · 결정 사항 · 할 일, 2 복사, 3 팀 위키에 저장, 4 할 일로" width="900" height="729" loading="lazy"></a>
+          <figcaption>회의록 화면</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p><b>요약 · 논의한 내용 · 결정 사항 · 할 일</b>이 정리되어 있습니다. 아래로 내리면 받아쓰기 전문(말한 사람 이름과 시각)이 있습니다.</p></li>
+          <li><p><span class="ui">복사</span>로 회의록 전체를 복사합니다.</p></li>
+          <li><p><span class="ui">팀 위키에 저장</span>으로 <a href="groupware.html#wiki">팀 위키</a>에 새 페이지로 남깁니다.</p></li>
+          <li><p>요약의 할 일은 줄마다 <span class="ui">할 일로</span>를 누르면 담당자 · 기한이 채워진 <a href="#todo">할 일</a>로 만들어집니다.</p></li>
+        </ol>
+        <ul>
+          <li>녹화 파일은 서버의 보관 기간 · 용량에 따라 나중에 지워질 수 있습니다(카드에 "보관 기간이 지나 파일을 지움"). 회의록은 그대로 남습니다.</li>
+        </ul>
+        <aside class="box caution">
+          <p class="box-title">녹화하기 전에 알리세요</p>
+          <p>녹화가 시작되면 모두의 화면에 표시되지만, 녹화 전에 참가자에게 미리 알리고 동의를 받는 것이 좋습니다.</p>
+        </aside>
+
+        <h3 id="call-caption">실시간 자막</h3>
+        <p>서버에 받아쓰기가 설정되어 있으면 진행자가 통화 화면 위쪽의 <b>CC</b>(<span class="ui">실시간 자막 켜기</span>)로 자막을 켭니다.
+          말한 사람 이름과 함께 화면 아래에 최근 세 줄이 뜹니다. 자막이 방해되면 각자 <span class="ui">자막 가리기(내 화면)</span>로 내 화면에서만 숨기고,
+          진행자(또는 켠 사람)는 <span class="ui">실시간 자막 끄기(모두)</span>로 끕니다.</p>
 
         <h3 id="call-leave">다른 화면 보기와 회의 나가기</h3>
         <ul>
@@ -2866,10 +3067,54 @@
           <li><p>이름 아래의 <b>상태</b> 줄("🗓️ 회의 중"처럼 — 정하지 않았으면 흐린 <b>상태 설정</b>)과 <b>방해 금지</b> 줄("방해 금지 · 13:00까지")에서
             지금 내 상태를 보고, 누르면 바로 바꿀 수 있습니다(<a href="#alert-dnd">상태 설정과 방해 금지</a>).</p></li>
           <li><p><span class="ui">개인정보 설정</span>에서 비밀번호를 한 번 더 확인한 뒤 이메일 · 생일 · 비밀번호를 바꾸거나 회원 탈퇴를 할 수 있습니다.
+            2단계 인증 · 보안 키 · 로그인한 기기도 여기서 관리합니다(<a href="#people-security">아래</a>).
             (그 아래 <span class="ui">나와의 대화</span>를 누르면 나만 보는 메모 대화방이 열립니다.)</p></li>
           <li><p><span class="ui">로그아웃</span>으로 로그인 화면으로 나갑니다.</p></li>
         </ol>
         <p>직책은 스스로 바꿀 수 없습니다. 바꿔야 하면 팀 소유자나 관리자에게 요청하세요.</p>
+        <p>서버에 메일 기능이 켜져 있으면 이메일을 <b>확인</b>해 두세요. 확인하지 않은 계정은 로그인할 때 <b>이메일 확인</b> 창이 한 번 뜨고,
+          <span class="ui">개인정보 설정</span> › <span class="ui">이메일 관리</span>의 <span class="ui">확인하기</span>로도 확인합니다(메일로 받은 6자리 코드). 확인한 이메일로 아이디 · 비밀번호를 찾습니다.</p>
+
+        <h3 id="people-security">2단계 인증 · 보안 키 · 로그인한 기기</h3>
+        <p><span class="ui">☰</span> › 내 이름 › <span class="ui">개인정보 설정</span>(비밀번호 확인)에 계정을 지키는 항목이 모여 있습니다. 서버 설정에 따라 일부 항목은 보이지 않습니다.</p>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-security.png">
+            <img src="images/messenger-security.png" alt="개인정보 창: 1 2단계 인증, 2 보안 키·패스키, 3 연결된 회사 계정, 4 로그인한 기기, 5 API 토큰 · 연결된 앱" width="448" height="640" loading="lazy"></a>
+          <figcaption>☰ › 내 이름 › 개인정보 설정</figcaption>
+        </figure>
+        <div class="table-wrap">
+          <table class="simple">
+            <thead><tr><th>번호</th><th>항목</th><th>하는 일</th></tr></thead>
+            <tbody>
+              <tr><td><span class="mark">1</span></td><td><span class="ui">2단계 인증</span></td><td>켜 두면 로그인할 때 비밀번호와 함께 휴대폰 <b>인증 앱</b>(Google Authenticator · Microsoft Authenticator 등)의 6자리 코드를 넣습니다.
+                <span class="ui">인증 앱 켜기</span>를 누르고 ① 인증 앱으로 QR을 찍은 뒤(찍을 수 없으면 키를 직접 입력) ② 앱에 보이는 6자리 코드를 넣으면 켜집니다.
+                이때 <b>복구 코드 10개</b>가 한 번만 보이니 꼭 적어 두세요(<span class="ui">전부 복사</span>) — 휴대폰을 잃었을 때 하나씩 씁니다. 복구 코드는 <span class="ui">복구 코드 새로 받기</span>로 다시 만들 수 있습니다.</td></tr>
+              <tr><td><span class="mark">2</span></td><td><span class="ui">보안 키·패스키</span></td><td>USB · NFC 보안 키(YubiKey 등), Windows Hello, 휴대폰의 패스키(지문 · 얼굴 · PIN)를 <span class="ui">보안 키 추가</span>로 등록합니다(10개까지).
+                등록하면 로그인 화면의 <span class="ui">보안 키·패스키로 로그인</span>으로 비밀번호 없이 들어오고, 2단계 인증 때 인증 앱 코드 대신 <span class="ui">보안 키로 확인</span>을 씁니다.
+                브라우저 창에서 등록 · 확인하면 앱이 저절로 이어집니다.</td></tr>
+              <tr><td><span class="mark">3</span></td><td><span class="ui">연결된 회사 계정</span></td><td>Google · Microsoft 회사 계정을 이 계정에 연결해 두면 로그인 화면의 회사 계정 단추로 들어옵니다.</td></tr>
+              <tr><td><span class="mark">4</span></td><td><span class="ui">로그인한 기기</span></td><td>내 계정으로 로그인한 PC · 휴대폰 · 브라우저가 이 기기부터 최근 순으로 보입니다(지금 사용 중이면 초록 점).
+                공용 PC에서 로그아웃을 잊었거나 휴대폰을 잃어버렸다면 그 기기의 <span class="ui">로그아웃</span>이나 <span class="ui">다른 모든 기기에서 로그아웃</span>을 누르세요.</td></tr>
+              <tr><td><span class="mark">5</span></td><td><span class="ui">API 토큰</span> · <span class="ui">연결된 앱</span></td><td>스크립트 · 다른 프로그램이 내 이름으로 TangoTalk을 쓰게 할 때 씁니다(<a href="#room-integrations">웹훅 · 봇 · 슬래시 명령</a>).</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><span class="ui">로그인한 기기</span>를 누르면 아래 창이 뜹니다.</p>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-devices.png">
+            <img src="images/messenger-devices.png" alt="로그인한 기기 창: 1 이 기기(사용 중), 2 다른 기기의 로그아웃, 3 다른 모든 기기에서 로그아웃" width="484" height="411" loading="lazy"></a>
+          <figcaption>로그인한 기기</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>맨 위가 <b>이 기기</b>입니다. 이름 옆 초록 점은 지금 접속 중이라는 뜻입니다.</p></li>
+          <li><p>다른 기기 오른쪽의 <span class="ui">로그아웃</span>을 누르면 그 기기만 로그아웃됩니다.</p></li>
+          <li><p><span class="ui">다른 모든 기기에서 로그아웃</span>은 이 기기만 남기고 모두 로그아웃시킵니다.</p></li>
+        </ol>
+        <aside class="box caution">
+          <p class="box-title">휴대폰도 복구 코드도 없다면</p>
+          <p>2단계 인증을 켠 휴대폰을 잃고 복구 코드도 없으면 로그인할 수 없습니다. 서버 운영자에게 2단계 인증 해제를 요청하세요.
+            관리자가 2단계 인증을 꼭 쓰게 정했다면 끌 수 없습니다("관리자가 꼭 쓰게 정해서 끌 수 없습니다").</p>
+        </aside>
 
 
         <h3 id="people-character">캐릭터로 프로필 사진 꾸미기</h3>
@@ -2904,8 +3149,9 @@
 
         <h3 id="people-more">조직도 · 팀장 문의 · 화상회의</h3>
         <ul>
-          <li><b>조직도</b> <span class="badge role">관리자</span> — 팀 리스트 화면 오른쪽 위의 <span class="ui">조직도</span> 버튼(PC 앱은 팀 화면 오른쪽 위, 알림 센터 왼쪽에도 있음)으로 서버 전체의 팀과 회원을
-            <b>팀</b> · <b>멤버</b> 탭으로 볼 수 있습니다. 관리자 이상에게만 보입니다.</li>
+          <li><b>조직도</b> — 팀 리스트 화면 오른쪽 위의 <span class="ui">조직도</span> 버튼(PC 앱은 팀 화면 오른쪽 위, 알림 센터 왼쪽에도 있음)으로 엽니다.
+            <b>부서</b> 탭에서 부서 트리와 부서장 · 상위자를 봅니다(회사 조직도는 정회원 이상). 관리자 이상에게는 서버 전체의 <b>팀</b> · <b>멤버</b> 탭도 보입니다
+            (<a href="groupware.html#org">그룹웨어 · 업무 도구 › 조직도</a>).</li>
           <li><b>팀장에게 문의하기</b> — 1:1 대화 상대가 우리 팀의 <b>팀장</b>이면 입력칸 아래에 <span class="ui">팀장에게 문의하기</span> 버튼이 생깁니다.
             분류(업무 · 근태/휴가 · 불편사항 · 기타), 제목, 내용을 쓰고 <span class="ui">보내기</span>를 누릅니다.
             오른쪽 위 <span class="ui">메뉴</span> › <span class="ui">문의함</span>을 누르면 오른쪽에 문의함 패널이 열립니다(휴대폰은 전체 화면).
@@ -2971,9 +3217,17 @@
               <tr><td><span class="mark">4</span></td><td>반투명 <span class="badge pc">PC</span></td><td>막대를 움직여 창을 20~100% 사이로 비치게 합니다. 움직이는 동안 바로 보이고, 저장하지 않고 닫으면 원래대로 돌아갑니다.</td></tr>
               <tr><td><span class="mark">5</span></td><td>창 깜빡임 <span class="badge pc">PC</span></td><td>알림이 왔을 때 작업 표시줄 버튼과 함께 메신저 창의 테두리도 깜빡일지 정합니다(처음은 깜빡임).</td></tr>
               <tr><td><span class="mark">6</span></td><td>작업표시줄 깜빡임 <span class="badge pc">PC</span></td><td>메신저 창을 보고 있을 때 다른 방에 메시지가 오면 작업 표시줄의 TangoTalk 버튼을 그 방을 열 때까지 깜빡일지 정합니다(처음은 깜빡이지 않음).</td></tr>
+              <tr><td><span class="mark">7</span></td><td>언어 (Language)</td><td>앱 화면을 <span class="ui">한국어</span> · <span class="ui">English</span> · <span class="ui">기기 언어 따르기</span> 중에서 고릅니다. 고르는 즉시 바뀌고(저장하기를 누르지 않아도 됨), 일부 글은 앱을 다시 시작하면 바뀝니다.
+                로그인 · 서버 연결 화면 오른쪽 위의 지구본으로도 바꿀 수 있습니다. 동료가 쓴 메시지는 번역되지 않습니다.</td></tr>
             </tbody>
           </table>
         </div>
+
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-settings-language.png">
+            <img src="images/messenger-settings-language.png" alt="화면 설정을 맨 아래로 내린 모습: 1 화면 설정, 2 언어 (Language)" width="740" height="680" loading="lazy"></a>
+          <figcaption>화면 설정 — 맨 아래의 언어 (Language)(표의 <span class="mark">7</span>)</figcaption>
+        </figure>
 
         <h3 id="settings-system">시스템 설정</h3>
         <figure class="shot crop">
@@ -3001,6 +3255,9 @@
                 알림이 켜져 있으면 <b>앱을 닫아도 알림 받기(푸시)</b> 스위치가 나옵니다. 같은 PC나 휴대폰에 TangoTalk 앱도 깔려 있어 알림이 두 번 온다면
                 꺼 두세요 — 웹 앱이 열려 있는 동안의 알림은 그대로 옵니다. (앱이 켜져 있는 동안은 같은 기기의 브라우저로 알림을 보내지 않으니,
                 두 번 오는 것은 앱을 꺼 둔 휴대폰에서 주로 생깁니다.)</td></tr>
+              <tr><td></td><td>모바일 데이터 <span class="badge mobile">안드로이드</span></td><td>안드로이드 앱과 안드로이드 브라우저의 웹 앱에 있습니다. Wi-Fi가 아니라 LTE/5G로 쓸 때만 적용됩니다.
+                <span class="ui">큰 파일을 받기 전에 데이터 사용 경고 띄우기</span>를 켜 두면 정한 크기(<b>경고 기준</b> — 처음은 10MB) 이상을 받기 전에 묻고,
+                <span class="ui">사진을 원본 대신 일반 화질로 보내기</span>(처음은 켬)는 보내는 사진을 알맞은 크기로 줄입니다. 동영상은 저절로 재생되지 않고 누를 때만 받습니다.</td></tr>
               <tr><td></td><td>버전 정보</td><td>맨 아래에 지금 쓰는 앱의 버전이 있습니다. 새 버전이 있으면 함께 표시됩니다.</td></tr>
             </tbody>
           </table>
@@ -3155,7 +3412,7 @@
             <tbody>
               <tr><td><span class="mark">1</span></td><td>팀 이름 — 눌러서 다른 팀으로 옮깁니다.</td></tr>
               <tr><td><span class="mark">2</span></td><td>알림 센터 — 안 읽은 방을 모아 봅니다.</td></tr>
-              <tr><td><span class="mark">3</span></td><td>메뉴(점 아홉 개) — 메시지 예약 · 할 일 · 투표 · 리마인더, 파일 · 즐겨찾기 · 북마크 · 링크 · 내가 쓴 글 · 앨범 · 문의함, 캘린더(휴대폰에는 프로젝트가 없습니다).</td></tr>
+              <tr><td><span class="mark">3</span></td><td>메뉴(점 아홉 개) — 메시지 예약 · 할 일 · 투표 · 리마인더, 파일 · 즐겨찾기 · 북마크 · 링크 · 내가 쓴 글 · 앨범 · 문의함, 캘린더 · 그룹웨어 · 드라이브 · 위키 · 메일(휴대폰에는 프로젝트가 없습니다).</td></tr>
               <tr><td><span class="mark">4</span></td><td>내 메뉴(☰) — 내 프로필, 환경설정, <b>도움말</b>, 로그아웃.</td></tr>
               <tr><td><span class="mark">5</span></td><td>검색창 — 누르면 검색 화면으로 갑니다.</td></tr>
               <tr><td><span class="mark">6</span></td><td><b>+</b> 버튼 — 그룹채팅 · 채팅 탭에서는 새 대화입니다. 토픽 탭에서는 새로운 토픽 생성하기 · 참여 가능한 토픽 보기 · 폴더 만들기를 고릅니다(<a href="#mobile-topic">아래</a>).</td></tr>
@@ -3202,6 +3459,16 @@
           <li><p>아래에서 메뉴가 올라옵니다: <b>메시지 공유 · 댓글 · 복사 · 선택 복사 · 즐겨찾기 · 업무로 등록 · 할 일로 등록 · 메시지 전달 · 공지 등록</b>(내 메시지는 <b>수정</b>도). 항목이 많으면 메뉴를 위로 밀어 봅니다.
             <span class="ui">선택 복사</span>는 글의 일부만 골라 복사할 때 씁니다.</p></li>
         </ol>
+
+        <h3 id="mobile-widget">홈 화면 위젯 · 알림에서 답장 <span class="badge mobile">안드로이드</span></h3>
+        <ul>
+          <li><b>홈 화면 위젯</b> — 휴대폰 홈 화면을 길게 눌러 위젯 목록에서 <b>TangoTalk</b> 위젯(안 읽은 대화)을 놓습니다(크기 조절 가능).
+            안 읽은 메시지 합계와 안 읽은 방 세 곳이 보이고, 방을 누르면 그 방이 열립니다. 알림을 끈 방은 빠지고, 비밀 대화는 이름 대신 "비밀 대화"로,
+            앱 잠금 중에는 방 이름 없이 합계만 보입니다(홈 화면은 누구나 볼 수 있어서).</li>
+          <li><b>알림에서 바로 답장</b> — 새 메시지 알림을 펼쳐 <span class="ui">답장</span>을 누르면 앱을 열지 않고 글을 보냅니다. 보내면 그 방은 읽음이 되고 알림이 사라집니다.
+            비밀 대화와 댓글 · 멘션 · 공지 알림에는 답장 칸이 없습니다. 보내지 못하면 알림에 이유가 남고, 누르면 그 방이 열립니다.</li>
+          <li><b>공유로 보내기</b> — 다른 앱의 <b>공유</b> › <b>TangoTalk</b>으로 사진 · 파일 · 링크를 대화방에 보냅니다(<a href="#send-share">다른 앱에서 보내기</a>).</li>
+        </ul>
 
         <h3 id="mobile-diff">PC와 다른 점</h3>
         <ul>

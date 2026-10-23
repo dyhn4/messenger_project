@@ -1055,15 +1055,15 @@ body.lightbox-open {
     gap: 8px;
   }
 
-  /* 휴대폰 폭에서는 "도움말", "이용법"을 줄여 세 메뉴가 한 줄에 다 보이게 */
+  /* 휴대폰 폭에서는 "도움말", "이용법"을 줄여 다섯 메뉴가 한 줄에 다 보이게 */
   .brand-text-long,
   .nav-long {
     display: none;
   }
 
   .site-nav a {
-    padding: 6px 10px;
-    font-size: 0.88rem;
+    padding: 6px 8px;
+    font-size: 0.86rem;
   }
 
   .layout {
@@ -1148,6 +1148,13 @@ body.lightbox-open {
 
   .pager .next {
     text-align: left;
+  }
+}
+
+/* 아주 좁은 휴대폰(가로 460px 이하)은 브랜드 글자 "TangoTalk"을 빼고 로고만 둬서 다섯 메뉴 자리를 만든다 */
+@media (max-width: 460px) {
+  .brand > span:not(.brand-logo) {
+    display: none;
   }
 }
 

@@ -17,6 +17,7 @@
 // 버튼을 글꼴 이름을 붙여 그 자리에 덮어 그린다(_CheckButtonLookalike).
 import 'dart:io';
 
+import 'package:client/models/login_security.dart';
 import 'package:client/screens/login_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -131,6 +132,49 @@ void main() {
         GuideCallout.box(
           buttonWith('계정이 없으신가요? 회원가입'),
           number: 5,
+          badge: CalloutBadge.left,
+        ),
+      ],
+      crop: cropAround(tester, [loginCard], margin: 36),
+    );
+  });
+
+  // 관리자가 회사 계정(Google · Microsoft) · 보안 키 · 회사 디렉터리 로그인을 켠 서버의 로그인 화면
+  // (GET /server-info의 loginMethods — 화면이 열릴 때 다시 묻는다).
+  guideCapture('로그인 — 다른 로그인 방법', const GuideSurface(Size(620, 820)), (
+    tester,
+  ) async {
+    const methods = {
+      'sso': ['google', 'microsoft'],
+      'passkey': true,
+      'ldap': true,
+    };
+    final api = GuideFakeApi()..get('/server-info', {'loginMethods': methods});
+    final session = guideSession(api: api, name: '김민지', username: 'minji.kim');
+    session.loginMethods = LoginMethods.fromJson(methods);
+    await pumpGuideApp(tester, LoginScreen(session: session));
+    await settleGuide(tester);
+    await saveGuideShot(
+      tester,
+      'messenger-login-other',
+      callouts: [
+        GuideCallout.box(
+          find.text('회사(Windows) 계정 아이디·비밀번호로도 로그인할 수 있습니다.'),
+          number: 1,
+          badge: CalloutBadge.left,
+          padding: 6,
+        ),
+        GuideCallout.rect(
+          unionRect(tester, [
+            buttonWith('Google 회사 계정으로 로그인'),
+            buttonWith('Microsoft 회사 계정으로 로그인'),
+          ], padding: 4),
+          number: 2,
+          badge: CalloutBadge.left,
+        ),
+        GuideCallout.box(
+          buttonWith('보안 키·패스키로 로그인'),
+          number: 3,
           badge: CalloutBadge.left,
         ),
       ],
